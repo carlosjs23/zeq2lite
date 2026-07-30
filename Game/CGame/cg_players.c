@@ -2032,7 +2032,12 @@ void CG_Player( centity_t *cent ) {
 	legs.renderfx = renderfx;
 	VectorCopy (legs.origin, legs.oldorigin);	// don't positionally lerp at all
 	if (!legs.hModel){return;}
+	// meshScale is optional in tier.cfg and no shipped config sets it, so it
+	// arrives as 0 from the tierConfig memset. Zero collapses the model axes
+	// below - and 1/meshScale then divides by zero - which left the character
+	// invisible. Treat "unset" as unscaled.
 	meshScale = ci->tierConfig[tier].meshScale;
+	if(meshScale <= 0){meshScale = 1.0f;}
 	torso.hModel = ci->modelDamageState[tier][1][damageModelState];
 	torso.customSkin = ci->skinDamageState[tier][1][damageTextureState];
 	if(!torso.hModel){return;}
@@ -2060,12 +2065,17 @@ void CG_Player( centity_t *cent ) {
 	head.renderfx = renderfx;
 	VectorCopy(cent->lerpOrigin,camera.origin);
 	VectorCopy(cent->lerpOrigin,camera.lightingOrigin);
+	// The camera model is an invisible rig that only carries tag_cam/tag_camTar
+	// for the scripted camera; it is never added to the scene itself. It is an
+	// optional asset, so a missing one must not stop the character from being
+	// drawn - returning here left the player invisible.
 	camera.hModel = ci->cameraModel[tier];
-	if(!camera.hModel){return;}
-	camera.shadowPlane = shadowPlane;
-	camera.renderfx = renderfx;
-	VectorCopy (camera.origin, camera.oldorigin);	// don't positionally lerp at all
-	CG_PositionRotatedEntityOnTag( &camera, &torso, torso.hModel, "tag_torso");
+	if(camera.hModel){
+		camera.shadowPlane = shadowPlane;
+		camera.renderfx = renderfx;
+		VectorCopy (camera.origin, camera.oldorigin);	// don't positionally lerp at all
+		CG_PositionRotatedEntityOnTag( &camera, &torso, torso.hModel, "tag_torso");
+	}
 	CG_AddRefEntityWithPowerups( &legs, &cent->currentState, ci->team, ci->auraConfig[tier]->auraAlways );
 	CG_AddRefEntityWithPowerups( &torso, &cent->currentState, ci->team, ci->auraConfig[tier]->auraAlways );
 	CG_AddRefEntityWithPowerups( &head, &cent->currentState, ci->team, ci->auraConfig[tier]->auraAlways );

@@ -146,6 +146,7 @@ void CG_Camera(centity_t *cent ){
 	int 			i,clientNum,cameraRange,cameraAngle,cameraSlide,cameraHeight;
 	float			lerpFactor = 0.0, lerpTime, ratio, forwardScale, sideScale, focusDist;
 	orientation_t	tagOrient,tagOrient2;
+	qboolean		hasTagCam,cameraContinuous;
 	trace_t			trace;
 	clientInfo_t	*ci;
 	tierConfig_cg	*tier;
@@ -153,6 +154,7 @@ void CG_Camera(centity_t *cent ){
 	centity_t 		targetEntity;
 	char			targetTag[256];
 	ps = &cg.snap->ps;
+	hasTagCam = cameraContinuous = qfalse;
 	clientNum = cent->currentState.clientNum;
 	if(clientNum != ps->clientNum){return;}
 	ci = &cgs.clientinfo[clientNum];
@@ -177,8 +179,16 @@ void CG_Camera(centity_t *cent ){
 		}
 	}
 	else if(cg_thirdPersonCamera.value >= 1){
-		if(CG_GetTagOrientationFromPlayerEntity(cent, "tag_cam", &tagOrient)){
-			if(!cent->pe.camera.animation->continuous){
+		// The scripted camera rides a tag_cam on the per-tier camera model and is
+		// driven by animCam.cfg. Both are optional assets, so a missing tag or a
+		// missing camera animation is treated as "not continuous": the view then
+		// falls through to the plain orbit offset below instead of being left
+		// sitting at the player's own origin.
+		hasTagCam = CG_GetTagOrientationFromPlayerEntity(cent, "tag_cam", &tagOrient);
+		cameraContinuous = hasTagCam && cent->pe.camera.animation
+						&& cent->pe.camera.animation->continuous;
+		{
+			if(!cameraContinuous){
 				VectorCopy(cent->lerpOrigin,tagOrient.origin);
 				tagOrient.origin[2] += cg.predictedPlayerState.viewheight;
 			}
@@ -212,7 +222,7 @@ void CG_Camera(centity_t *cent ){
 			VectorMA(tagOrient.origin, 512, forward, focusPoint);
 			VectorCopy(tagOrient.origin, view);	
 			AngleVectors(cg.refdefViewAngles, forward, right, up);
-			if(!cent->pe.camera.animation->continuous){
+			if(!cameraContinuous){
 				VectorMA(view,cameraSlide,right,view);
 				view[2] += cameraHeight;
 				forwardScale = cos(cameraAngle / 180 * M_PI);	
