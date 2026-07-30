@@ -26,7 +26,7 @@ AuraSwirl
 	cull none
 	{
 		animmap 10 effects/aura/auraSwirl.png
-		blendFunc blend
+		blendFunc GL_ONE GL_ONE_MINUS_SRC_ALPHA
 	}
 }
 Aura_Trail
@@ -91,6 +91,6 @@ Aura_ScreenSpace
 		program aura
 		vertexProgram glsl/aura_vp.glsl
 		fragmentProgram glsl/aura_fp.glsl
-		blendFunc add
+		blendFunc GL_ONE GL_ONE_MINUS_SRC_ALPHA
 	}
 }
