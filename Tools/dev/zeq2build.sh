@@ -98,3 +98,22 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]]; then
 	done < <(find "$ZEQ2_ROOT/GameData" -type f ! -name 'README.md' -print0)
 	echo "ok: $data mod file(s) staged in $ZEQ2_BUILD/$ZEQ2_GAME"
 fi
+
+# The screen-space aura's ring mesh and spike strip are generated rather than
+# authored, so the generators are the source and the outputs are build products
+# like anything else here. Generating them on every build keeps the two from
+# drifting - the strip that shipped under Build/ had been produced by an earlier
+# revision of its generator and no longer matched it.
+#
+# Both scripts are deterministic and take only stdlib, so this is reproducible
+# and needs nothing installed. Parameters are the generators' own defaults;
+# pass them explicitly only when a value has to differ from the default.
+if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
+	echo "=== generating aura mesh and texture into $ZEQ2_GAME/ ==="
+	mkdir -p "$ZEQ2_BUILD/$ZEQ2_GAME/models/effects" "$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura"
+	python3 "$ZEQ2_ROOT/Tools/dev/make_aura_mesh.py" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME/models/effects/aura.iqm" >/dev/null
+	python3 "$ZEQ2_ROOT/Tools/dev/make_aura_texture.py" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura/auraSpikeStrip.png" >/dev/null
+	echo "ok: aura.iqm and auraSpikeStrip.png generated"
+fi
