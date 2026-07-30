@@ -415,6 +415,47 @@ S_SpatializeOrigin
 Used for spatializing s_channels
 =================
 */
+/*
+=================
+S_ScaledVolume
+
+Apply a 0..1 pan/distance scale to master_vol and return it as an integer.
+
+Doing the clamp in float space, before the conversion, is the point. 'scale' is
+(1.0 - dist) * pan: dist is clamped from below but never from above, so scale is
+unbounded downwards, and it is NaN whenever the attenuation is. Converting a
+float that does not fit into an int is undefined behaviour, and on arm64 it
+saturates - which is how a distant sound produced an INT_MAX channel volume that
+then overflowed the multiply in S_PaintChannelFrom16 one subsystem away. The
+old code clamped with "if (*vol < 0) *vol = 0" only after the cast, by which
+point the damage was done.
+
+Written as "!(volume > 0)" so NaN, for which every comparison is false, falls
+through to silence.
+=================
+*/
+static int S_ScaledVolume( int master_vol, float scale )
+{
+	float	volume;
+
+	if ( master_vol <= 0 ) {
+		return 0;
+	}
+
+	volume = (float)master_vol * scale;
+
+	if ( !( volume > 0.0f ) ) {
+		return 0;
+	}
+	if ( volume >= (float)master_vol ) {
+		// scale is a product of two factors that cannot exceed 1.0, so this is
+		// only reachable via a non-finite value.
+		return master_vol;
+	}
+
+	return (int)volume;
+}
+
 void S_SpatializeOrigin (vec3_t origin, int master_vol, int *left_vol, int *right_vol, float attenuation)
 {
     vec_t		dot;
@@ -457,14 +498,10 @@ void S_SpatializeOrigin (vec3_t origin, int master_vol, int *left_vol, int *righ
 
 	// add in distance effect
 	scale = (1.0 - dist) * rscale;
-	*right_vol = (master_vol * scale);
-	if (*right_vol < 0)
-		*right_vol = 0;
+	*right_vol = S_ScaledVolume( master_vol, scale );
 
 	scale = (1.0 - dist) * lscale;
-	*left_vol = (master_vol * scale);
-	if (*left_vol < 0)
-		*left_vol = 0;
+	*left_vol = S_ScaledVolume( master_vol, scale );
 }
 
 // =======================================================================

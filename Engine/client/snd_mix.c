@@ -642,6 +642,18 @@ void S_PaintChannels( int endtime ) {
 	else
 		snd_vol = s_volume->value*255;
 
+	// s_volume is a plain archived cvar with no enforced range, so a user or a
+	// stale config can set it well above 1.0. The mixing loops below compute
+	// (data * ch->leftvol * snd_vol) >> 8 in an int: with a 16-bit sample and a
+	// channel volume of up to 255 that only stays inside INT_MAX while snd_vol
+	// is at most 257. Clamp here, once per call, rather than widening the
+	// arithmetic in the per-sample hot loops.
+	if ( snd_vol < 0 ) {
+		snd_vol = 0;
+	} else if ( snd_vol > 255 ) {
+		snd_vol = 255;
+	}
+
 //Com_Printf ("%i to %i\n", s_paintedtime, endtime);
 	while ( s_paintedtime < endtime ) {
 		// if paintbuffer is smaller than DMA buffer
