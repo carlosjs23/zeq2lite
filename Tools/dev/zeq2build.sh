@@ -78,3 +78,23 @@ if (( staged == 0 )); then
 	exit 1
 fi
 echo "ok: $staged module(s) staged in $ZEQ2_BUILD/$ZEQ2_GAME"
+
+# Patched GLSL programs, shader scripts and tier config, overlaid onto the
+# installed mod directory. Some of it is coupled to the engine -
+# glsl/generic_vp.glsl only makes sense against the tcMod handling in
+# tr_shade.c - so staging it is part of a build, not a setup step you do once.
+# Reinstalling the mod directory drops the stock files back on top; running this
+# again restores the overlay. See GameData/README.md.
+if [[ -d "$ZEQ2_ROOT/GameData" ]]; then
+	echo "=== staging mod files into $ZEQ2_GAME/ ==="
+	data=0
+	while IFS= read -r -d '' src; do
+		rel="${src#"$ZEQ2_ROOT/GameData/"}"
+		dst="$ZEQ2_BUILD/$ZEQ2_GAME/$rel"
+		mkdir -p "$(dirname "$dst")"
+		rm -f "$dst"
+		cp "$src" "$dst"
+		data=$((data + 1))
+	done < <(find "$ZEQ2_ROOT/GameData" -type f ! -name 'README.md' -print0)
+	echo "ok: $data mod file(s) staged in $ZEQ2_BUILD/$ZEQ2_GAME"
+fi
