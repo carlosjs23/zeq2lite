@@ -72,7 +72,35 @@ Every join-time crash found in this codebase so far has been *in* cgame, so a
 server-only smoke test would have passed while the game was unplayable. Use
 `--dedicated` to add server coverage, not to replace client coverage.
 
-## Two traps these scripts exist to avoid
+## Three traps these scripts exist to avoid
+
+**`+set` loses to the config for any archived cvar.** Startup execs
+`default.cfg` and then `zeq2config.cfg`, and both are full of `seta` lines. A
+`+set` on the command line is applied *before* that, so the config overwrites it
+and the game runs with the value you thought you had replaced. This is silent:
+nothing warns, and the cvar reads back as the config's value.
+
+It applies to every `CVAR_ARCHIVE` cvar the saved config mentions —
+`s_musicvolume`, `cg_thirdPersonSlide`, `r_picmip`, `model`, and most of the
+rest. Cvars absent from both configs are unaffected, which is why
+`+set s_initsound 0` sticks and `+set s_musicvolume 0` does not.
+
+Two ways round it, in order of preference:
+
+```bash
+# a bare cvar name is a console command, so it goes into the command buffer
+# and runs after the configs have exec'd - this wins
+ZEQ2.arm ... +cg_thirdPersonSlide 0 +map desert
+
+# or edit zeq2config.cfg, but the engine rewrites it at shutdown, so change it
+# with the game closed or the change is lost
+```
+
+Check which you got: the value is echoed in the startup log for some cvars
+(`picmip: 1`), and `+cvarlist <name>` or the console shows the rest. If a
+`+set` appears to do nothing, this is why — reach for it before assuming the
+feature is broken. `zeq2aura.sh` passes its camera cvars as bare commands for
+exactly this reason.
 
 **Module staging.** `make` writes `Build/<cfg>/Base/cgame$(uname -p).dylib`
 (e.g. `cgamearm.dylib`), but the engine derives its module name from
