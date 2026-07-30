@@ -783,7 +783,8 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return 0;
 
   case UI_R_MODELBOUNDS:
-		re.ModelBounds( args[1], VMA(2), VMA(3) );
+		// The UI's trap takes no frame: menu models are shown in their rest pose.
+		re.ModelBounds( args[1], VMA(2), VMA(3), 0 );
 		return 0;
 
 	case UI_UPDATESCREEN:

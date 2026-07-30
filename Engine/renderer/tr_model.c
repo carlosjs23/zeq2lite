@@ -647,7 +647,7 @@ int R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFram
 R_ModelBounds
 ====================
 */
-void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
+void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs, int frame ) {
 	model_t		*model;
 
 	model = R_GetModelByHandle( handle );
@@ -655,28 +655,42 @@ void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
 	if(model->type == MOD_BRUSH) {
 		VectorCopy( model->bmodel->bounds[0], mins );
 		VectorCopy( model->bmodel->bounds[1], maxs );
-		
+
 		return;
 	} else if (model->type == MOD_MESH) {
 		md3Header_t	*header;
-		md3Frame_t	*frame;
+		md3Frame_t	*md3Frames;
 
 		header = model->md3[0];
-		frame = (md3Frame_t *) ((byte *)header + header->ofsFrames);
+		md3Frames = (md3Frame_t *) ((byte *)header + header->ofsFrames);
 
-		VectorCopy( frame->bounds[0], mins );
-		VectorCopy( frame->bounds[1], maxs );
-		
+		// Both MD3 and IQM store bounds per frame, and an animated model's
+		// silhouette changes enough between frames to matter - a thrown kick
+		// is well outside the rest pose. Callers have been passing a frame
+		// index all along; until now it was discarded here and everyone got
+		// the rest pose.
+		if ( frame < 0 || frame >= header->numFrames ) {
+			frame = 0;
+		}
+		md3Frames += frame;
+
+		VectorCopy( md3Frames->bounds[0], mins );
+		VectorCopy( md3Frames->bounds[1], maxs );
+
 		return;
 	} else if(model->type == MOD_IQM) {
 		iqmData_t *iqmData;
-		
+
 		iqmData = model->modelData;
 
 		if(iqmData->bounds)
 		{
-			VectorCopy(iqmData->bounds, mins);
-			VectorCopy(iqmData->bounds + 3, maxs);
+			// 6 floats per frame: bbmin[3] then bbmax[3].
+			if ( frame < 0 || frame >= iqmData->num_frames ) {
+				frame = 0;
+			}
+			VectorCopy(iqmData->bounds + 6 * frame, mins);
+			VectorCopy(iqmData->bounds + 6 * frame + 3, maxs);
 			return;
 		}
 	}
