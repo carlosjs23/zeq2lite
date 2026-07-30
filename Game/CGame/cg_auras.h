@@ -26,6 +26,13 @@ typedef struct auraConfig_s {
 	vec3_t		auraColor;
 	qhandle_t	auraShader;
 	float		auraScale;
+	// Screen-space aura tuning; see the programParams layout in cg_auras.c and
+	// the matching header comment in glsl/aura_vp.glsl.
+	float		auraOriginDistance;
+	float		auraPadding;		// in NDC
+	float		auraAmplitude;
+	float		auraWavelength;		// wraps of the spike strip around the ring
+	float		auraScrollSpeed;
 	float		tailLength;
 	sfxHandle_t	chargeStartSound;
 	sfxHandle_t	chargeLoopSound;

@@ -857,16 +857,16 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	ent.programParams[4]  = mins[0];
 	ent.programParams[5]  = mins[1];
 	ent.programParams[6]  = mins[2];
-	ent.programParams[7]  = 1.0f;		// origin distance
+	ent.programParams[7]  = config->auraOriginDistance;
 
 	ent.programParams[8]  = maxs[0];
 	ent.programParams[9]  = maxs[1];
 	ent.programParams[10] = maxs[2];
-	ent.programParams[11] = 0.02f;		// bounding box padding, in NDC
+	ent.programParams[11] = config->auraPadding;
 
-	ent.programParams[12] = 1.0f;		// amplitude
-	ent.programParams[13] = 4.0f;		// wavelength: wraps of the strip around the ring
-	ent.programParams[14] = 1.5f;		// scroll speed toward the tip
+	ent.programParams[12] = config->auraAmplitude;
+	ent.programParams[13] = config->auraWavelength;
+	ent.programParams[14] = config->auraScrollSpeed;
 	ent.programParams[15] = 0.0f;
 
 	trap_R_AddRefEntityToScene( &ent );
@@ -1003,6 +1003,17 @@ void CG_RegisterClientAura(int clientNum,clientInfo_t *ci){
 	for(i = 0;i < 8;i++){ 
 		ci->auraConfig[i] = &(auraStates[clientNum].configurations[i]);
 		memset(ci->auraConfig[i],0,sizeof(auraConfig_t));
+		// Every other key defaults by way of players/tierDefault.cfg, which is
+		// parsed below before the per-tier file. These five are the values the
+		// screen-space aura was authored against, and zero is not a usable
+		// fallback for any of them - a zero wavelength or amplitude flattens
+		// the aura rather than degrading it - so they are seeded here as well,
+		// and a config omitting them renders exactly as before.
+		ci->auraConfig[i]->auraOriginDistance = 1.0f;
+		ci->auraConfig[i]->auraPadding = 0.02f;
+		ci->auraConfig[i]->auraAmplitude = 1.0f;
+		ci->auraConfig[i]->auraWavelength = 4.0f;
+		ci->auraConfig[i]->auraScrollSpeed = 1.5f;
 		Com_sprintf(filename,sizeof(filename),"players/tierDefault.cfg",ci->modelName,i+1);
 		parseAura(filename,ci->auraConfig[i]);
 		Com_sprintf(filename,sizeof(filename),"players/%s/tier%i/tier.cfg",ci->modelName,i+1);
@@ -1122,6 +1133,31 @@ void parseAura(char *path,auraConfig_t *aura){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				aura->auraScale = atof(token);
+			}
+			else if(!Q_stricmp( token, "auraOriginDistance")){
+				token = COM_Parse(&parse);
+				if(!token[0]){break;}
+				aura->auraOriginDistance = atof(token);
+			}
+			else if(!Q_stricmp( token, "auraPadding")){
+				token = COM_Parse(&parse);
+				if(!token[0]){break;}
+				aura->auraPadding = atof(token);
+			}
+			else if(!Q_stricmp( token, "auraAmplitude")){
+				token = COM_Parse(&parse);
+				if(!token[0]){break;}
+				aura->auraAmplitude = atof(token);
+			}
+			else if(!Q_stricmp( token, "auraWavelength")){
+				token = COM_Parse(&parse);
+				if(!token[0]){break;}
+				aura->auraWavelength = atof(token);
+			}
+			else if(!Q_stricmp( token, "auraScrollSpeed")){
+				token = COM_Parse(&parse);
+				if(!token[0]){break;}
+				aura->auraScrollSpeed = atof(token);
 			}
 			else if(!Q_stricmp( token, "auraLength")){
 				token = COM_Parse(&parse);
