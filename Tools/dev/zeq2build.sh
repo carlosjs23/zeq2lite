@@ -116,4 +116,12 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 	python3 "$ZEQ2_ROOT/Tools/dev/make_aura_texture.py" \
 		"$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura/auraSpikeStrip.png" >/dev/null
 	echo "ok: aura.iqm and auraSpikeStrip.png generated"
+
+	# The map-selection highlight and the missing-levelshot placeholder, for the
+	# same reason: ui_startserver.c names images the mod directory does not
+	# supply, and a missing one draws as shader handle 0 - the default black and
+	# white block - rather than as nothing.
+	python3 "$ZEQ2_ROOT/Tools/dev/make_ui_art.py" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME/interface/art" >/dev/null
+	echo "ok: maps_selected.png and unknownmap.png generated"
 fi
