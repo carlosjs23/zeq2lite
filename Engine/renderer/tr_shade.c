@@ -1814,6 +1814,30 @@ static void RB_GLSL_IterateStagesGeneric(shaderCommands_t *input) {
 		if (program->u_ViewOrigin > -1)
 			R_GLSL_SetUniform_ViewOrigin(program, backEnd.or.viewOrigin);
 
+		/*
+		 * Texture coordinates, resolved per stage on the CPU exactly as the
+		 * fixed-function path does. tcGen and every tcMod (scale, scroll, turb,
+		 * rotate, stretch, transform) land in svars here; the vertex programs
+		 * receive finished coordinates and pass them straight through.
+		 *
+		 * This has to happen per stage, not once per surface. Binding the raw
+		 * tess.texCoords up front - as this path used to - silently discarded
+		 * every tcMod, so a stage saying `tcMod scale 50 50` sampled its texture
+		 * at 1:1 and stretched one tile over the whole surface. On the desert
+		 * terrain that turned the ground and its detail layer into a flat
+		 * gradient whenever GLSL was enabled.
+		 */
+		ComputeTexCoords(pStage);
+
+		GL_SelectTexture(0);
+		qglTexCoordPointer(2, GL_FLOAT, 0, input->svars.texcoords[0]);
+
+		if (program->u_Texture1 > -1) {
+			GL_SelectTexture(1);
+			qglTexCoordPointer(2, GL_FLOAT, 0, input->svars.texcoords[1]);
+			GL_SelectTexture(0);
+		}
+
 		/* draw */
 		R_DrawElements(input->numIndexes, input->indexes);
 
