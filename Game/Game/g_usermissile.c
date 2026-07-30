@@ -473,11 +473,15 @@ void G_UserWeaponDamage(gentity_t *target,gentity_t *inflictor,gentity_t *attack
 	}
 	if(damage){
 		if(tgClient){
-			attacker->client->ps.states |= causedDamage;
+			// A missing attacker was replaced by the world entity above, and the
+			// world has no client - attacker-side credit is for players only.
+			if(attacker->client){attacker->client->ps.states |= causedDamage;}
 			G_LocationImpact(inflictor->r.currentOrigin,target,inflictor);
 			if(target == attacker){damage *= 0.2f;}
-			attacker->client->ps.powerLevel[plHealthPool] += damage * 0.7;
-			attacker->client->ps.powerLevel[plMaximumPool] += damage * 0.3;
+			if(attacker->client){
+				attacker->client->ps.powerLevel[plHealthPool] += damage * 0.7;
+				attacker->client->ps.powerLevel[plMaximumPool] += damage * 0.3;
+			}
 			tgClient->ps.powerLevel[plDamageFromEnergy] += damage;
 			if(inflictor->impede){tgClient->ps.timers[tmImpede] = inflictor->impede;}
 			if(knockback){
@@ -1306,7 +1310,11 @@ void G_LocationImpact(vec3_t point, gentity_t* targ, gentity_t* attacker) {
 	int clientRotation;
 	int attackRotation;	// Degrees rotation around client.
 	int impactRotation;	// used to check back of head vs. face
-	VectorSubtract(targ->r.currentOrigin, point, attackPath); 
+	// The caller hands us whatever the missile touched, and most shots land on
+	// map geometry. A non-player has no facing and no side of the body to
+	// record, so there is nothing to work out here.
+	if(!targ->client){return;}
+	VectorSubtract(targ->r.currentOrigin, point, attackPath);
 	vectoangles(attackPath, attackAngle);
 	clientRotation = targ->client->ps.viewangles[YAW];
 	attackRotation = attackAngle[YAW];
@@ -1328,11 +1336,13 @@ void G_LocationImpact(vec3_t point, gentity_t* targ, gentity_t* attacker) {
 // Handles impact of the weapon with map geometry or entities.
 void G_ImpactUserWeapon(gentity_t *self,trace_t *trace){
 	gentity_t		*other;
+	gentity_t		*missileOwner;
 	qboolean		hitClient = qfalse;
 	vec3_t	velocity;
 	int radius;
 	other = &g_entities[trace->entityNum];
-	G_LocationImpact(trace->endpos,other,GetMissileOwnerEntity(self));
+	missileOwner = self->parent ? GetMissileOwnerEntity(self) : NULL;
+	G_LocationImpact(trace->endpos,other,missileOwner);
 	//G_Printf("Attack's power level is : %i\n",self->powerLevelCurrent);
 	// Initiate Player Interaction
 	if(other->s.eType == ET_PLAYER){
@@ -1414,7 +1424,10 @@ void G_ImpactUserWeapon(gentity_t *self,trace_t *trace){
 	}
 	else if(self->s.eType == ET_BEAMHEAD){
 		if(other->s.eType == ET_BEAMHEAD){
-			if(!(self->client->ps.bitFlags & isStruggling)){
+			// The struggle is between the two players who fired, so the flag
+			// lives on the owner - a beam entity has no client of its own.
+			if(!missileOwner || !missileOwner->client
+				|| !(missileOwner->client->ps.bitFlags & isStruggling)){
 				G_AddEvent(self,EV_POWER_STRUGGLE_START, DirToByte( trace->plane.normal));
 				other->enemy = self;
 				self->s.dashDir[2] = 1.0f;
@@ -1477,14 +1490,26 @@ void G_DetachUserWeapon (gentity_t *self) {
 }
 void G_RemoveUserWeapon (gentity_t *self) {
 	gentity_t *other;
+	gentity_t *missileOwner;
+	// isStruggling is raised on the blocker and the firer together, so it has to
+	// come off both. Neither is reachable the way this used to read: a weapon
+	// only acquires an enemy once somebody blocks it, and the missile entity
+	// itself never has a client - g_client.c assigns one to players only.
 	other = self->enemy;
-	other->client->ps.bitFlags &= ~isStruggling;
-	self->client->ps.bitFlags &= ~isStruggling;
-	if(other->client->ps.lockedTarget >= MAX_CLIENTS){
-		other->client->ps.lockedPosition = NULL;
-		other->client->ps.lockedTarget = 0;
+	missileOwner = self->parent ? GetMissileOwnerEntity( self ) : NULL;
+	if(other && other->client){
+		other->client->ps.bitFlags &= ~isStruggling;
+		if(other->client->ps.lockedTarget >= MAX_CLIENTS){
+			other->client->ps.lockedPosition = NULL;
+			other->client->ps.lockedTarget = 0;
+		}
 	}
-	if (self->guided) {
+	if(missileOwner && missileOwner->client){
+		missileOwner->client->ps.bitFlags &= ~isStruggling;
+	}
+	// s.clientNum still names the firer, but that slot is empty once they leave.
+	if (self->guided && self->s.clientNum >= 0 && self->s.clientNum < MAX_CLIENTS
+		&& g_entities[ self->s.clientNum ].client) {
 		g_entities[ self->s.clientNum ].client->ps.weaponstate = WEAPON_READY;
 	}
 	if (self->s.eType == ET_BEAMHEAD && self->powerLevelCurrent > 0) {
