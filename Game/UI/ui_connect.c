@@ -204,6 +204,11 @@ void UI_DrawConnectScreen( qboolean overlay ) {
 		lastLoadingText[0] = '\0';
 	}
 	lastConnState = cstate.connState;
+	// RegisterShaderNoMip answers 0 for an image that is not there, and handle 0
+	// is the default shader - an opaque black and white block. "connecting",
+	// "searching" and "dots" are all absent from the mod directory, and this
+	// screen is drawn over cgame's during CA_LOADING (cl_scrn.c), so the block
+	// landed on the loading screen's top-left corner.
 	text = trap_R_RegisterShaderNoMip("connecting");
 	dots = trap_R_RegisterShaderNoMip("dots");
 	x = 0;
@@ -214,14 +219,14 @@ void UI_DrawConnectScreen( qboolean overlay ) {
 	switch ( cstate.connState ) {
 		case CA_CONNECTING:
 			text = trap_R_RegisterShaderNoMip("searching");
-			trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, text);
+			if(text){trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, text);}
 			x = 70;
 			y = 52;
 			w = 8;
 			h = 4;
 			break;
 		case CA_CHALLENGING:
-			trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, text);
+			if(text){trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, text);}
 			x = -100;
 			y = -100;
 			w = 0;
@@ -236,7 +241,7 @@ void UI_DrawConnectScreen( qboolean overlay ) {
 					return;
 				}
 			}
-			trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, text);
+			if(text){trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, text);}
 			x = -100;
 			y = -100;
 			w = 0;
@@ -248,7 +253,7 @@ void UI_DrawConnectScreen( qboolean overlay ) {
 	}
 
 	UI_AdjustFrom640(&x,&y,&w,&h);
-	trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, dots);
+	if(dots){trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, dots);}
 	//UI_DrawProportionalString( 320, 128, s, UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, color_white );
 
 	// password required / connection rejected information goes here
