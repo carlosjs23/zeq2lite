@@ -1832,7 +1832,17 @@ static void RB_GLSL_IterateStagesGeneric(shaderCommands_t *input) {
 		GL_SelectTexture(0);
 		qglTexCoordPointer(2, GL_FLOAT, 0, input->svars.texcoords[0]);
 
-		if (program->u_Texture1 > -1) {
+		/*
+		 * Unit 1 only when this stage really has a second image, matching the
+		 * guard the texture binding above uses. ComputeTexCoords defaults tcGen
+		 * for bundle 0 alone (tr_shader.c), so a single-texture stage leaves
+		 * bundle 1 on TCGEN_BAD, which its switch does not handle and therefore
+		 * leaves holding whatever the previous surface computed. Binding that
+		 * unconditionally fed 2D shaders stale coordinates and drew them as
+		 * flat blocks. Everything else keeps the surface-wide array set up in
+		 * RB_GLSL_StageIteratorGeneric.
+		 */
+		if (program->u_Texture1 > -1 && pStage->bundle[1].image[0]) {
 			GL_SelectTexture(1);
 			qglTexCoordPointer(2, GL_FLOAT, 0, input->svars.texcoords[1]);
 			GL_SelectTexture(0);
