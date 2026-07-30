@@ -154,6 +154,9 @@ def main():
                     help="'R,G,B' or 'checker' (default: 25,25,35)")
     ap.add_argument("--label", action="store_true",
                     help="caption each cell with its filename")
+    ap.add_argument("--crop", default="",
+                    help="centre-crop each image to WxH before compositing, so a "
+                         "sheet of full frames stays legible")
     args = ap.parse_args()
 
     if args.columns < 1:
@@ -179,7 +182,23 @@ def main():
             sys.exit("--label needs make_ui_art.py beside this script")
         font, label_h = (FONT, GLYPH_W, GLYPH_H), GLYPH_H * 2 + 4
 
-    tiles = [(os.path.basename(p),) + decode_png(p) for p in args.images]
+    crop = None
+    if args.crop:
+        try:
+            cw, chh = (int(v) for v in args.crop.lower().split("x"))
+        except ValueError:
+            sys.exit("--crop wants WxH, e.g. 640x720")
+        crop = (cw, chh)
+
+    tiles = []
+    for path in args.images:
+        w, h, pixels = decode_png(path)
+        if crop:
+            cw, chh = min(crop[0], w), min(crop[1], h)
+            ox, oy = (w - cw) // 2, (h - chh) // 2
+            pixels = [row[ox:ox + cw] for row in pixels[oy:oy + chh]]
+            w, h = cw, chh
+        tiles.append((os.path.basename(path), w, h, pixels))
     cols = min(args.columns, len(tiles))
     rows_of = [tiles[i:i + cols] for i in range(0, len(tiles), cols)]
 

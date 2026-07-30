@@ -11,6 +11,7 @@ Python scripts use only the standard library; shell scripts need bash.
 | `zeq2shot.sh` | join a map, grab an in-engine screenshot, convert it to PNG |
 | `zeq2smoke.sh` | **gate**: load every map, assert the game survives joining it |
 | `zeq2audit.sh` | report where the code expects assets the data set never shipped |
+| `zeq2aura.sh` | sweep the aura's tuning and contact-sheet what each value renders as |
 | `zeq2sanitize.sh` | build + run under ASan/UBSan and group the findings |
 | `zeq2test.sh` | **gate**: static checks, ASan demonstrations, sanitizer-log assertions |
 | `tga2png.py` | convert an ioquake3 TGA screenshot to PNG (+ colour histogram) |
