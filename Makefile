@@ -435,8 +435,31 @@ ifeq ($(PLATFORM),darwin)
     # It has to be *real* SDL2, not homebrew's sdl2-compat.  /opt/homebrew/opt/sdl2
     # is a symlink to the sdl2-compat keg, which reaches SDL3 through dlopen;
     # that dlopen chain is exactly what stops AddressSanitizer from ever
-    # starting the engine.  Point at the real sdl2 keg by its versioned path.
-    SDL2_PREFIX ?= /opt/homebrew/Cellar/sdl2/2.32.10
+    # starting the engine.
+    #
+    # Homebrew's `sdl2` formula is now only an alias for sdl2-compat, so there is
+    # no longer any way to `brew install` real SDL2 -- it lands in
+    # Cellar/sdl2-compat and drags in SDL3.  Real SDL2 therefore comes from either
+    # a pre-migration keg under Cellar/sdl2/<version> or a from-source build; CI
+    # builds one from the upstream release tarball (.github/workflows/ci.yml).
+    #
+    # Discovered rather than hardcoded: a pinned version string silently turns
+    # into a nonexistent -I path when the keg is a different version, and the
+    # flag still prints in the banner below, so the build looks correctly
+    # configured right up until 'SDL.h file not found'.  Override by setting
+    # SDL2_PREFIX in the environment or on the command line.
+    SDL2_PREFIX ?= $(lastword $(sort $(wildcard /opt/homebrew/Cellar/sdl2/[0-9]*)))
+    ifeq ($(strip $(SDL2_PREFIX)),)
+      # Only a hard error for goals that actually compile -- cleaning must still
+      # work on a machine that has no SDL2 at all.
+      SDL2_CLEAN_GOALS := clean clean2 clean-debug clean-release distclean \
+        toolsclean toolsclean2 toolsclean-debug toolsclean-release
+      ifneq ($(if $(MAKECMDGOALS),$(filter-out $(SDL2_CLEAN_GOALS),$(MAKECMDGOALS)),build),)
+        $(error No real SDL2 found under /opt/homebrew/Cellar/sdl2. \
+          `brew install sdl2` installs sdl2-compat, which is NOT usable here. \
+          Build SDL2 from source and pass its prefix, e.g. make SDL2_PREFIX=$$HOME/sdl2)
+      endif
+    endif
     BASE_CFLAGS += -I$(SDL2_PREFIX)/include/SDL2
     # The real keg's own LC_ID_DYLIB still names the /opt/homebrew/opt/sdl2
     # symlink, so a plain -lSDL2 link resolves against real SDL2 but *loads*

@@ -6,15 +6,76 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # Homebrew's `sdl2` formula is now only an alias for sdl2-compat, which is a
+  # shim over SDL3 and is exactly what this port must not link (see the
+  # SDL2_PREFIX comment in the Makefile). There is no longer any brew formula
+  # for real SDL2, so CI builds it from the upstream release tarball. Keep this
+  # in step with the version developers have under Cellar/sdl2.
+  SDL2_VERSION: "2.32.10"
+
 jobs:
+  # Built once and cached, then restored by both consumer jobs, so a green cache
+  # costs a download rather than a compile in each of them.
+  sdl2:
+    name: Build real SDL2
+    runs-on: macos-latest
+    steps:
+      - name: Cache SDL2
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl2
+          key: sdl2-${{ runner.os }}-${{ runner.arch }}-${{ env.SDL2_VERSION }}
+
+      - name: Build SDL2 from source
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL -o sdl2.tar.gz \
+            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.tar.gz"
+          tar xzf sdl2.tar.gz
+          cd "SDL2-${SDL2_VERSION}"
+          ./configure --prefix="$HOME/sdl2"
+          make -j"$(sysctl -n hw.ncpu)"
+          make install
+
+      # Cheap insurance that the cache holds what we think it does: a restored
+      # shim would otherwise only surface as a baffling runtime failure.
+      - name: Verify it is real SDL2
+        run: |
+          set -euo pipefail
+          test -f "$HOME/sdl2/include/SDL2/SDL.h"
+          test -f "$HOME/sdl2/lib/libSDL2-2.0.0.dylib"
+          if otool -L "$HOME/sdl2/lib/libSDL2-2.0.0.dylib" \
+              | grep -qiE 'libSDL3|sdl2-compat|sdl12-compat'; then
+            echo "ERROR: built library is an SDL shim, not real SDL2" >&2
+            otool -L "$HOME/sdl2/lib/libSDL2-2.0.0.dylib" >&2
+            exit 1
+          fi
+
   unit-tests:
     name: Unit tests (Criterion, ASan + UBSan)
     runs-on: macos-latest
+    needs: sdl2
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Criterion
         run: brew install criterion
+
+      # The png suite compiles renderer sources, which reach SDL_opengl.h
+      # through qgl.h, so this job needs the SDL2 headers too.
+      - name: Restore SDL2
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/sdl2
+          key: sdl2-${{ runner.os }}-${{ runner.arch }}-${{ env.SDL2_VERSION }}
+          fail-on-cache-miss: true
+
+      # Absolute, because make does not expand ~ inside an -I flag.
+      - name: Point the build at real SDL2
+        run: echo "SDL2_PREFIX=$HOME/sdl2" >> "$GITHUB_ENV"
 
       # Cheap and catches a whole defect class, so it runs before the build.
       - name: Lint
@@ -38,12 +99,25 @@ jobs:
   build:
     name: Build engine and game modules
     runs-on: macos-latest
+    needs: sdl2
     steps:
       - uses: actions/checkout@v4
 
-      # Real SDL2, not sdl2-compat: see the SDL2_PREFIX comment in the Makefile.
-      - name: Install SDL2
-        run: brew install sdl2
+      # The client links these from /opt/homebrew/lib; they are not preinstalled
+      # on the runner image.
+      - name: Install audio codecs
+        run: brew install libogg libvorbis
+
+      - name: Restore SDL2
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/sdl2
+          key: sdl2-${{ runner.os }}-${{ runner.arch }}-${{ env.SDL2_VERSION }}
+          fail-on-cache-miss: true
+
+      # Absolute, because make does not expand ~ inside an -I flag.
+      - name: Point the build at real SDL2
+        run: echo "SDL2_PREFIX=$HOME/sdl2" >> "$GITHUB_ENV"
 
       - name: Build
         run: make -j"$(sysctl -n hw.ncpu)"

@@ -42,8 +42,19 @@ SRC_snd      := $(ROOT)/Engine/client/snd_dma.c $(SHARED_CORE) $(SUPPORT) \
                 support/sound_stubs.c
 
 # The renderer sources reach SDL2's SDL_opengl.h through qgl.h, so the PNG
-# suite needs the same SDL2 include path the engine build uses.
-SDL2_PREFIX ?= $(firstword $(wildcard /opt/homebrew/Cellar/sdl2/*))
+# suite needs the same SDL2 include path the engine build uses.  See the
+# SDL2_PREFIX comment in ../Makefile: `brew install sdl2` gives you sdl2-compat,
+# not real SDL2, so this is a pre-migration keg or a from-source build.
+#
+# An empty match here used to degrade silently into a bare -I/include/SDL2 and
+# surface as 'SDL_opengl.h file not found' in the png suite, so it is an error.
+SDL2_PREFIX ?= $(lastword $(sort $(wildcard /opt/homebrew/Cellar/sdl2/[0-9]*)))
+ifeq ($(strip $(SDL2_PREFIX)),)
+  ifneq ($(if $(MAKECMDGOALS),$(filter-out clean,$(MAKECMDGOALS)),build),)
+    $(error No real SDL2 found under /opt/homebrew/Cellar/sdl2. \
+      Build SDL2 from source and pass its prefix, e.g. make SDL2_PREFIX=$$HOME/sdl2)
+  endif
+endif
 INCLUDES := -I$(ROOT)/Shared -I$(ROOT)/Game/Game -I$(ROOT)/Game/CGame \
             -I$(ROOT)/Engine/renderer -I$(ROOT)/Engine/client -Ifixtures \
             -Isupport -I$(CRITERION_PREFIX)/include \
