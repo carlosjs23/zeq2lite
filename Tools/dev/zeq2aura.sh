@@ -21,6 +21,7 @@
 #   zeq2aura.sh --set auraColor="1 0.2 0.2" --out /tmp/red.png
 #   zeq2aura.sh --sweep auraScale=1,2,3 --map landing --hull
 #   zeq2aura.sh --sweep auraScale=1,2,3 --crop none      # keep whole frames
+#   zeq2aura.sh --sweep auraScale=1,2,3 --range 160      # pull the camera back
 #
 # Writes a labelled contact sheet, one cell per sample.
 
@@ -31,7 +32,8 @@ OUT="$ZEQ2_BUILD/aura-sweep.png"
 SWEEP=""
 FIXED=()
 FRAMES=400
-CROP=720x820
+CROP=470x640
+RANGE=110
 HULL=0
 KEEP=0
 
@@ -43,6 +45,7 @@ while [[ $# -gt 0 ]]; do
 		--out)     OUT="$2"; shift 2 ;;
 		--frames)  FRAMES="$2"; shift 2 ;;
 		--crop)    CROP="$2"; shift 2 ;;
+		--range)   RANGE="$2"; shift 2 ;;
 		--hull)    HULL=1; shift ;;
 		--keep)    KEEP=1; shift ;;
 		-h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}"; exit 0 ;;
@@ -105,12 +108,18 @@ for value in "${SWEEP_VALUES[@]}"; do
 	shot="$WORK/$safe.png"
 	printf '  %-28s ' "$label"
 
-	# Fixed camera orbit and no HUD, so the only thing differing between cells is
-	# the aura. The spawn point still varies, so the backdrop does too - that is
+	# Fixed camera and no HUD, so the only thing differing between cells is the
+	# aura. The spawn point still varies, so the backdrop does too - that is
 	# scenery, not the subject.
+	#
+	# The camera cvars are passed as bare commands rather than `+set`: they are
+	# CVAR_ARCHIVE and sit in zeq2config.cfg, whose exec would overwrite an early
+	# `+set`. A command goes into the buffer and runs after that. cg_thirdPersonSlide
+	# defaults to -20, which is what pushes the player off to one side.
 	if "$ZEQ2_DEV/zeq2shot.sh" --map "$MAP" --frames "$FRAMES" --out "$shot" \
-		-- +set cg_auraScreenSpace $(( HULL ? 0 : 1 )) \
-		   +set cg_thirdpersonangle 0 +set cg_draw2D 0 >/dev/null 2>&1 && [[ -f "$shot" ]]; then
+		-- +set cg_auraScreenSpace $(( HULL ? 0 : 1 )) +set cg_draw2D 0 \
+		   +cg_thirdPersonSlide 0 +cg_thirdPersonHeight 0 \
+		   +cg_thirdPersonAngle 0 +cg_thirdPersonRange "$RANGE" >/dev/null 2>&1 && [[ -f "$shot" ]]; then
 		echo "ok"
 		shots+=("$shot")
 	else
