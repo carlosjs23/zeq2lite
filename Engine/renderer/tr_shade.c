@@ -1802,6 +1802,10 @@ static void RB_GLSL_IterateStagesGeneric(shaderCommands_t *input) {
 			R_BindAnimatedImage(&pStage->bundle[7]);
 		}
 
+		/* per-entity program parameters */
+		if (program->u_ProgramParams > -1)
+			R_GLSL_SetUniform_ProgramParams(program, backEnd.currentEntity->e.programParams);
+
 		/* time */
 		if (program->u_Time > -1)
 			R_GLSL_SetUniform_Time(program, input->shaderTime);

@@ -29,6 +29,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	ENTITYNUM_BITS		10		// can't be increased without changing drawsurf bit packing
 #define	MAX_ENTITIES		((1<<ENTITYNUM_BITS) - 1)
 
+// Per-entity GLSL parameters, as vec4s. Sized for the screen-space aura, which
+// needs force, strength, origin distance, bounding box padding, amplitude,
+// wavelength and scroll speed, with room left for the layered-texture variants
+// that technique is meant to grow. Raising it costs 16 bytes per vec4 on every
+// refEntity_t, of which there are MAX_ENTITIES.
+#define	MAX_PROGRAM_PARAM_VEC4S	4
+#define	MAX_PROGRAM_PARAMS	(MAX_PROGRAM_PARAM_VEC4S * 4)
+
 // renderfx flags
 #define	RF_MINLIGHT		0x0001		// allways have some light (viewmodel, some items)
 #define	RF_THIRD_PERSON		0x0002		// don't draw through eyes, only mirrors (player bodies, chat sprites)
@@ -118,6 +126,17 @@ typedef struct {
 	// extra sprite information
 	float		radius;
 	float		rotation;
+
+	// Free-form per-draw input for GLSL programs, surfaced to the vertex and
+	// fragment stages as u_ProgramParams. The renderer never interprets these;
+	// they exist so a game module can drive a shader with values that have no
+	// business being smuggled through origin/oldorigin/radius, which carry
+	// meanings of their own.
+	//
+	// Safe to read per draw because a differing entity number forces a batch
+	// flush (see RB_RenderDrawSurfList), so one entity's parameters can never
+	// leak into another's geometry - unlike polys, which merge freely.
+	float		programParams[MAX_PROGRAM_PARAMS];
 } refEntity_t;
 
 

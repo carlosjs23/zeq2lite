@@ -827,6 +827,9 @@ typedef struct {
 	GLint			u_ModelViewProjectionMatrix;
 	float			v_ModelViewProjectionMatrix[16];
 
+	GLint			u_ProgramParams;
+	float			v_ProgramParams[MAX_PROGRAM_PARAMS];
+
 	GLint			u_ProjectionMatrix;
 	float			v_ProjectionMatrix[16];
 
@@ -1571,6 +1574,17 @@ static ID_INLINE void R_GLSL_SetUniform_LightDistance(glslProgram_t *program, fl
 
 	program->v_LightDistance = value;
 	qglUniform1fARB(program->u_LightDistance, value);
+}
+
+/* Whole array in one upload. Compared before uploading like every other
+   uniform here, because most entities leave these at zero and re-sending 16
+   floats per stage per draw would be pure waste. */
+static ID_INLINE void R_GLSL_SetUniform_ProgramParams(glslProgram_t *program, const float *value) {
+	if (!memcmp(program->v_ProgramParams, value, sizeof(program->v_ProgramParams)))
+		return;
+
+	Com_Memcpy(program->v_ProgramParams, value, sizeof(program->v_ProgramParams));
+	qglUniform4fvARB(program->u_ProgramParams, MAX_PROGRAM_PARAM_VEC4S, value);
 }
 
 static ID_INLINE void R_GLSL_SetUniform_ColorGen(glslProgram_t *program, colorGen_t value) {

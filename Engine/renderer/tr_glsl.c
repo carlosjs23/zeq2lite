@@ -188,6 +188,13 @@ static void R_GLSL_ParseProgram(glslProgram_t *program, char *_text) {
 					program->u_EntityColor = qglGetUniformLocationARB(program->program, "u_EntityColor");
 				} else if (!Q_stricmp(token, "u_FogColor;")) {
 					program->u_FogColor = qglGetUniformLocationARB(program->program, "u_FogColor");
+				} else if (!Q_stricmpn(token, "u_ProgramParams", 15)) {
+					/* Matched on the prefix because this one is an array: the
+					   declaration tokenises as "u_ProgramParams[4];", and
+					   pinning the subscript here would silently stop
+					   recognising the uniform the moment its size changed.
+					   GL resolves the bare array name to element 0. */
+					program->u_ProgramParams = qglGetUniformLocationARB(program->program, "u_ProgramParams");
 				} else {
 					ri.Printf(PRINT_WARNING, "WARNING: uniform vec4 %s unrecognized in program %s\n", token, program->name);
 				}
