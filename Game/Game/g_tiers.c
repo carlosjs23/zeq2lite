@@ -1,4 +1,7 @@
 #include "g_local.h"
+
+// Model whose tier configs stand in for a model that ships none of its own.
+#define TIER_FALLBACK_MODEL "goku"
 void parseTier(char *path,tierConfig_g *tier);
 void syncTier(gclient_t *client){
 	tierConfig_g *tier;
@@ -218,15 +221,32 @@ void setupTiers(gclient_t *client){
 	int	i;
 	tierConfig_g *tier;
 	char *modelName;
-	char *tierPath;
-	char tempPath[MAX_QPATH];
+	char tierPath[MAX_QPATH];
 	modelName = client->modelName;
 	for(i=0;i<8;i++){
 		tier = &client->tiers[i];
 		memset(tier,0,sizeof(tierConfig_g));
-		tierPath = va("players/%s/tier%i/",modelName,i+1);
+		// Most thresholds are lower bounds, where the zero left by the memset
+		// reads as "no requirement". requirementHealthMaximum is an upper bound
+		// as a percentage of maximum, so zero would read as "only at zero
+		// health" and make the tier unreachable. A config that says nothing
+		// about health means no cap, which is 100%.
+		tier->requirementHealthMaximum = 100;
+		// Build the path in our own storage. va() cycles just two static buffers
+		// and the engine's filesystem uses it while opening a file, so a va()
+		// pointer held across parseTier() comes back clobbered - which silently
+		// left every tier unresolved and made transforming impossible.
+		Com_sprintf(tierPath,sizeof(tierPath),"players/%s/tier%i/tier.cfg",modelName,i+1);
 		parseTier("players/tierDefault.cfg",tier);
-		parseTier(strcat(tierPath,"tier.cfg"),tier);
+		parseTier(tierPath,tier);
+		// A model that ships no tier config of its own inherits the default
+		// model's, the same way g_client.c falls back for the .phys file. Without
+		// this a stock Quake III model (the "model" cvar still defaults to
+		// "sarge") silently ends up with no tiers at all and cannot transform.
+		if(!tier->exists && Q_stricmp(modelName,TIER_FALLBACK_MODEL)){
+			Com_sprintf(tierPath,sizeof(tierPath),"players/%s/tier%i/tier.cfg",TIER_FALLBACK_MODEL,i+1);
+			parseTier(tierPath,tier);
+		}
 	}
 	syncTier(client);
 }
@@ -237,7 +257,10 @@ void parseTier(char *path,tierConfig_g *tier){
 	int fileLength;
 	char fileContents[32000];
 	tier->exists = qfalse;
-	if(trap_FS_FOpenFile(path,0,FS_READ)>0){
+	// A length of 0 is an empty file, not a missing one - several characters ship
+	// a zero-byte tier.cfg and inherit everything from tierDefault.cfg. Only the
+	// engine's -1 means the tier is absent.
+	if(trap_FS_FOpenFile(path,0,FS_READ)>=0){
 		tier->exists = qtrue;
 		fileLength = trap_FS_FOpenFile(path,&tierCFG,FS_READ);
 		trap_FS_Read(fileContents,fileLength,tierCFG);

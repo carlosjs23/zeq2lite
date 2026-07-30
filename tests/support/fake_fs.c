@@ -92,6 +92,14 @@ int trap_FS_FOpenFile(const char *qpath, fileHandle_t *f, fsMode_t mode) {
 	int i, slot;
 
 	(void)mode;
+	/* The engine's FS builds OS paths with va() on the way through (FS_BuildOSPath
+	   and friends), and va() cycles two static buffers. A caller that holds a
+	   va() pointer across an open therefore finds it clobbered. Burning two
+	   buffers here keeps that hazard visible instead of letting a too-clean fake
+	   hide it: setupTiers had exactly that bug, and without this the tier suite
+	   reported the configs resolving while the game could not load one. */
+	(void)va("fake_fs:%s", qpath);
+	(void)va("fake_fs:%s", qpath);
 	for (i = 0; i < fs_file_count; ++i) {
 		if (Q_stricmp(fs_files[i].path, qpath)) {
 			continue;

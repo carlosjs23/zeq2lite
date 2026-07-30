@@ -26,7 +26,7 @@ BUILD             := bin
 # Adding a suite: create suites/test_<name>.c, add <name> here, and give it an
 # SRC_<name> line listing the engine translation units it needs. Keep that list
 # minimal - a short list is a sign the unit under test is well isolated.
-SUITES := q_shared screen cg_screen vidmodes fs_path cg_music cg_players iqm msg weapgfx png snd
+SUITES := q_shared screen cg_screen vidmodes fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers
 
 SHARED_CORE := $(ROOT)/Shared/q_shared.c $(ROOT)/Shared/q_math.c
 SUPPORT     := support/engine_stubs.c
@@ -55,6 +55,12 @@ SRC_msg      := $(ROOT)/Shared/msg.c $(ROOT)/Shared/huffman.c $(SHARED_CORE) $(S
 SRC_weapgfx  := $(SHARED_CORE) $(SUPPORT)
 SRC_png      := $(ROOT)/Engine/renderer/tr_image_png.c $(ROOT)/Shared/puff.c \
                 $(SHARED_CORE) $(SUPPORT)
+SRC_usermissile := $(ROOT)/Game/Game/g_usermissile.c $(ROOT)/Game/Game/bg_misc.c \
+                $(SHARED_CORE) $(SUPPORT) support/game_stubs.c
+# g_tiers.c is the best-isolated unit in the game module: the parser plus the
+# transformation predicate, reaching only COM_Parse, the FS traps and 5 cvars.
+SRC_tiers    := $(ROOT)/Game/Game/g_tiers.c $(SHARED_CORE) $(SUPPORT) \
+                support/fake_fs.c support/tiers_stubs.c
 SRC_snd      := $(ROOT)/Engine/client/snd_dma.c $(SHARED_CORE) $(SUPPORT) \
                 support/sound_stubs.c
 
