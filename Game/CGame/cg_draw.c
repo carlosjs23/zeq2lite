@@ -124,7 +124,9 @@ void CG_Text_PaintChar(float x, float y, float width, float height, float scale,
   float w, h;
   w = width * scale;
   h = height * scale;
-  CG_AdjustFrom640( &x, &y, &w, &h,qtrue);
+  // Glyphs come from a fixed-cell texture, so they scale uniformly like any
+  // other HUD element; stretching them is what made text fat at 16:9.
+  CG_AdjustFrom640( &x, &y, &w, &h,qfalse);
   trap_R_DrawStretchPic( x, y, w, h, s, t, s2, t2, hShader );
 }
 
@@ -388,7 +390,9 @@ CG_Draw3DModel
 void CG_Draw3DModel( float x, float y, float w, float h, qhandle_t model, qhandle_t skin, vec3_t origin, vec3_t angles ) {
 	refdef_t		refdef;
 	refEntity_t		ent;
-	CG_AdjustFrom640( &x, &y, &w, &h,qtrue);
+	// A model rendered into a stretched viewport comes out squashed, so the
+	// 2D box it is drawn into keeps its aspect.
+	CG_AdjustFrom640( &x, &y, &w, &h,qfalse);
 	memset( &refdef, 0, sizeof( refdef ) );
 	memset( &ent, 0, sizeof( ent ) );
 	AnglesToAxis( angles, ent.axis );

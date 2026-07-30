@@ -510,8 +510,15 @@ static void IN_DeactivateMouse( void )
 
 		// Don't warp the mouse unless the cursor is within the window
 		if( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_MOUSE_FOCUS )
-			SDL_WarpMouseInWindow( SDL_window,
-					cls.glconfig.vidWidth / 2, cls.glconfig.vidHeight / 2 );
+		{
+			int windowWidth, windowHeight;
+
+			// Warp coordinates are window points, while glconfig is in
+			// framebuffer pixels - twice as many on a Retina display, which
+			// would put the cursor off the bottom right of the window.
+			SDL_GetWindowSize( SDL_window, &windowWidth, &windowHeight );
+			SDL_WarpMouseInWindow( SDL_window, windowWidth / 2, windowHeight / 2 );
+		}
 
 		mouseActive = qfalse;
 	}
@@ -1010,8 +1017,13 @@ static void IN_ProcessEvents( void )
 						if( cls.glconfig.isFullscreen )
 							break;
 
-						// check if the size actually changed
-						if( cls.glconfig.vidWidth == w && cls.glconfig.vidHeight == h )
+						// Check if the size actually changed. Compared against
+						// r_custom*, not glconfig: the event is in window points
+						// and glconfig is in framebuffer pixels, so on a HiDPI
+						// display that test never matched and every stray resize
+						// event queued another vid_restart.
+						if( Cvar_VariableIntegerValue( "r_customwidth" ) == w &&
+							Cvar_VariableIntegerValue( "r_customheight" ) == h )
 							break;
 
 						Com_sprintf( width, sizeof(width), "%d", w );

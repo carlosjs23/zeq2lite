@@ -929,9 +929,7 @@ typedef struct {
 typedef struct {
 	gameState_t		gameState;			// gamestate from server
 	glconfig_t		glconfig;			// rendering configuration
-	float			screenXScale;		// derived from glconfig
-	float			screenYScale;
-	float			screenXBias;
+	screenScale_t	screen;				// derived from glconfig by CG_SetupScreenScale
 
 	int				serverCommandSequence;	// reliable command stream counter
 	int				processedSnapshotNum;// the number of snapshots cgame has requested
@@ -1101,6 +1099,7 @@ extern	vmCvar_t		cg_tracerLength;
 extern	vmCvar_t		cg_displayObituary;
 extern	vmCvar_t		cg_ignore;
 extern	vmCvar_t		cg_fov;
+extern	vmCvar_t		cg_fovAspectAdjust;
 extern	vmCvar_t		cg_zoomFov;
 extern	vmCvar_t		cg_advancedFlight;
 extern	vmCvar_t		cg_thirdPersonCameraDamp;
@@ -1233,7 +1232,9 @@ void CG_AddLensFlare(lensFlareEntity_t* lfent, int quality);	// JUHOX
 //
 // cg_drawtools.c
 //
+void CG_SetupScreenScale( void );
 void CG_AdjustFrom640( float *x, float *y, float *w, float *h,qboolean stretch);
+void CG_DrawChar( int x, int y, int width, int height, int ch );
 void CG_FillRect( float x, float y, float width, float height, const float *color );
 void CG_DrawPic(qboolean stretch, float x, float y, float width, float height, qhandle_t hShader );
 void CG_DrawString( float x, float y, const char *string, 

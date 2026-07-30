@@ -355,8 +355,8 @@ static void UI_DrawBannerString2( int x, int y, const char* str, vec4_t color )
 	ax = x * uis.scale + uis.bias;
 	ay = y * uis.scale;
 #else
-	ax = x * uis.scaleX;
-	ay = y * uis.scaleY;
+	ax = x * uis.screen.scale + uis.screen.xBias;
+	ay = y * uis.screen.scale + uis.screen.yBias;
 #endif
 
 	s = str;
@@ -368,7 +368,7 @@ static void UI_DrawBannerString2( int x, int y, const char* str, vec4_t color )
 #if 0
 			ax += ((float)PROPB_SPACE_WIDTH + (float)PROPB_GAP_WIDTH)* uis.scale;
 #else
-			ax += ((float)PROPB_SPACE_WIDTH + (float)PROPB_GAP_WIDTH)* uis.scaleX;
+			ax += ((float)PROPB_SPACE_WIDTH + (float)PROPB_GAP_WIDTH)* uis.screen.scale;
 #endif
 		}
 		else if ( ch >= 'A' && ch <= 'Z' ) {
@@ -382,15 +382,15 @@ static void UI_DrawBannerString2( int x, int y, const char* str, vec4_t color )
 			aw = (float)propMapB[ch][2] * uis.scale;
 			ah = (float)PROPB_HEIGHT * uis.scale;
 #else
-			aw = (float)propMapB[ch][2] * uis.scaleX;
-			ah = (float)PROPB_HEIGHT * uis.scaleY;
+			aw = (float)propMapB[ch][2] * uis.screen.scale;
+			ah = (float)PROPB_HEIGHT * uis.screen.scale;
 #endif
 			trap_R_DrawStretchPic( ax, ay, aw, ah, fcol, frow, fcol+fwidth, frow+fheight, uis.charsetPropB );
 			// MDave: apply the new scaling
 #if 0
 			ax += (aw + (float)PROPB_GAP_WIDTH * uis.scale);
 #else
-			ax += (aw + (float)PROPB_GAP_WIDTH * uis.scaleX);
+			ax += (aw + (float)PROPB_GAP_WIDTH * uis.screen.scale);
 #endif
 		}
 		s++;
@@ -487,8 +487,8 @@ static void UI_DrawProportionalString2( int x, int y, const char* str, vec4_t co
 	ax = x * uis.scale + uis.bias;
 	ay = y * uis.scale;
 #else
-	ax = x * uis.scaleX;
-	ay = y * uis.scaleY;
+	ax = x * uis.screen.scale + uis.screen.xBias;
+	ay = y * uis.screen.scale + uis.screen.yBias;
 #endif
 
 	s = str;
@@ -500,7 +500,7 @@ static void UI_DrawProportionalString2( int x, int y, const char* str, vec4_t co
 #if 0
 			aw = (float)PROP_SPACE_WIDTH * uis.scale * sizeScale;
 #else
-			aw = (float)PROP_SPACE_WIDTH * uis.scaleX * sizeScale;
+			aw = (float)PROP_SPACE_WIDTH * uis.screen.scale * sizeScale;
 #endif
 		}
 		else if ( propMap[ch][2] != -1 ) {
@@ -513,8 +513,8 @@ static void UI_DrawProportionalString2( int x, int y, const char* str, vec4_t co
 			aw = (float)propMap[ch][2] * uis.scale * sizeScale;
 			ah = (float)PROP_HEIGHT * uis.scale * sizeScale;
 #else
-			aw = (float)propMap[ch][2] * uis.scaleX * sizeScale;
-			ah = (float)PROP_HEIGHT * uis.scaleY * sizeScale;
+			aw = (float)propMap[ch][2] * uis.screen.scale * sizeScale;
+			ah = (float)PROP_HEIGHT * uis.screen.scale * sizeScale;
 #endif
 			trap_R_DrawStretchPic( ax, ay, aw, ah, fcol, frow, fcol+fwidth, frow+fheight, charset );
 		}
@@ -522,7 +522,7 @@ static void UI_DrawProportionalString2( int x, int y, const char* str, vec4_t co
 #if 0
 		ax += (aw + (float)PROP_GAP_WIDTH * uis.scale * sizeScale);
 #else
-		ax += (aw + (float)PROP_GAP_WIDTH * uis.scaleX * sizeScale);
+		ax += (aw + (float)PROP_GAP_WIDTH * uis.screen.scale * sizeScale);
 #endif
 		s++;
 	}
@@ -639,10 +639,10 @@ static void UI_DrawString2( int x, int y, const char* str, vec4_t color, int cha
 	aw = charw * uis.scale;
 	ah = charh * uis.scale;
 #else
-	ax = x * uis.scaleX;
-	ay = y * uis.scaleY;
-	aw = charw * uis.scaleX;
-	ah = charh * uis.scaleY;
+	ax = x * uis.screen.scale + uis.screen.xBias;
+	ay = y * uis.screen.scale + uis.screen.yBias;
+	aw = charw * uis.screen.scale;
+	ah = charh * uis.screen.scale;
 #endif
 
 	s = str;
@@ -668,7 +668,7 @@ static void UI_DrawString2( int x, int y, const char* str, vec4_t color, int cha
 			trap_R_DrawStretchPic( ax, ay, aw, ah, fcol, frow, fcol + 0.0625, frow + 0.0625, uis.charset );
 		}
 
-		ax += (charw*0.7) * uis.scaleX;
+		ax += (charw*0.7) * uis.screen.scale;
 		s++;
 	}
 
@@ -970,8 +970,7 @@ void UI_Init( void ) {
 	UI_RegisterCvars();
 	UI_InitGameinfo();
 	trap_GetGlconfig( &uis.glconfig );
-	uis.scaleX = uis.glconfig.vidWidth / 640.0;
-	uis.scaleY = uis.glconfig.vidHeight / 480.0;
+	Com_ScreenScale( &uis.screen, uis.glconfig.vidWidth, uis.glconfig.vidHeight );
 	Menu_Cache();
 	uis.activemenu = NULL;
 	uis.menusp = 0;
@@ -982,11 +981,24 @@ UI_AdjustFrom640
 Adjusted for resolution and screen aspect ratio
 ================*/
 void UI_AdjustFrom640( float *x, float *y, float *w, float *h ) {
-	qboolean stretch = qtrue;
-	*x *= uis.scaleX;
-	*y *= uis.scaleY;
-	*w *= stretch ? uis.scaleX : 1.6;
-	*h *= stretch ? uis.scaleY : 1.6;
+	Com_ScreenAdjustFrom640( &uis.screen, qfalse, x, y, w, h );
+}
+
+/*================
+UI_AdjustFrom640Stretch
+For the full-screen backdrop only. Menu artwork has to cover every pixel, while
+the widgets drawn on top of it keep their 4:3 shape - stretching those is what
+made the menus look squashed on a widescreen display.
+================*/
+void UI_AdjustFrom640Stretch( float *x, float *y, float *w, float *h ) {
+	Com_ScreenAdjustFrom640( &uis.screen, qtrue, x, y, w, h );
+}
+
+void UI_DrawFullscreenPic( qhandle_t hShader ) {
+	float	x = 0, y = 0, w = SCREEN_WIDTH, h = SCREEN_HEIGHT;
+
+	UI_AdjustFrom640Stretch( &x, &y, &w, &h );
+	trap_R_DrawStretchPic( x, y, w, h, 0, 0, 1, 1, hShader );
 }
 
 void UI_DrawNamedPic(float x, float y, float width, float height, const char *picname){
@@ -1231,14 +1243,21 @@ JUHOX: UI_DrawBackPic
 void UI_DrawBackPic(qboolean drawPic) {
 	float x, y, w, h;
 	if (!drawPic) {
-		UI_FillRect(0, 0, 640, 480, colorBlack);
+		x = 0;
+		y = 0;
+		w = SCREEN_WIDTH;
+		h = SCREEN_HEIGHT;
+		UI_AdjustFrom640Stretch(&x, &y, &w, &h);
+		trap_R_SetColor(colorBlack);
+		trap_R_DrawStretchPic(x, y, w, h, 0, 0, 0, 0, uis.whiteShader);
+		trap_R_SetColor(NULL);
 	}
 	else {
 		x = 0;
 		y = 0;
-		w = 640;
-		h = 480;
-		UI_AdjustFrom640(&x, &y, &w, &h);
+		w = SCREEN_WIDTH;
+		h = SCREEN_HEIGHT;
+		UI_AdjustFrom640Stretch(&x, &y, &w, &h);
 		trap_R_DrawStretchPic(x, y, w, h, 0, 0, 1, 768.0/1024.0, uis.menuBackShader);
 	}
 }
@@ -1257,7 +1276,7 @@ void UI_Refresh( int realtime ){
 	UI_UpdateCvars();
 	if(uis.activemenu){
 		if (uis.activemenu->fullscreen){
-			if(!uis.hideBack){UI_DrawHandlePic( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, uis.menuBackShader);}
+			if(!uis.hideBack){UI_DrawFullscreenPic( uis.menuBackShader );}
 			if(!uis.hideEarth){UI_MenuScene();}
 			if(uis.showFrame){Menu_Frame();}
 			if(uis.showSide){Menu_Side();}

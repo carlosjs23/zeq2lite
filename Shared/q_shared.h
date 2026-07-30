@@ -349,6 +349,23 @@ extern	vec3_t	bytedirs[NUMVERTEXNORMALS];
 #define	SCREEN_WIDTH		640
 #define	SCREEN_HEIGHT		480
 
+// How the 640x480 virtual screen maps onto the real framebuffer. Derived once
+// per video mode by Com_ScreenScale; the engine, cgame and UI each keep their
+// own copy because they are separate modules, but they share this arithmetic so
+// that a HUD element and a console line agree about where the screen edge is.
+typedef struct {
+	float	xScale;		// virtual -> pixels, stretched to fill the width
+	float	yScale;		// virtual -> pixels, stretched to fill the height
+	float	scale;		// virtual -> pixels, 4:3 preserved (the short axis)
+	float	xBias;		// left edge of the 4:3 box, in pixels
+	float	yBias;		// top edge of the 4:3 box, in pixels
+} screenScale_t;
+
+void Com_ScreenScale( screenScale_t *scale, int vidWidth, int vidHeight );
+void Com_ScreenAdjustFrom640( const screenScale_t *scale, qboolean stretch,
+		float *x, float *y, float *w, float *h );
+float Com_ScreenFovX( float fovX, int vidWidth, int vidHeight );
+
 #define TINYCHAR_WIDTH		(SMALLCHAR_WIDTH)
 #define TINYCHAR_HEIGHT		(SMALLCHAR_HEIGHT/2)
 

@@ -360,6 +360,14 @@ static int CG_CalcFov(void ){
 		}
 	}
 
+	// Treat cg_fov as the horizontal fov at 4:3 and widen it for the real
+	// display aspect, so fov_y below lands on the same vertical fov a 4:3
+	// player gets. Without this a 16:9 player keeps the width and loses the
+	// top and bottom of the view.
+	if ( cg_fovAspectAdjust.integer ) {
+		fov_x = Com_ScreenFovX( fov_x, cg.refdef.width, cg.refdef.height );
+	}
+
 	x = cg.refdef.width / tan(fov_x / 360 * M_PI);
 	fov_y = atan2(cg.refdef.height, x);
 	fov_y = fov_y * 360 / M_PI;

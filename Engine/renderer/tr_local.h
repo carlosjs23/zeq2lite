@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../../Shared/qfiles.h"
 #include "../../Shared/qcommon.h"
 #include "tr_public.h"
+#include "tr_vidmodes.h"
 #include "qgl.h"
 #include "iqm.h"
 
@@ -1115,6 +1116,8 @@ extern qboolean  textureFilterAnisotropic;
 extern int       maxAnisotropy;
 extern qboolean  vertexShaders;
 extern float     displayAspect;
+extern int       displayWidth;
+extern int       displayHeight;
 
 
 //

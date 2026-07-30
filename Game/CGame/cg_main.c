@@ -122,6 +122,7 @@ vmCvar_t	cg_tracerLength;
 vmCvar_t	cg_displayObituary;
 vmCvar_t	cg_ignore;
 vmCvar_t	cg_fov;
+vmCvar_t	cg_fovAspectAdjust;
 vmCvar_t	cg_zoomFov;
 vmCvar_t	cg_thirdPerson;
 vmCvar_t	cg_thirdPersonRange;
@@ -205,6 +206,9 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_displayObituary, "cg_displayObituary", "0", CVAR_ARCHIVE },
 	{ &cg_zoomFov, "cg_zoomfov", "22.5", CVAR_ARCHIVE },
 	{ &cg_fov, "cg_fov", "90", CVAR_ARCHIVE },
+	// cg_fov is the horizontal fov at 4:3; widen it to match the display so a
+	// widescreen player sees more at the sides instead of less top and bottom.
+	{ &cg_fovAspectAdjust, "cg_fovAspectAdjust", "1", CVAR_ARCHIVE },
 	{ &cg_viewsize, "cg_viewsize", "100", CVAR_ARCHIVE },
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	{ &cg_gibs, "cg_gibs", "1", CVAR_ARCHIVE  },
@@ -1521,8 +1525,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	// get the rendering configuration from the client system
 	trap_GetGlconfig( &cgs.glconfig );
-	cgs.screenXScale = cgs.glconfig.vidWidth / 640.0;
-	cgs.screenYScale = cgs.glconfig.vidHeight / 480.0;
+	CG_SetupScreenScale();
 
 	// get the gamestate from the client system
 	trap_GetGameState( &cgs.gameState );

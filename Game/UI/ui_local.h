@@ -543,12 +543,13 @@ typedef struct {
 	qhandle_t			cursor;
 	qhandle_t			rb_on;
 	qhandle_t			rb_off;
-	float				scaleX;
-	float				scaleY;
+	screenScale_t		screen;		// derived from glconfig in UI_Init
 	qboolean			demoversion;
 	qboolean			firstdraw;
 } uiStatic_t;
 
+extern void			UI_AdjustFrom640Stretch( float *x, float *y, float *w, float *h );
+extern void			UI_DrawFullscreenPic( qhandle_t hShader );
 extern void			UI_Init( void );
 extern void			UI_Shutdown( void );
 extern void			UI_KeyEvent( int key, int down );

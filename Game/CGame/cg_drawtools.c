@@ -25,27 +25,30 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 /*
 ================
+CG_SetupScreenScale
+
+Derives the virtual-screen mapping from the current glconfig. Kept out of
+CG_Init so that a video mode change - or a test - can re-derive it without
+re-initialising the whole client game.
+================
+*/
+void CG_SetupScreenScale( void ) {
+	Com_ScreenScale( &cgs.screen, cgs.glconfig.vidWidth, cgs.glconfig.vidHeight );
+}
+
+/*
+================
 CG_AdjustFrom640
 
-Adjusted for resolution and screen aspect ratio
+Adjusted for resolution and screen aspect ratio.
+
+stretch fills the framebuffer and is for full-screen artwork and overlays;
+everything else keeps its 4:3 shape inside a centred box, so a HUD icon stays
+square and a glyph stays legible on a widescreen display.
 ================
 */
 void CG_AdjustFrom640(float *x, float *y, float *w, float *h,qboolean stretch) {
-		float offset = 1.33333333333333 + ((cgs.screenXScale/cgs.screenYScale) - 1.0);
-		float width = *w;
-		float height = *h;
-		stretch = qtrue;
-		*x *= cgs.screenXScale;
-		*y *= cgs.screenYScale;
-		*w *= stretch ? cgs.screenXScale : offset;
-		*h *= stretch ? cgs.screenYScale : offset;
-		if(!stretch){
-			//*x -= *x - width;
-			//*y -= height -*h;
-		}
-		//*x = (*x * cgs.screenXScale) - (*w - width);
-		//*y = (*y * cgs.screenYScale) - (*h - height);
-
+	Com_ScreenAdjustFrom640( &cgs.screen, stretch, x, y, w, h );
 }
 /*
 ================
@@ -72,14 +75,14 @@ Coords are virtual 640x480
 */
 void CG_DrawSides(float x, float y, float w, float h, float size) {
 	CG_AdjustFrom640( &x, &y, &w, &h,qtrue);
-	size *= cgs.screenXScale;
+	size *= cgs.screen.xScale;
 	trap_R_DrawStretchPic( x, y, size, h, 0, 0, 0, 0, cgs.media.whiteShader );
 	trap_R_DrawStretchPic( x + w - size, y, size, h, 0, 0, 0, 0, cgs.media.whiteShader );
 }
 
 void CG_DrawTopBottom(float x, float y, float w, float h, float size) {
 	CG_AdjustFrom640( &x, &y, &w, &h,qtrue);
-	size *= cgs.screenYScale;
+	size *= cgs.screen.yScale;
 	trap_R_DrawStretchPic( x, y, w, size, 0, 0, 0, 0, cgs.media.whiteShader );
 	trap_R_DrawStretchPic( x, y + h - size, w, size, 0, 0, 0, 0, cgs.media.whiteShader );
 }
@@ -138,7 +141,7 @@ void CG_DrawChar( int x, int y, int width, int height, int ch ) {
 	ay = y;
 	aw = width;
 	ah = height;
-	CG_AdjustFrom640( &ax, &ay, &aw, &ah, qtrue);
+	CG_AdjustFrom640( &ax, &ay, &aw, &ah, qfalse);
 
 	row = ch>>4;
 	col = ch&15;
@@ -629,15 +632,15 @@ static void UI_DrawBannerString2( int x, int y, const char* str, vec4_t color )
 	// draw the colored text
 	trap_R_SetColor( color );
 	
-	ax = x * cgs.screenXScale + cgs.screenXBias;
-	ay = y * cgs.screenYScale;
+	ax = x * cgs.screen.scale + cgs.screen.xBias;
+	ay = y * cgs.screen.scale + cgs.screen.yBias;
 
 	s = str;
 	while ( *s )
 	{
 		ch = *s & 127;
 		if ( ch == ' ' ) {
-			ax += ((float)PROPB_SPACE_WIDTH + (float)PROPB_GAP_WIDTH)* cgs.screenXScale;
+			ax += ((float)PROPB_SPACE_WIDTH + (float)PROPB_GAP_WIDTH)* cgs.screen.scale;
 		}
 		else if ( ch >= 'A' && ch <= 'Z' ) {
 			ch -= 'A';
@@ -645,10 +648,10 @@ static void UI_DrawBannerString2( int x, int y, const char* str, vec4_t color )
 			frow = (float)propMapB[ch][1] / 256.0f;
 			fwidth = (float)propMapB[ch][2] / 256.0f;
 			fheight = (float)PROPB_HEIGHT / 256.0f;
-			aw = (float)propMapB[ch][2] * cgs.screenXScale;
-			ah = (float)PROPB_HEIGHT * cgs.screenYScale;
+			aw = (float)propMapB[ch][2] * cgs.screen.scale;
+			ah = (float)PROPB_HEIGHT * cgs.screen.scale;
 			trap_R_DrawStretchPic( ax, ay, aw, ah, fcol, frow, fcol+fwidth, frow+fheight, cgs.media.charsetPropB );
-			ax += (aw + (float)PROPB_GAP_WIDTH * cgs.screenXScale);
+			ax += (aw + (float)PROPB_GAP_WIDTH * cgs.screen.scale);
 		}
 		s++;
 	}
@@ -739,28 +742,28 @@ static void UI_DrawProportionalString2( int x, int y, const char* str, vec4_t co
 	// draw the colored text
 	trap_R_SetColor( color );
 	
-	ax = x * cgs.screenXScale + cgs.screenXBias;
-	ay = y * cgs.screenYScale;
+	ax = x * cgs.screen.scale + cgs.screen.xBias;
+	ay = y * cgs.screen.scale + cgs.screen.yBias;
 
 	s = str;
 	while ( *s )
 	{
 		ch = *s & 127;
 		if ( ch == ' ' ) {
-			aw = (float)PROP_SPACE_WIDTH * cgs.screenXScale * sizeScale;
+			aw = (float)PROP_SPACE_WIDTH * cgs.screen.scale * sizeScale;
 		} else if ( propMap[ch][2] != -1 ) {
 			fcol = (float)propMap[ch][0] / 256.0f;
 			frow = (float)propMap[ch][1] / 256.0f;
 			fwidth = (float)propMap[ch][2] / 256.0f;
 			fheight = (float)PROP_HEIGHT / 256.0f;
-			aw = (float)propMap[ch][2] * cgs.screenXScale * sizeScale;
-			ah = (float)PROP_HEIGHT * cgs.screenYScale * sizeScale;
+			aw = (float)propMap[ch][2] * cgs.screen.scale * sizeScale;
+			ah = (float)PROP_HEIGHT * cgs.screen.scale * sizeScale;
 			trap_R_DrawStretchPic( ax, ay, aw, ah, fcol, frow, fcol+fwidth, frow+fheight, charset );
 		} else {
 			aw = 0;
 		}
 
-		ax += (aw + (float)PROP_GAP_WIDTH * cgs.screenXScale * sizeScale);
+		ax += (aw + (float)PROP_GAP_WIDTH * cgs.screen.scale * sizeScale);
 		s++;
 	}
 

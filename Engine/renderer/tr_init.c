@@ -27,6 +27,9 @@ glconfig_t  glConfig;
 qboolean    textureFilterAnisotropic = qfalse;
 int         maxAnisotropy = 0;
 float       displayAspect = 0.0f;
+// The desktop resolution, as reported by the platform layer; 0 when unknown.
+int         displayWidth = 0;
+int         displayHeight = 0;
 qboolean    vertexShaders = qfalse;
 
 glstate_t	glState;
@@ -288,57 +291,17 @@ void GL_CheckErrors( void ) {
 
 /*
 ** R_GetModeInfo
+**
+** The table itself lives in tr_vidmodes.c, which links without renderer state
+** so the mode arithmetic can be unit tested. This wrapper only supplies what
+** that arithmetic cannot know: the r_custom* cvars and the desktop resolution
+** the platform layer reported.
 */
-typedef struct vidmode_s
-{
-	const char *description;
-	int width, height;
-	float pixelAspect;		// pixel width / height
-} vidmode_t;
-
-vidmode_t r_vidModes[] =
-{
-	{ "Mode  0: 320x240",		320,	240,	1 },
-	{ "Mode  1: 400x300",		400,	300,	1 },
-	{ "Mode  2: 512x384",		512,	384,	1 },
-	{ "Mode  3: 640x480",		640,	480,	1 },
-	{ "Mode  4: 800x600",		800,	600,	1 },
-	{ "Mode  5: 960x720",		960,	720,	1 },
-	{ "Mode  6: 1024x768",		1024,	768,	1 },
-	{ "Mode  7: 1152x864",		1152,	864,	1 },
-	{ "Mode  8: 1280x1024",		1280,	1024,	1 },
-	{ "Mode  9: 1600x1200",		1600,	1200,	1 },
-	{ "Mode 10: 2048x1536",		2048,	1536,	1 },
-	{ "Mode 11: 856x480 (wide)",856,	480,	1 }
-};
-static int	s_numVidModes = ARRAY_LEN( r_vidModes );
-
 qboolean R_GetModeInfo( int *width, int *height, float *windowAspect, int mode ) {
-	vidmode_t	*vm;
-	float			pixelAspect;
-
-	if ( mode < -1 ) {
-		return qfalse;
-	}
-	if ( mode >= s_numVidModes ) {
-		return qfalse;
-	}
-
-	if ( mode == -1 ) {
-		*width = r_customwidth->integer;
-		*height = r_customheight->integer;
-		pixelAspect = r_customPixelAspect->value;
-	} else {
-		vm = &r_vidModes[mode];
-
-		*width  = vm->width;
-		*height = vm->height;
-		pixelAspect = vm->pixelAspect;
-	}
-
-	*windowAspect = (float)*width / ( *height * pixelAspect );
-
-	return qtrue;
+	return R_ModeInfo( width, height, windowAspect, mode,
+			r_customwidth->integer, r_customheight->integer,
+			r_customPixelAspect->value,
+			displayWidth, displayHeight );
 }
 
 /*
@@ -349,9 +312,11 @@ static void R_ModeList_f( void )
 	int i;
 
 	ri.Printf( PRINT_ALL, "\n" );
-	for ( i = 0; i < s_numVidModes; i++ )
+	ri.Printf( PRINT_ALL, "Mode -2: use the current desktop resolution\n" );
+	ri.Printf( PRINT_ALL, "Mode -1: r_customwidth x r_customheight\n" );
+	for ( i = 0; i < R_NumVidModes(); i++ )
 	{
-		ri.Printf( PRINT_ALL, "%s\n", r_vidModes[i].description );
+		ri.Printf( PRINT_ALL, "%s\n", R_VidMode( i )->description );
 	}
 	ri.Printf( PRINT_ALL, "\n" );
 }

@@ -1635,3 +1635,133 @@ float Q_acos(float c) {
 	return angle;
 }
 #endif
+
+/*
+=====================================================================
+
+SCREEN SPACE
+
+All 2D drawing happens in a 640x480 virtual space that has to be mapped onto
+whatever the display actually is. Two mappings are needed and the difference is
+the whole of "widescreen support": full-screen artwork should stretch to fill,
+while anything the player reads or aims with - text, HUD, crosshair - has to
+keep its shape and sit inside a centred 4:3 box.
+
+Shared by the engine (cl_scrn.c), cgame (cg_drawtools.c) and the UI (ui_atoms.c),
+which each used to carry their own copy of the arithmetic.
+=====================================================================
+*/
+
+/*
+================
+Com_ScreenScale
+
+Derives both mappings for a framebuffer of vidWidth x vidHeight pixels. On a 4:3
+display the two are identical and the biases are zero, which is why this is
+invisible on the resolutions the game was authored for.
+================
+*/
+void Com_ScreenScale( screenScale_t *scale, int vidWidth, int vidHeight ) {
+	float	w = (float)vidWidth;
+	float	h = (float)vidHeight;
+
+	if ( !scale ) {
+		return;
+	}
+
+	// glConfig is zeroed until the first window is up, and cgame can ask for
+	// the scale in between; a 1:1 fallback keeps every later divide finite
+	// rather than seeding inf into every coordinate on screen.
+	if ( w <= 0.0f || h <= 0.0f ) {
+		w = SCREEN_WIDTH;
+		h = SCREEN_HEIGHT;
+	}
+
+	scale->xScale = w / SCREEN_WIDTH;
+	scale->yScale = h / SCREEN_HEIGHT;
+
+	// The 4:3 box is as large as fits on the short axis. Whatever is left over
+	// on the long axis becomes an equal margin at each end.
+	scale->scale = scale->xScale < scale->yScale ? scale->xScale : scale->yScale;
+	scale->xBias = 0.5f * ( w - SCREEN_WIDTH * scale->scale );
+	scale->yBias = 0.5f * ( h - SCREEN_HEIGHT * scale->scale );
+}
+
+/*
+================
+Com_ScreenAdjustFrom640
+
+Maps a virtual rect to pixels. Any of x/y/w/h may be NULL, since callers that
+only care about one axis pass the rest as NULL.
+================
+*/
+void Com_ScreenAdjustFrom640( const screenScale_t *scale, qboolean stretch,
+		float *x, float *y, float *w, float *h ) {
+	if ( !scale ) {
+		return;
+	}
+
+	if ( stretch ) {
+		if ( x ) {
+			*x *= scale->xScale;
+		}
+		if ( y ) {
+			*y *= scale->yScale;
+		}
+		if ( w ) {
+			*w *= scale->xScale;
+		}
+		if ( h ) {
+			*h *= scale->yScale;
+		}
+		return;
+	}
+
+	// The bias has to be applied to the position as well as the size, or
+	// right- and bottom-aligned elements walk off the edge of the box.
+	if ( x ) {
+		*x = *x * scale->scale + scale->xBias;
+	}
+	if ( y ) {
+		*y = *y * scale->scale + scale->yBias;
+	}
+	if ( w ) {
+		*w *= scale->scale;
+	}
+	if ( h ) {
+		*h *= scale->scale;
+	}
+}
+
+/*
+================
+Com_ScreenFovX
+
+Corrects a horizontal field of view for the display aspect, "Hor+" style:
+cg_fov is taken to mean the horizontal fov at 4:3, so the vertical fov matches
+what a 4:3 player sees and a wider display adds width at the sides.
+
+Deriving fov_y from a fixed fov_x instead - which is what the stock CG_CalcFov
+does - keeps the width and shrinks the height, so a widescreen player sees less
+of the world vertically than a 4:3 one. That is a competitive difference in a
+game about aiming energy attacks at people, not only a cosmetic one.
+================
+*/
+float Com_ScreenFovX( float fovX, int vidWidth, int vidHeight ) {
+	const float	baseAspect = (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT;
+	float		aspect;
+	float		halfTan;
+
+	if ( vidWidth <= 0 || vidHeight <= 0 ) {
+		return fovX;
+	}
+
+	// Guard the tan() below: the projection matrix divides by tan(fov/2), so
+	// neither end of the range may reach a right angle.
+	fovX = Com_Clamp( 1.0f, 179.0f, fovX );
+
+	aspect = (float)vidWidth / (float)vidHeight;
+	halfTan = tan( fovX * 0.5f * ( M_PI / 180.0f ) ) * ( aspect / baseAspect );
+
+	return Com_Clamp( 1.0f, 179.0f, 2.0f * atan( halfTan ) * ( 180.0f / M_PI ) );
+}

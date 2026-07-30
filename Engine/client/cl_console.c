@@ -615,9 +615,9 @@ void Con_DrawSolidConsole( float frac ) {
 	if (lines > cls.glconfig.vidHeight )
 		lines = cls.glconfig.vidHeight;
 
-	// on wide screens, we will center the text
-	con.xadjust = 0;
-	SCR_AdjustFrom640( &con.xadjust, NULL, NULL, NULL );
+	// The backdrop spans the screen, so console lines start at its left edge
+	// rather than inside the centred 4:3 box the rest of the 2D layer uses.
+	con.xadjust = SCR_ConsoleXAdjust();
 
 	// draw the background
 	y = frac * SCREEN_HEIGHT;
@@ -625,14 +625,14 @@ void Con_DrawSolidConsole( float frac ) {
 		y = 0;
 	}
 	else {
-		SCR_DrawPic( 0, 0, SCREEN_WIDTH, y, cls.consoleShader );
+		SCR_DrawPicStretched( 0, 0, SCREEN_WIDTH, y, cls.consoleShader );
 	}
 
 	color[0] = 0.5;
 	color[1] = 0.5;
 	color[2] = 0.5;
 	color[3] = 0.5;
-	SCR_FillRect( 0, y, SCREEN_WIDTH, 2, color );
+	SCR_FillRectStretched( 0, y, SCREEN_WIDTH, 2, color );
 
 /*
 	// draw the version number

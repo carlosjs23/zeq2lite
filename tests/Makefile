@@ -26,12 +26,16 @@ BUILD             := bin
 # Adding a suite: create suites/test_<name>.c, add <name> here, and give it an
 # SRC_<name> line listing the engine translation units it needs. Keep that list
 # minimal - a short list is a sign the unit under test is well isolated.
-SUITES := q_shared cg_music cg_players msg weapgfx png snd
+SUITES := q_shared screen cg_screen vidmodes cg_music cg_players msg weapgfx png snd
 
 SHARED_CORE := $(ROOT)/Shared/q_shared.c $(ROOT)/Shared/q_math.c
 SUPPORT     := support/engine_stubs.c
 
 SRC_q_shared := $(SHARED_CORE) $(SUPPORT)
+SRC_screen   := $(SHARED_CORE) $(SUPPORT)
+SRC_cg_screen := $(ROOT)/Game/CGame/cg_drawtools.c $(SHARED_CORE) $(SUPPORT) \
+                support/cgame_stubs.c support/fake_draw.c
+SRC_vidmodes := $(ROOT)/Engine/renderer/tr_vidmodes.c $(SHARED_CORE) $(SUPPORT)
 SRC_cg_music := $(ROOT)/Game/CGame/cg_music.c $(SHARED_CORE) $(SUPPORT) \
                 support/cgame_stubs.c support/fake_fs.c
 SRC_cg_players := $(ROOT)/Game/CGame/cg_players.c $(SHARED_CORE) $(SUPPORT) \

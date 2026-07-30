@@ -51,37 +51,96 @@ void SCR_DrawNamedPic( float x, float y, float width, float height, const char *
 
 /*
 ================
+SCR_ScreenScale
+
+The engine's copy of the virtual-screen mapping. Derived per call rather than
+cached because cls.glconfig changes under vid_restart and a stale copy would put
+the console and the HUD on different grids.
+================
+*/
+static void SCR_ScreenScale( screenScale_t *scale ) {
+	Com_ScreenScale( scale, cls.glconfig.vidWidth, cls.glconfig.vidHeight );
+}
+
+/*
+================
 SCR_AdjustFrom640
 
-Adjusted for resolution and screen aspect ratio
+Adjusted for resolution and screen aspect ratio: keeps the 4:3 shape and centres
+it, so console text and loading-screen strings are not stretched sideways on a
+widescreen display. Full-screen artwork wants SCR_AdjustFrom640Stretch instead.
 ================
 */
 void SCR_AdjustFrom640( float *x, float *y, float *w, float *h ) {
-	float	xscale;
-	float	yscale;
+	screenScale_t	scale;
 
-#if 0
-		// adjust for wide screens
-		if ( cls.glconfig.vidWidth * 480 > cls.glconfig.vidHeight * 640 ) {
-			*x += 0.5 * ( cls.glconfig.vidWidth - ( cls.glconfig.vidHeight * 640 / 480 ) );
-		}
-#endif
+	SCR_ScreenScale( &scale );
+	Com_ScreenAdjustFrom640( &scale, qfalse, x, y, w, h );
+}
 
-	// scale for screen sizes
-	xscale = cls.glconfig.vidWidth / 640.0;
-	yscale = cls.glconfig.vidHeight / 480.0;
-	if ( x ) {
-		*x *= xscale;
+/*
+================
+SCR_AdjustFrom640Stretch
+
+For anything that has to cover the framebuffer edge to edge: the console
+backdrop, cinematics, fades.
+================
+*/
+void SCR_AdjustFrom640Stretch( float *x, float *y, float *w, float *h ) {
+	screenScale_t	scale;
+
+	SCR_ScreenScale( &scale );
+	Com_ScreenAdjustFrom640( &scale, qtrue, x, y, w, h );
+}
+
+/*
+================
+SCR_ConsoleXAdjust
+
+Virtual-space x offset that cancels the widescreen centring, so console lines
+start at the left edge of the console backdrop (which does span the screen)
+instead of at the left edge of the centred 4:3 box.
+
+Returned in virtual units on purpose: callers add it to virtual coordinates and
+the result goes through SCR_AdjustFrom640 like any other x.
+================
+*/
+float SCR_ConsoleXAdjust( void ) {
+	screenScale_t	scale;
+
+	SCR_ScreenScale( &scale );
+	if ( scale.scale <= 0.0f ) {
+		return 0.0f;
 	}
-	if ( y ) {
-		*y *= yscale;
-	}
-	if ( w ) {
-		*w *= xscale;
-	}
-	if ( h ) {
-		*h *= yscale;
-	}
+	return -scale.xBias / scale.scale;
+}
+
+/*
+================
+SCR_DrawPicStretched
+
+Coordinates are 640*480 virtual values, stretched to fill.
+=================
+*/
+void SCR_DrawPicStretched( float x, float y, float width, float height, qhandle_t hShader ) {
+	SCR_AdjustFrom640Stretch( &x, &y, &width, &height );
+	re.DrawStretchPic( x, y, width, height, 0, 0, 1, 1, hShader );
+}
+
+/*
+================
+SCR_FillRectStretched
+
+Coordinates are 640*480 virtual values, stretched to fill.
+=================
+*/
+void SCR_FillRectStretched( float x, float y, float width, float height, const float *color ) {
+	re.SetColor( color );
+
+	SCR_AdjustFrom640Stretch( &x, &y, &width, &height );
+	re.DrawStretchPic( x, y, width, height, 0, 0, 0, 0, cls.whiteShader );
+
+	re.SetColor( NULL );
 }
 
 /*

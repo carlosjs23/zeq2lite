@@ -66,6 +66,7 @@ static SDL_GLContext SDL_glContext = NULL;
 
 cvar_t *r_allowSoftwareGL; // Don't abort out if a hardware visual can't be obtained
 cvar_t *r_allowResize; // make window resizable
+cvar_t *r_allowHighDPI; // render at the display's real pixel density
 cvar_t *r_centerWindow;
 cvar_t *r_sdlDriver;
 
@@ -369,6 +370,15 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder)
 	if ( r_allowResize->integer )
 		flags |= SDL_WINDOW_RESIZABLE;
 
+	// On a Retina display the window is measured in points and the framebuffer
+	// in pixels. Without this flag macOS hands us a point-sized framebuffer and
+	// upscales it, which is the blurry rendering the port shipped with; with it
+	// we render at the panel's real resolution. The requested r_mode stays the
+	// window size in points either way, so a mode means the same physical size
+	// on any display.
+	if ( r_allowHighDPI->integer )
+		flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+
 	// If a window already exists, stay on whatever display it is on
 	if( SDL_window != NULL )
 	{
@@ -387,6 +397,11 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder)
 		// by assuming (relatively safely) that it is set at or close to
 		// the display's native aspect ratio
 		displayAspect = (float)desktopMode.w / (float)desktopMode.h;
+
+		// Published for r_mode -2 ("use the desktop resolution"), which is
+		// resolved by R_GetModeInfo a few lines below.
+		displayWidth = desktopMode.w;
+		displayHeight = desktopMode.h;
 
 		ri.Printf( PRINT_ALL, "Estimated display aspect: %.3f\n", displayAspect );
 	}
@@ -574,6 +589,12 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder)
 			SDL_window = NULL;
 			continue;
 		}
+
+		// SDL_CreateWindow was given a size in points; the GL viewport needs
+		// pixels. These are the same number except on a HiDPI display, and
+		// asking SDL rather than multiplying by a scale factor keeps this
+		// correct for windowed, fullscreen and mixed-DPI setups alike.
+		SDL_GL_GetDrawableSize( SDL_window, &glConfig.vidWidth, &glConfig.vidHeight );
 
 		if( fullscreen )
 		{
@@ -1006,6 +1027,7 @@ void GLimp_Init( void )
 	r_allowSoftwareGL = ri.Cvar_Get( "r_allowSoftwareGL", "0", CVAR_LATCH );
 	r_sdlDriver = ri.Cvar_Get( "r_sdlDriver", "", CVAR_ROM );
 	r_allowResize = ri.Cvar_Get( "r_allowResize", "0", CVAR_ARCHIVE );
+	r_allowHighDPI = ri.Cvar_Get( "r_allowHighDPI", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_centerWindow = ri.Cvar_Get( "r_centerWindow", "0", CVAR_ARCHIVE );
 
 	if( ri.Cvar_VariableIntegerValue( "com_abnormalExit" ) )
