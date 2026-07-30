@@ -1961,9 +1961,9 @@ qboolean CG_weapGfx_ParseIcon( cg_weapGfxParser_t *parser, cg_weapGfxCategoryInd
 	}
 
 	if ( token->tokenSym == TOKEN_NULL ) {
-		Q_strncpyz( cg_weapGfxBuffer.weaponIcon, "", sizeof(cg_weapGfxBuffer.missileTrailSpiralShader) );
+		Q_strncpyz( cg_weapGfxBuffer.weaponIcon, "", sizeof(cg_weapGfxBuffer.weaponIcon) );
 	} else if ( token->tokenSym == TOKEN_STRING ) {
-		Q_strncpyz( cg_weapGfxBuffer.weaponIcon, token->stringval, sizeof(cg_weapGfxBuffer.missileTrailSpiralShader) );
+		Q_strncpyz( cg_weapGfxBuffer.weaponIcon, token->stringval, sizeof(cg_weapGfxBuffer.weaponIcon) );
 	} else {
 		CG_weapGfx_ErrorHandle( ERROR_STRING_EXPECTED, scanner, token->stringval, NULL );
 		return qfalse;
@@ -2001,9 +2001,9 @@ qboolean CG_weapGfx_ParseDisplayName( cg_weapGfxParser_t *parser, cg_weapGfxCate
 	}
 
 	if ( token->tokenSym == TOKEN_NULL ) {
-		Q_strncpyz( cg_weapGfxBuffer.weaponName, "", sizeof(cg_weapGfxBuffer.missileTrailSpiralShader) );
+		Q_strncpyz( cg_weapGfxBuffer.weaponName, "", sizeof(cg_weapGfxBuffer.weaponName) );
 	} else if ( token->tokenSym == TOKEN_STRING ) {
-		Q_strncpyz( cg_weapGfxBuffer.weaponName, token->stringval, sizeof(cg_weapGfxBuffer.missileTrailSpiralShader) );
+		Q_strncpyz( cg_weapGfxBuffer.weaponName, token->stringval, sizeof(cg_weapGfxBuffer.weaponName) );
 	} else {
 		CG_weapGfx_ErrorHandle( ERROR_STRING_EXPECTED, scanner, token->stringval, NULL );
 		return qfalse;
