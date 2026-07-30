@@ -76,10 +76,17 @@ COM_StripExtension
 void COM_StripExtension( const char *in, char *out, int destsize )
 {
 	const char *dot = strrchr(in, '.'), *slash;
-	if (dot && (!(slash = strrchr(in, '/')) || slash < dot))
-		Q_strncpyz(out, in, (destsize < dot-in+1 ? destsize : dot-in+1));
-	else
-		Q_strncpyz(out, in, destsize);
+	if (in != out) {
+		if (dot && (!(slash = strrchr(in, '/')) || slash < dot))
+			Q_strncpyz(out, in, (destsize < dot-in+1 ? destsize : dot-in+1));
+		else
+			Q_strncpyz(out, in, destsize);
+	} else if (dot && (!(slash = strrchr(in, '/')) || slash < dot)) {
+		int len = (int)(dot - in);
+		if (len < destsize) {
+			out[len] = 0;
+		}
+	}
 }
 
 /*

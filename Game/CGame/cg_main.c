@@ -36,11 +36,11 @@ This is the only way control passes into the module.
 This must be the very first function compiled into the .q3vm file
 ================
 */
-Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8, int arg9, int arg10, int arg11  ) {
+Q_EXPORT intptr_t vmMain( intptr_t command, intptr_t arg0, intptr_t arg1, intptr_t arg2, intptr_t arg3, intptr_t arg4, intptr_t arg5, intptr_t arg6, intptr_t arg7, intptr_t arg8, intptr_t arg9, intptr_t arg10, intptr_t arg11  ) {
 
-	switch ( command ) {
+	switch ( (int)command ) {
 	case CG_INIT:
-		CG_Init( arg0, arg1, arg2 );
+		CG_Init( (int)arg0, (int)arg1, (int)arg2 );
 		return 0;
 	case CG_SHUTDOWN:
 		CG_Shutdown();
@@ -48,23 +48,23 @@ Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, i
 	case CG_CONSOLE_COMMAND:
 		return CG_ConsoleCommand();
 	case CG_DRAW_ACTIVE_FRAME:
-		CG_DrawActiveFrame( arg0, arg1, arg2 );
+		CG_DrawActiveFrame( (int)arg0, (int)arg1, (int)arg2 );
 		return 0;
 	case CG_CROSSHAIR_PLAYER:
 		return CG_CrosshairPlayer();
 	case CG_LAST_ATTACKER:
 		return CG_LastAttacker();
 	case CG_KEY_EVENT:
-		CG_KeyEvent(arg0, arg1);
+		CG_KeyEvent((int)arg0, (int)arg1);
 		return 0;
 	case CG_MOUSE_EVENT:
-		CG_MouseEvent(arg0, arg1);
+		CG_MouseEvent((int)arg0, (int)arg1);
 		return 0;
 	case CG_EVENT_HANDLING:
-		CG_EventHandling(arg0);
+		CG_EventHandling((int)arg0);
 		return 0;
 	default:
-		CG_Error( "vmMain: unknown command %i", command );
+		CG_Error( "vmMain: unknown command %i", (int)command );
 		break;
 	}
 	return -1;
@@ -1314,13 +1314,16 @@ static void CG_RegisterGraphics( void ) {
 
 	CG_LoadingString( cgs.mapname );
 
+	CG_Printf( "CG_RegisterGraphics: A (about to load world map)\n" );
 	trap_R_LoadWorldMap( cgs.mapname );
+	CG_Printf( "CG_RegisterGraphics: B (world map loaded)\n" );
 	CG_LoadingString( "game media" );
 
 	for ( i=0 ; i<11 ; i++) {
 		cgs.media.numberShaders[i] = trap_R_RegisterShader( sb_nums[i] );
 	}
 
+	CG_Printf( "CG_RegisterGraphics: C (shaders registering)\n" );
 	cgs.media.waterBubbleLargeShader = trap_R_RegisterShader( "waterBubbleLarge" );
 	cgs.media.waterBubbleMediumShader = trap_R_RegisterShader( "waterBubbleMedium" );
 	cgs.media.waterBubbleSmallShader = trap_R_RegisterShader( "waterBubbleSmall" );
@@ -1340,6 +1343,8 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.waterRippleModel = trap_R_RegisterModel( "effects/water/waterRipple.md3" );
 	cgs.media.waterRippleSingleSkin = trap_R_RegisterSkin( "effects/water/waterRippleSingle.skin" );
 	cgs.media.waterRippleSingleModel = trap_R_RegisterModel( "effects/water/waterRippleSingle.md3" );
+
+	CG_Printf( "CG_RegisterGraphics: D (water media registered)\n" );
 	cgs.media.meleeSpeedEffectShader = trap_R_RegisterShader( "skills/energyBlast" );
 	cgs.media.meleePowerEffectShader = trap_R_RegisterShader( "shockwave" );
 	cgs.media.teleportEffectShader = trap_R_RegisterShader( "teleportEffect" );
@@ -1496,6 +1501,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	cgs.processedSnapshotNum = serverMessageNum;
 	cgs.serverCommandSequence = serverCommandSequence;
 
+	CG_Printf( "CG_Init: step 1\n" );
 	// load a few needed things before we do any screen updates
 	cgs.media.charsetShader		= trap_R_RegisterShader( "interface/fonts/font0.png" );
 	cgs.media.whiteShader		= trap_R_RegisterShader( "white" );
@@ -1521,9 +1527,11 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	// get the gamestate from the client system
 	trap_GetGameState( &cgs.gameState );
 
+	CG_Printf( "CG_Init: step 2 (gamestate acquired)\n" );
+
 	// check version
 	s = CG_ConfigString( CS_GAME_VERSION );
-	if ( strcmp( s, GAME_VERSION ) ) {
+	if ( s[0] && strcmp( s, GAME_VERSION ) ) {
 		CG_Error( "Client/Server game mismatch: %s/%s", GAME_VERSION, s );
 	}
 
@@ -1532,23 +1540,33 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_ParseServerinfo();
 
+	CG_Printf( "CG_Init: step 3 (serverinfo parsed, map=%s)\n", cgs.mapname );
+
 	// load the new map
 	CG_LoadingString( "collision map" );
 
 	trap_CM_LoadMap( cgs.mapname );
 	cg.loading = qtrue;		// force players to load instead of defer
 
+	CG_Printf( "CG_Init: step 4 (map loaded)\n" );
+
 	CG_LoadingString( "sounds" );
 
 	CG_RegisterSounds();
+
+	CG_Printf( "CG_Init: step 5 (sounds registered)\n" );
 
 	CG_LoadingString( "graphics" );
 
 	CG_RegisterGraphics();
 
+	CG_Printf( "CG_Init: step 6 (graphics registered)\n" );
+
 	CG_LoadingString( "clients" );
 
 	CG_RegisterClients();		// if low on memory, some clients will be deferred
+
+	CG_Printf( "CG_Init: step 7 (clients registered)\n" );
 
 
 	cg.loading = qfalse;	// future players will be deferred

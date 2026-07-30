@@ -162,6 +162,9 @@ qboolean CG_ParseAnimationFile( const char *filename, clientInfo_t *ci, qboolean
 		} else if ( !Q_stricmp( token, "overrideHead" ) ) {
 			ci->overrideHead = qtrue;
 			continue;
+		} else if ( !Q_stricmp( token, "sex" ) ) {
+			token = COM_Parse( &text_p );	// skip the value (m/f/n)
+			continue;
 		}
 		// if it is a number, start parsing animations
 		if ( token[0] >= '0' && token[0] <= '9' ) {
@@ -445,7 +448,7 @@ static void CG_LoadClientInfo( clientInfo_t *ci ) {
 		strcpy(ci->skinName,"default");
 		strcpy(ci->headSkinName,"default");
 		if ( cg_buildScript.integer ) {
-			CG_Error( "CG_RegisterClientModelname( %s, %s, %s, %s %s ) failed", ci, ci->modelName, ci->skinName, ci->headModelName, ci->headSkinName,teamname);
+			CG_Error( "CG_RegisterClientModelname( %s, %s, %s, %s, %s ) failed", ci->modelName, ci->skinName, ci->headModelName, ci->headSkinName, teamname);
 		}
 		if (!CG_RegisterClientModelname(ci,DEFAULT_MODEL,"default",DEFAULT_MODEL,"default",teamname) ) {
 			CG_Error("DEFAULT_MODEL (%s) failed to register",DEFAULT_MODEL);

@@ -420,7 +420,7 @@ extern	vec3_t	axisDefault[3];
 
 int Q_isnan(float x);
 
-#if idx64
+#if idx64 && (defined(__x86_64__) || defined(_M_X64))
   extern long qftolsse(float f);
   extern int qvmftolsse(void);
   extern void qsnapvectorsse(vec3_t vec);

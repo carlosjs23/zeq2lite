@@ -3118,10 +3118,19 @@ typedef ptrdiff_t GLintptrARB;
 typedef ptrdiff_t GLsizeiptrARB;
 #endif
 
+#if defined(__APPLE__) || defined(MACOS_X)
+#ifndef GLhandleARB
+typedef void *GLhandleARB;
+#endif
+#ifndef GLcharARB
+typedef char GLcharARB;
+#endif
+#else
 #ifndef GL_ARB_shader_objects
 /* GL types for handling shader object handles and program/shader text */
 typedef char GLcharARB;		/* native character */
 typedef unsigned int GLhandleARB;	/* shader object handle */
+#endif
 #endif
 
 /* GL types for "half" precision (s10e5) float data in host memory */

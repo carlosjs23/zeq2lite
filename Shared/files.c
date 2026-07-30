@@ -1394,6 +1394,7 @@ vmInterpret_t FS_FindVM(void **startSearch, char *found, int foundlen, const cha
 			if(enableDll)
 			{
 				netpath = FS_BuildOSPath(dir->path, dir->gamedir, dllName);
+				Com_Printf("FS_FindVM testing dll: %s (exists=%d)\n", netpath, FS_FileInPathExists(netpath));
 
 				if(FS_FileInPathExists(netpath))
 				{

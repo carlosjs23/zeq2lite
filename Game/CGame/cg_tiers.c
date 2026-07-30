@@ -30,7 +30,9 @@ qboolean CG_RegisterClientModelnameWithTiers(clientInfo_t *ci, const char *model
 	Com_sprintf(filename,sizeof(filename),"players/%s/animCam.cfg",modelName);
 	if(!CG_ParseAnimationFile(filename,ci,qfalse)){
 		Com_sprintf(filename,sizeof(filename),"players/animCam.cfg");
-		if(!CG_ParseAnimationFile(filename,ci,qfalse)){return qfalse;}
+		if(!CG_ParseAnimationFile(filename,ci,qfalse)){
+			Com_Printf("WARNING: No animCam.cfg found for %s, using defaults\n", modelName);
+		}
 	}
 	for(i=0;i<8;++i){
 		// ===================================

@@ -195,6 +195,7 @@ Single exit point (regular exit or in case of error)
 */
 static __attribute__ ((noreturn)) void Sys_Exit( int exitCode )
 {
+	fprintf( stderr, "\n=== Sys_Exit( %d ) called ===\n", exitCode ); fflush( stderr );
 	CON_Shutdown( );
 
 #ifndef DEDICATED
@@ -232,11 +233,11 @@ cpuFeatures_t Sys_GetProcessorFeatures( void )
 	cpuFeatures_t features = 0;
 
 #ifndef DEDICATED
+	// SDL2 dropped SDL_HasMMXExt() and SDL_Has3DNowExt(); both were only ever
+	// true on pre-2004 AMD parts, so CF_MMX_EXT / CF_3DNOW_EXT are never set.
 	if( SDL_HasRDTSC( ) )    features |= CF_RDTSC;
 	if( SDL_HasMMX( ) )      features |= CF_MMX;
-	if( SDL_HasMMXExt( ) )   features |= CF_MMX_EXT;
 	if( SDL_Has3DNow( ) )    features |= CF_3DNOW;
-	if( SDL_Has3DNowExt( ) ) features |= CF_3DNOW_EXT;
 	if( SDL_HasSSE( ) )      features |= CF_SSE;
 	if( SDL_HasSSE2( ) )     features |= CF_SSE2;
 	if( SDL_HasAltiVec( ) )  features |= CF_ALTIVEC;
@@ -467,7 +468,7 @@ Used to load a development dll instead of a virtual machine
 =================
 */
 void *Sys_LoadGameDll(const char *name,
-	intptr_t (QDECL **entryPoint)(int, ...),
+	intptr_t (QDECL **entryPoint)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t),
 	intptr_t (*systemcalls)(intptr_t, ...))
 {
 	void *libHandle;
@@ -477,6 +478,11 @@ void *Sys_LoadGameDll(const char *name,
 
 	Com_Printf( "Loading DLL file: %s\n", name);
 	libHandle = Sys_LoadLibrary(name);
+	if (!libHandle && name[0] != '/' && (name[0] != '.' || name[1] != '/')) {
+		char altPath[MAX_OSPATH];
+		Com_sprintf(altPath, sizeof(altPath), "./%s", name);
+		libHandle = Sys_LoadLibrary(altPath);
+	}
 
 	if(!libHandle)
 	{
@@ -485,7 +491,14 @@ void *Sys_LoadGameDll(const char *name,
 	}
 
 	dllEntry = Sys_LoadFunction( libHandle, "dllEntry" );
+	if (!dllEntry) {
+		dllEntry = Sys_LoadFunction( libHandle, "_dllEntry" );
+	}
+
 	*entryPoint = Sys_LoadFunction( libHandle, "vmMain" );
+	if (!*entryPoint) {
+		*entryPoint = Sys_LoadFunction( libHandle, "_vmMain" );
+	}
 
 	if ( !*entryPoint || !dllEntry )
 	{
@@ -541,6 +554,8 @@ void Sys_SigHandler( int signal )
 {
 	static qboolean signalcaught = qfalse;
 
+	fprintf( stderr, "\n=== Sys_SigHandler: caught signal %d ===\n", signal ); fflush( stderr );
+
 	if( signalcaught )
 	{
 		fprintf( stderr, "DOUBLE SIGNAL FAULT: Received signal %d, exiting...\n",
@@ -581,8 +596,11 @@ int main( int argc, char **argv )
 #		error A more recent version of SDL is required
 #	endif
 
-	// Run time
-	const SDL_version *ver = SDL_Linked_Version( );
+	// Run time -- SDL_Linked_Version() was replaced by SDL_GetVersion()
+	SDL_version sdlVersion;
+	const SDL_version *ver = &sdlVersion;
+
+	SDL_GetVersion( &sdlVersion );
 
 #define MINSDL_VERSION \
 	XSTRING(MINSDL_MAJOR) "." \
@@ -629,11 +647,20 @@ int main( int argc, char **argv )
 
 	CON_Init( );
 
-	signal( SIGILL, Sys_SigHandler );
-	signal( SIGFPE, Sys_SigHandler );
-	signal( SIGSEGV, Sys_SigHandler );
-	signal( SIGTERM, Sys_SigHandler );
-	signal( SIGINT, Sys_SigHandler );
+	{
+		struct sigaction sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = Sys_SigHandler;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0;
+		sigaction( SIGILL, &sa, NULL );
+		sigaction( SIGFPE, &sa, NULL );
+		sigaction( SIGSEGV, &sa, NULL );
+		sigaction( SIGTERM, &sa, NULL );
+		sigaction( SIGINT, &sa, NULL );
+		sigaction( SIGABRT, &sa, NULL );
+		sigaction( SIGBUS, &sa, NULL );
+	}
 
 	while( 1 )
 	{

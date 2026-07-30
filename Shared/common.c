@@ -38,8 +38,8 @@ int demo_protocols[] =
 
 #define MIN_DEDICATED_COMHUNKMEGS 1
 #define MIN_COMHUNKMEGS		256
-#define DEF_COMHUNKMEGS		512
-#define DEF_COMZONEMEGS		24
+#define DEF_COMHUNKMEGS		1024
+#define DEF_COMZONEMEGS		64
 #define DEF_COMHUNKMEGS_S	XSTRING(DEF_COMHUNKMEGS)
 #define DEF_COMZONEMEGS_S	XSTRING(DEF_COMZONEMEGS)
 
@@ -289,6 +289,9 @@ void QDECL Com_Error( int code, const char *fmt, ... ) {
 	va_start (argptr,fmt);
 	Q_vsnprintf (com_errorMessage, sizeof(com_errorMessage),fmt,argptr);
 	va_end (argptr);
+
+	fprintf( stderr, "\n========================================\nCom_Error(code=%d): %s\n========================================\n", code, com_errorMessage );
+	fflush( stderr );
 
 	if (code != ERR_DISCONNECT)
 		Cvar_Set("com_errorMessage", com_errorMessage);
@@ -2445,7 +2448,7 @@ Find out whether we have SSE support for Q_ftol function
 =================
 */
 
-#if id386 || idx64
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
 
 static void Com_DetectSSE(void)
 {

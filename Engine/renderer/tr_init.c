@@ -1095,7 +1095,7 @@ void R_Register( void )
 	r_ambientScale = ri.Cvar_Get( "r_ambientScale", "0.6", CVAR_ARCHIVE );
 	r_directedScale = ri.Cvar_Get( "r_directedScale", "1", CVAR_ARCHIVE );
 	// <-- RiO_MotionBlur
-	r_motionBlur = ri.Cvar_Get ("r_motionBlur", "1", CVAR_ARCHIVE);
+	r_motionBlur = ri.Cvar_Get ("r_motionBlur", "0", CVAR_ARCHIVE);
 	// -->
 
 	r_anaglyphMode = ri.Cvar_Get("r_anaglyphMode", "0", CVAR_ARCHIVE);

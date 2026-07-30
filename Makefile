@@ -220,14 +220,23 @@ ifneq ($(BUILD_CLIENT),0)
     CURL_LIBS=$(shell pkg-config --silence-errors --libs libcurl)
     OPENAL_CFLAGS=$(shell pkg-config --silence-errors --cflags openal)
     OPENAL_LIBS=$(shell pkg-config --silence-errors --libs openal)
-    SDL_CFLAGS=$(shell pkg-config --silence-errors --cflags sdl|sed 's/-Dmain=SDL_main//')
-    SDL_LIBS=$(shell pkg-config --silence-errors --libs sdl)
+    # Engine/sdl/*.c are SDL2 sources now, so query sdl2 rather than the SDL 1.2
+    # 'sdl' module.  Beware: on systems where homebrew-style sdl2-compat is
+    # installed, pkg-config's sdl2 can resolve to that shim, which reaches SDL3
+    # by dlopen and breaks AddressSanitizer -- check the prefix it hands back.
+    #
+    # NOTE: only the darwin-arm branch below has actually been ported and tested.
+    # The other platforms still add the bundled SDL 1.2 headers in
+    # Engine/SDL12/include to their include path (search USE_LOCAL_HEADERS), which
+    # will shadow SDL2 and needs the same treatment before they build again.
+    SDL_CFLAGS=$(shell pkg-config --silence-errors --cflags sdl2|sed 's/-Dmain=SDL_main//')
+    SDL_LIBS=$(shell pkg-config --silence-errors --libs sdl2)
   endif
-  # Use sdl-config if all else fails
+  # Use sdl2-config if all else fails
   ifeq ($(SDL_CFLAGS),)
-    ifneq ($(call bin_path, sdl-config),)
-      SDL_CFLAGS=$(shell sdl-config --cflags)
-      SDL_LIBS=$(shell sdl-config --libs)
+    ifneq ($(call bin_path, sdl2-config),)
+      SDL_CFLAGS=$(shell sdl2-config --cflags)
+      SDL_LIBS=$(shell sdl2-config --libs)
     endif
   endif
 endif
@@ -369,7 +378,11 @@ else # ifeq Linux
 #############################################################################
 
 ifeq ($(PLATFORM),darwin)
-  HAVE_VM_COMPILED=true
+  ifneq ($(filter $(ARCH),i386 x86_64 ppc ppc64),)
+    HAVE_VM_COMPILED=true
+  else
+    HAVE_VM_COMPILED=false
+  endif
   LIBS = -framework Cocoa
   CLIENT_LIBS=
   RENDERER_LIBS=
@@ -409,22 +422,53 @@ ifeq ($(PLATFORM),darwin)
   endif
 
   ifeq ($(USE_CODEC_VORBIS),1)
-    CLIENT_LIBS += -lvorbisfile -lvorbis -logg
+    CLIENT_LIBS += -L/opt/homebrew/lib -lvorbisfile -lvorbis -logg
   endif
 
   BASE_CFLAGS += -D_THREAD_SAFE=1
 
-  ifeq ($(USE_LOCAL_HEADERS),1)
-    BASE_CFLAGS += -I$(SDLHDIR)/include
+  ifneq ($(filter $(ARCH),arm arm64 aarch64),)
+    # arm64 builds against real SDL2, so the bundled SDL 1.2 headers must stay
+    # off the include path entirely -- a stale SDL12/include/SDL.h earlier in
+    # the -I list silently shadows SDL2 and produces baffling errors.
+    #
+    # It has to be *real* SDL2, not homebrew's sdl2-compat.  /opt/homebrew/opt/sdl2
+    # is a symlink to the sdl2-compat keg, which reaches SDL3 through dlopen;
+    # that dlopen chain is exactly what stops AddressSanitizer from ever
+    # starting the engine.  Point at the real sdl2 keg by its versioned path.
+    SDL2_PREFIX ?= /opt/homebrew/Cellar/sdl2/2.32.10
+    BASE_CFLAGS += -I$(SDL2_PREFIX)/include/SDL2
+    # The real keg's own LC_ID_DYLIB still names the /opt/homebrew/opt/sdl2
+    # symlink, so a plain -lSDL2 link resolves against real SDL2 but *loads*
+    # sdl2-compat at runtime.  Rewrite the load command after every link, and
+    # reserve mach-o header room for the longer replacement path.
+    # Named by absolute path rather than -L/-lSDL2 on purpose: CLIENT_LIBS also
+    # carries -L/opt/homebrew/lib for vorbis, and whichever -L comes first wins,
+    # so -lSDL2 would quietly resolve to the sdl2-compat shim in /opt/homebrew/lib.
+    SDL2_DYLIB = $(SDL2_PREFIX)/lib/libSDL2-2.0.0.dylib
+    SDL2_LIBS = $(SDL2_DYLIB) -Wl,-headerpad_max_install_names
+    # ...then verify, because getting this wrong is silent: the engine links and
+    # runs, just against a shim that breaks AddressSanitizer.
+    SDL_INSTALL_NAME_FIX = $(Q)install_name_tool -change \
+      /opt/homebrew/opt/sdl2/lib/libSDL2-2.0.0.dylib $(SDL2_DYLIB) $@ && \
+      if otool -L $@ | grep -qE 'sdl2-compat|sdl12-compat|libSDL3|libSDL-1'; then \
+        echo "ERROR: $@ links an SDL shim instead of real SDL2:" >&2; \
+        otool -L $@ | grep -i sdl >&2; exit 1; \
+      fi
+    CLIENT_LIBS += -framework IOKit $(SDL2_LIBS)
+    RENDERER_LIBS += -framework OpenGL $(SDL2_LIBS)
+    LIBSDLMAIN=
+    LIBSDLMAINSRC=
+  else
+    ifeq ($(USE_LOCAL_HEADERS),1)
+      BASE_CFLAGS += -I$(SDLHDIR)/include
+    endif
+    LIBSDLMAIN=$(B)/libSDLmain.a
+    LIBSDLMAINSRC=$(LIBSDIR)/macosx/libSDLmain.a
+    CLIENT_LIBS += -framework IOKit \
+      $(LIBSDIR)/macosx/libSDL-1.2.0.dylib
+    RENDERER_LIBS += -framework OpenGL $(LIBSDIR)/macosx/libSDL-1.2.0.dylib
   endif
-
-  # We copy sdlmain before ranlib'ing it so that subversion doesn't think
-  #  the file has been modified by each build.
-  LIBSDLMAIN=$(B)/libSDLmain.a
-  LIBSDLMAINSRC=$(LIBSDIR)/macosx/libSDLmain.a
-  CLIENT_LIBS += -framework IOKit \
-    $(LIBSDIR)/macosx/libSDL-1.2.0.dylib
-  RENDERER_LIBS += -framework OpenGL $(LIBSDIR)/macosx/libSDL-1.2.0.dylib
 
   OPTIMIZEVM += -falign-loops=16
   OPTIMIZE = $(OPTIMIZEVM) -ffast-math
@@ -865,7 +909,7 @@ ifeq ($(USE_CURL),1)
 endif
 
 ifeq ($(USE_CODEC_VORBIS),1)
-  CLIENT_CFLAGS += -DUSE_CODEC_VORBIS
+  CLIENT_CFLAGS += -DUSE_CODEC_VORBIS -IEngine/libvorbis/include -IEngine/libogg/include
 endif
 
 ifeq ($(USE_RENDERER_DLOPEN),1)
@@ -936,6 +980,12 @@ Q=
 else
 echo_cmd=@echo
 Q=@
+endif
+
+# Post-link fixup for anything that links SDL.  Only darwin-arm needs it (see
+# the SDL2_PREFIX comment in the darwin section); everywhere else it is a no-op.
+ifeq ($(strip $(SDL_INSTALL_NAME_FIX)),)
+  SDL_INSTALL_NAME_FIX = @:
 endif
 
 define DO_CC
@@ -1557,6 +1607,8 @@ ifeq ($(HAVE_VM_COMPILED),true)
   ifeq ($(ARCH),sparc)
     Q3OBJ += $(B)/client/vm_sparc.o
   endif
+else
+  Q3OBJ += $(B)/client/vm_none.o
 endif
 
 ifeq ($(PLATFORM),mingw32)
@@ -1590,28 +1642,33 @@ $(B)/$(CLIENTBIN)$(FULLBINEXT): $(Q3OBJ) $(LIBSDLMAIN)
 	$(Q)$(CC) $(CLIENT_CFLAGS) $(CFLAGS) $(CLIENT_LDFLAGS) $(LDFLAGS) \
 		-o $@ $(Q3OBJ) \
 		$(LIBSDLMAIN) $(CLIENT_LIBS) $(LIBS)
+	$(SDL_INSTALL_NAME_FIX)
 
 $(B)/renderer_opengl1_$(SHLIBNAME): $(Q3ROBJ) $(Q3POBJ)
 	$(echo_cmd) "LD $@"
 	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3ROBJ) $(Q3POBJ) \
 		$(THREAD_LIBS) $(LIBSDLMAIN) $(RENDERER_LIBS) $(LIBS)
+	$(SDL_INSTALL_NAME_FIX)
 
 $(B)/renderer_opengl1_smp_$(SHLIBNAME): $(Q3ROBJ) $(Q3POBJ_SMP)
 	$(echo_cmd) "LD $@"
 	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3ROBJ) $(Q3POBJ_SMP) \
 		$(THREAD_LIBS) $(LIBSDLMAIN) $(RENDERER_LIBS) $(LIBS)
+	$(SDL_INSTALL_NAME_FIX)
 else
 $(B)/$(CLIENTBIN)$(FULLBINEXT): $(Q3OBJ) $(Q3ROBJ) $(Q3POBJ) $(LIBSDLMAIN)
 	$(echo_cmd) "LD $@"
 	$(Q)$(CC) $(CLIENT_CFLAGS) $(CFLAGS) $(CLIENT_LDFLAGS) $(LDFLAGS) \
 		-o $@ $(Q3OBJ) $(Q3ROBJ) $(Q3POBJ) \
 		$(LIBSDLMAIN) $(CLIENT_LIBS) $(RENDERER_LIBS) $(LIBS)
+	$(SDL_INSTALL_NAME_FIX)
 
 $(B)/$(CLIENTBIN)-smp$(FULLBINEXT): $(Q3OBJ) $(Q3ROBJ) $(Q3POBJ_SMP) $(LIBSDLMAIN)
 	$(echo_cmd) "LD $@"
 	$(Q)$(CC) $(CLIENT_CFLAGS) $(CFLAGS) $(CLIENT_LDFLAGS) $(LDFLAGS) $(THREAD_LDFLAGS) \
 		-o $@ $(Q3OBJ) $(Q3ROBJ) $(Q3POBJ_SMP) \
 		$(THREAD_LIBS) $(LIBSDLMAIN) $(CLIENT_LIBS) $(RENDERER_LIBS) $(LIBS)
+	$(SDL_INSTALL_NAME_FIX)
 endif
 
 ifneq ($(strip $(LIBSDLMAIN)),)
@@ -1754,6 +1811,8 @@ ifeq ($(HAVE_VM_COMPILED),true)
   ifeq ($(ARCH),sparc)
     Q3DOBJ += $(B)/ded/vm_sparc.o
   endif
+else
+  Q3DOBJ += $(B)/ded/vm_none.o
 endif
 
 ifeq ($(PLATFORM),mingw32)
