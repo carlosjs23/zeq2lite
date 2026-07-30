@@ -2314,6 +2314,7 @@ test-clean:
 
 lint:
 	@python3 tests/lint/check_strncpyz_field_sizes.py
+	@python3 tests/lint/check_self_aliasing_copies.py
 
 .PHONY: all clean clean2 clean-debug clean-release install copyfiles \
 	debug default dist distclean installer makedirs \

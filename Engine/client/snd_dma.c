@@ -1444,9 +1444,15 @@ void S_UpdateBackgroundTrack( void ) {
 			// loop
 			if(s_backgroundLoop[0])
 			{
+				// Restart through a copy: S_Base_StartBackgroundTrack copies its
+				// loop argument into s_backgroundLoop, and handing it its own
+				// buffer makes that a strncpy onto itself - undefined, and a
+				// fortified strncpy traps on the overlap outright.
+				char loopTrack[MAX_QPATH];
+				Q_strncpyz( loopTrack, s_backgroundLoop, sizeof( loopTrack ) );
 				S_CodecCloseStream(s_backgroundStream);
 				s_backgroundStream = NULL;
-				S_Base_StartBackgroundTrack( s_backgroundLoop, s_backgroundLoop );
+				S_Base_StartBackgroundTrack( loopTrack, loopTrack );
 				if(!s_backgroundStream)
 					return;
 			}
