@@ -820,7 +820,7 @@ void PM_CheckPowerLevel(void){
 			pm->ps->eFlags |= EF_AURA;
 			timers[tmPowerRaise] += pml.msec;
 			while(timers[tmPowerRaise] >= 25){
-				if(!pm->ps->options & canBreakLimit){break;}
+				if(!(pm->ps->options & canBreakLimit)){break;}
 				timers[tmPowerRaise] -= 25;
 				raise = powerLevel[plMaximum] * 0.009;
 				if(powerLevel[plCurrent] > powerLevel[plFatigue]){raise *= 0.6;}
