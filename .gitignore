@@ -1,0 +1,17 @@
+# Build output
+/Build/
+/tests/bin/
+.sanitize-build.log
+
+# Game data. The ~324MB asset set ships separately from the source; a populated
+# Build/<config>/ZEQ2/ is expected locally but must never be committed.
+/Base/
+
+# Local build configuration (documented in the Makefile as intentionally
+# untracked so it can differ per machine).
+Makefile.local
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
