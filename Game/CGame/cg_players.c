@@ -2086,6 +2086,13 @@ void CG_Player( centity_t *cent ) {
 	memcpy( &(cent->pe.headRef ), &head , sizeof(refEntity_t));
 	memcpy( &(cent->pe.torsoRef), &torso, sizeof(refEntity_t));
 	memcpy( &(cent->pe.legsRef ), &legs , sizeof(refEntity_t));
+	// Only now is the pose complete. Every return above this point leaves the
+	// refEntities holding an earlier frame's values, so the stamp goes here
+	// rather than on entry - it is what lets a reader outside CG_Player tell a
+	// current pose from a leftover one.
+	//
+	// Before the copy below, so the shadow the tag lookups read carries it too.
+	cent->pe.poseFrame = cg.clientFrame;
 	memcpy( &playerInfoDuplicate[cent->currentState.number], &cent->pe, sizeof(playerEntity_t));
 	if(onBodyQue){return;}
 	CG_Camera(cent);

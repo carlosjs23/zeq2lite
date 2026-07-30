@@ -121,6 +121,70 @@ Test(cg_players, player_tag_lookup_reads_its_own_pose) {
 	             "a living player must read back its own head model");
 }
 
+/*
+CG_Player returns early in several cases - a blinking player, one mid-zanzoken,
+or one whose legs, torso or head model is missing - and every one of those
+returns happens *before* it writes legsRef/torsoRef/headRef. Whatever those held
+from a previous frame survives.
+
+That matters to anything reading the pose from outside CG_Player. The aura sizes
+itself from those refEntities' model handles and animation frames, so a stale
+pose means it is measuring a player who was not drawn this frame, and a
+never-drawn one means reading handle 0.
+
+pe.poseFrame records the frame the pose was actually built in, so a reader can
+tell. These tests pin that it is set on a completed render and left alone
+otherwise.
+*/
+Test(cg_players, a_completed_render_marks_the_pose_current) {
+	centity_t	player;
+
+	setup();
+	cg.clientFrame = 42;
+	seed_entity(&player, TEST_CLIENT, TIER_LIVE);
+
+	CG_Player(&player);
+
+	cr_assert_eq(player.pe.poseFrame, 42,
+	             "a player that rendered should have its pose stamped with the "
+	             "current frame, got %d", player.pe.poseFrame);
+}
+
+Test(cg_players, a_blinking_player_leaves_its_pose_stale) {
+	centity_t	player;
+
+	setup();
+	cg.clientFrame = 42;
+	seed_entity(&player, TEST_CLIENT, TIER_LIVE);
+
+	/* Blinking makes CG_Player return long before it builds any refEntity. */
+	player.currentState.playerBitFlags |= isBlinking;
+
+	CG_Player(&player);
+
+	cr_assert_neq(player.pe.poseFrame, 42,
+	              "a player that never rendered must not claim a current pose - "
+	              "its refEntities still hold whatever the last frame left");
+}
+
+Test(cg_players, a_player_missing_its_head_model_leaves_its_pose_stale) {
+	centity_t	player;
+
+	setup();
+	cg.clientFrame = 42;
+	seed_entity(&player, TEST_CLIENT, TIER_LIVE);
+
+	/* CG_Player returns at the missing head model, after positioning legs and
+	   torso but before storing any of them. A reader that trusted legsRef here
+	   would get a half-built pose from an earlier frame. */
+	cgs.clientinfo[TEST_CLIENT].modelDamageState[TIER_LIVE][0][FULL_HEALTH_SLOT] = 0;
+
+	CG_Player(&player);
+
+	cr_assert_neq(player.pe.poseFrame, 42,
+	              "an incomplete render must not be stamped as current");
+}
+
 Test(cg_players, corpse_tag_lookup_reads_its_own_pose_not_the_living_player) {
 	centity_t		player, corpse;
 	orientation_t	tagOrient;

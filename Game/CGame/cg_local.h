@@ -159,6 +159,13 @@ typedef struct {
 	// needed to obtain tag positions after player entity has been processed.
 	// For linking beam attacks, particle systems, etc.
 	refEntity_t		legsRef, torsoRef, headRef, cameraRef;
+	// cg.clientFrame in which the refEntities above were last built. CG_Player
+	// bails out early in several cases - the player is blinking, mid-zanzoken,
+	// or one of its three models is missing - and returns before writing them,
+	// leaving whatever the previous frame left behind. Anything reading this
+	// pose from outside CG_Player therefore has to know whether it is current;
+	// comparing against cg.clientFrame is how.
+	int				poseFrame;
 } playerEntity_t;
 
 //=================================================
