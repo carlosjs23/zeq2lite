@@ -1,8 +1,9 @@
 #define MUSICTYPES 10
+#define MUSICTRACKS 32
 typedef struct{
-	char *playlist[MUSICTYPES][32];
-	int trackLength[MUSICTYPES][32];
-	int hasPlayed[MUSICTYPES][32];
+	char *playlist[MUSICTYPES][MUSICTRACKS];
+	int trackLength[MUSICTYPES][MUSICTRACKS];
+	int hasPlayed[MUSICTYPES][MUSICTRACKS];
 	qboolean random;
 	qboolean started;
 	qboolean fading;
@@ -28,7 +29,7 @@ typedef enum {
 	transform
 }trackTypes;
 void CG_CheckMusic(void);
-int CG_GetMilliseconds(char*);
+int CG_GetMilliseconds(const char*);
 void CG_ParsePlaylist(void);
 void CG_StartMusic(void);
 void CG_FadeNext(void);
