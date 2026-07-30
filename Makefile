@@ -2270,8 +2270,30 @@ ifneq ($(B),)
   -include $(OBJ_D_FILES) $(TOOLSOBJ_D_FILES)
 endif
 
+#############################################################################
+# UNIT TESTS
+#############################################################################
+
+# Criterion-based unit tests live in tests/ with their own Makefile, so they
+# stay entirely out of the release build. See tests/README.md.
+test:
+	@$(MAKE) --no-print-directory -C tests
+
+test-coverage:
+	@$(MAKE) --no-print-directory -C tests coverage
+
+test-report:
+	@$(MAKE) --no-print-directory -C tests report
+
+test-clean:
+	@$(MAKE) --no-print-directory -C tests clean
+
+lint:
+	@python3 tests/lint/check_strncpyz_field_sizes.py
+
 .PHONY: all clean clean2 clean-debug clean-release install copyfiles \
 	debug default dist distclean installer makedirs \
 	release targets \
+	test test-coverage test-report test-clean lint \
 	toolsclean toolsclean2 toolsclean-debug toolsclean-release \
 	$(OBJ_D_FILES) $(TOOLSOBJ_D_FILES)
