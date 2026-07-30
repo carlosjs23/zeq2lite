@@ -611,6 +611,12 @@ void ClientThink( int clientNum ) {
 
 
 void G_RunClient( gentity_t *ent ) {
+	// a dummy has no engine client to deliver usercmds, so it thinks here
+	// every server frame rather than on arrival of a command
+	if ( ent->client->pers.isDummy ) {
+		G_RunDummy( ent );
+		return;
+	}
 	if ( !g_synchronousClients.integer && !ent->client->ps.lockedTarget) {
 		return;
 	}

@@ -278,6 +278,8 @@ typedef struct {
 	int			voteCount;			// to prevent people from constantly calling votes
 	int			teamVoteCount;		// to prevent people from constantly calling votes
 	qboolean	teamInfo;			// send team overlay updates?
+	qboolean	isDummy;			// training dummy: no engine client behind this slot,
+									// the game module builds its usercmds itself
 } clientPersistant_t;
 
 
@@ -443,6 +445,7 @@ char *G_NewString( const char *string );
 // g_cmds.c
 //
 void Cmd_Score_f (gentity_t *ent);
+qboolean CheatsOk( gentity_t *ent );
 void StopFollowing( gentity_t *ent );
 void BroadcastTeamChange( gclient_t *client, int oldTeam );
 void SetTeam( gentity_t *ent, char *s );
@@ -620,8 +623,16 @@ void ClientCommand( int clientNum );
 //
 void SetTargetPos(gentity_t* ent);
 void ClientThink( int clientNum );
+void ClientThink_real( gentity_t *ent );
 void ClientEndFrame( gentity_t *ent );
 void G_RunClient( gentity_t *ent );
+
+//
+// g_dummy.c
+//
+void G_RunDummy( gentity_t *ent );
+void Cmd_Dummy_f( gentity_t *ent );
+void Cmd_DummyClear_f( gentity_t *ent );
 
 //
 // g_team.c

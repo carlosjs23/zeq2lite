@@ -1,0 +1,363 @@
+/*
+===========================================================================
+Copyright (C) 1999-2005 Id Software, Inc.
+
+This file is part of Quake III Arena source code.
+
+Quake III Arena source code is free software; you can redistribute it
+and/or modify it under the terms of the GNU General Public License as
+published by the Free Software Foundation; either version 2 of the License,
+or (at your option) any later version.
+
+Quake III Arena source code is distributed in the hope that it will be
+useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with Quake III Arena source code; if not, write to the Free Software
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+===========================================================================
+*/
+//
+// g_dummy.c -- training dummies: player-shaped targets to hit
+//
+// This tree has no bot support at all - the engine ships no sv_bot.c and the
+// game module no ai_*.c - so there is no way to get a second player-shaped
+// entity into a map, and none of the combat code can be exercised. A dummy is
+// therefore an ordinary client slot that the game module connects, spawns and
+// feeds usercmds to itself. Nothing in the engine knows the difference: the
+// slot's client_t stays CS_FREE, so the server never tries to send it a
+// snapshot, while the entity it owns is transmitted like any other.
+//
+// A dummy does not move or fight. It stands where it was put, turns to face
+// the nearest player, and takes damage.
+
+#include "g_local.h"
+
+#define	DUMMY_DISTANCE_DEFAULT	200
+#define	DUMMY_DISTANCE_MIN		64
+#define	DUMMY_DISTANCE_MAX		8000
+
+/*
+=================
+G_DummySlot
+
+Client slots are handed out from the top down, because the engine hands real
+connections out from the bottom up (SV_DirectConnect scans from slot 0). A
+dummy holds a slot the engine still believes is free, so keeping the two
+allocators at opposite ends of the array is what stops a joining player from
+landing on top of one.
+=================
+*/
+static int G_DummySlot( void ) {
+	int		i;
+
+	for ( i = level.maxclients - 1 ; i >= 0 ; i-- ) {
+		if ( level.clients[i].pers.connected != CON_DISCONNECTED ) {
+			continue;
+		}
+		if ( g_entities[i].inuse ) {
+			continue;
+		}
+		return i;
+	}
+
+	return -1;
+}
+
+/*
+=================
+G_DummyModelOk
+
+The model name ends up in an info string, so it must not carry any of the
+characters that would split one.
+=================
+*/
+static qboolean G_DummyModelOk( const char *model ) {
+	if ( !model[0] || strlen( model ) >= MAX_QPATH ) {
+		return qfalse;
+	}
+	if ( strchr( model, '\\' ) || strchr( model, '\"' ) || strchr( model, ';' ) ) {
+		return qfalse;
+	}
+	return qtrue;
+}
+
+/*
+=================
+G_ClosestPlayer
+
+Nearest live player that isn't a dummy, so dummies face whoever is hitting
+them rather than each other.
+=================
+*/
+static gentity_t *G_ClosestPlayer( gentity_t *from ) {
+	gentity_t	*ent;
+	gentity_t	*closest;
+	float		bestDistance;
+	float		distance;
+	vec3_t		delta;
+	int			i;
+
+	closest = NULL;
+	bestDistance = 0;
+
+	for ( i = 0 ; i < level.maxclients ; i++ ) {
+		ent = &g_entities[i];
+
+		if ( ent == from || !ent->inuse || !ent->client ) {
+			continue;
+		}
+		if ( ent->client->pers.connected != CON_CONNECTED ) {
+			continue;
+		}
+		if ( ent->client->pers.isDummy ) {
+			continue;
+		}
+		if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
+			continue;
+		}
+
+		VectorSubtract( ent->client->ps.origin, from->client->ps.origin, delta );
+		distance = VectorLength( delta );
+
+		if ( !closest || distance < bestDistance ) {
+			closest = ent;
+			bestDistance = distance;
+		}
+	}
+
+	return closest;
+}
+
+/*
+=================
+G_PlaceDummy
+
+Drop the dummy in front of the player who asked for it, facing back at them.
+=================
+*/
+static void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance ) {
+	vec3_t		forward, start, origin, angles;
+	trace_t		trace;
+
+	VectorCopy( owner->client->ps.viewangles, angles );
+	angles[PITCH] = 0;
+	angles[ROLL] = 0;
+	AngleVectors( angles, forward, NULL, NULL );
+
+	// Aim the search from chest height with a point hull rather than sweeping
+	// the player box along the floor: the box sits flush on the ground, so on
+	// any real terrain it starts solid and the sweep stops where it began -
+	// which puts the dummy inside the player who asked for it.
+	VectorCopy( owner->client->ps.origin, start );
+	start[2] += owner->client->ps.viewheight;
+	VectorMA( start, distance, forward, origin );
+
+	trap_Trace( &trace, start, NULL, NULL, origin, owner->s.number, MASK_PLAYERSOLID );
+	VectorCopy( trace.endpos, origin );
+	if ( trace.fraction < 1.0f ) {
+		// back off the wall far enough for the body to fit
+		VectorMA( origin, -( dummy->r.maxs[0] + 8 ), forward, origin );
+	}
+
+	// settle it on the ground under that point, if there is any
+	VectorCopy( origin, start );
+	start[2] += 32;
+	origin[2] -= 4096;
+	trap_Trace( &trace, start, dummy->r.mins, dummy->r.maxs, origin, dummy->s.number, MASK_PLAYERSOLID );
+	VectorCopy( trace.endpos, origin );
+
+	trap_UnlinkEntity( dummy );
+
+	VectorCopy( origin, dummy->client->ps.origin );
+	VectorClear( dummy->client->ps.velocity );
+	dummy->client->ps.pm_time = 0;
+	dummy->client->ps.pm_flags &= ~PMF_TIME_KNOCKBACK;
+
+	// face the player who spawned it
+	angles[YAW] = AngleNormalize360( angles[YAW] + 180 );
+	SetClientViewAngle( dummy, angles );
+
+	// don't interpolate in from the spawn point it was given
+	dummy->client->ps.eFlags ^= EF_TELEPORT_BIT;
+
+	VectorCopy( origin, dummy->r.currentOrigin );
+	BG_PlayerStateToEntityState( &dummy->client->ps, &dummy->s, qtrue );
+	trap_LinkEntity( dummy );
+}
+
+/*
+=================
+G_SpawnDummy
+
+Returns the dummy, or NULL with the reason already printed to the caller.
+=================
+*/
+static gentity_t *G_SpawnDummy( gentity_t *owner, const char *model, float distance ) {
+	gentity_t	*dummy;
+	char		userinfo[MAX_INFO_STRING];
+	char		*denied;
+	int			clientNum;
+
+	clientNum = G_DummySlot();
+	if ( clientNum == -1 ) {
+		trap_SendServerCommand( owner - g_entities, "print \"No free client slot for a dummy.\n\"" );
+		return NULL;
+	}
+
+	Com_sprintf( userinfo, sizeof( userinfo ),
+		"\\name\\Dummy %i\\model\\%s\\headmodel\\%s\\legsmodel\\%s"
+		"\\ip\\localhost\\rate\\25000\\snaps\\20\\team\\free",
+		clientNum, model, model, model );
+
+	trap_SetUserinfo( clientNum, userinfo );
+
+	denied = ClientConnect( clientNum, qtrue );
+	if ( denied ) {
+		trap_SendServerCommand( owner - g_entities, va( "print \"Dummy rejected: %s\n\"", denied ) );
+		return NULL;
+	}
+
+	// ClientConnect clears the whole client, so the slot can only be marked
+	// once it has returned - and it has to be marked before ClientBegin, which
+	// runs a client frame that G_RunDummy has to recognise.
+	level.clients[clientNum].pers.isDummy = qtrue;
+
+	ClientBegin( clientNum );
+
+	dummy = &g_entities[clientNum];
+	G_PlaceDummy( dummy, owner, distance );
+
+	return dummy;
+}
+
+/*
+=================
+G_RunDummy
+
+Called from G_RunClient in place of the usual "wait for a usercmd" path.
+Nothing on the network side feeds this slot, so the command it thinks with is
+the one built here.
+=================
+*/
+void G_RunDummy( gentity_t *ent ) {
+	gentity_t	*player;
+	vec3_t		angles, delta;
+
+	// keep the client from being flagged as having lost its connection
+	ent->client->lastCmdTime = level.time;
+	ent->client->pers.cmd.serverTime = level.time;
+
+	player = G_ClosestPlayer( ent );
+	if ( player ) {
+		VectorSubtract( player->client->ps.origin, ent->client->ps.origin, delta );
+		vectoangles( delta, angles );
+		angles[PITCH] = 0;
+		angles[ROLL] = 0;
+		SetClientViewAngle( ent, angles );
+	}
+
+	ClientThink_real( ent );
+}
+
+/*
+=================
+G_RemoveDummies
+
+Returns how many were removed.
+=================
+*/
+static int G_RemoveDummies( void ) {
+	int		i;
+	int		count;
+
+	count = 0;
+	for ( i = 0 ; i < level.maxclients ; i++ ) {
+		if ( !level.clients[i].pers.isDummy ) {
+			continue;
+		}
+		// the engine has no client here, so this is the game-side half of a
+		// disconnect only - trap_DropClient would be talking about a client_t
+		// that was never allocated.
+		ClientDisconnect( i );
+		level.clients[i].pers.isDummy = qfalse;
+		count++;
+	}
+
+	return count;
+}
+
+/*
+=================
+Cmd_Dummy_f
+
+dummy [model] [distance]
+=================
+*/
+void Cmd_Dummy_f( gentity_t *ent ) {
+	gentity_t	*dummy;
+	char		model[MAX_QPATH];
+	char		arg[MAX_TOKEN_CHARS];
+	float		distance;
+
+	if ( !CheatsOk( ent ) ) {
+		return;
+	}
+
+	if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
+		trap_SendServerCommand( ent - g_entities, "print \"Spectators can't spawn dummies.\n\"" );
+		return;
+	}
+
+	if ( trap_Argc() > 1 ) {
+		trap_Argv( 1, model, sizeof( model ) );
+	} else {
+		Q_strncpyz( model, "goku", sizeof( model ) );
+	}
+
+	if ( !G_DummyModelOk( model ) ) {
+		trap_SendServerCommand( ent - g_entities, "print \"Bad dummy model name.\n\"" );
+		return;
+	}
+
+	distance = DUMMY_DISTANCE_DEFAULT;
+	if ( trap_Argc() > 2 ) {
+		trap_Argv( 2, arg, sizeof( arg ) );
+		distance = atof( arg );
+		if ( distance < DUMMY_DISTANCE_MIN ) {
+			distance = DUMMY_DISTANCE_MIN;
+		} else if ( distance > DUMMY_DISTANCE_MAX ) {
+			distance = DUMMY_DISTANCE_MAX;
+		}
+	}
+
+	dummy = G_SpawnDummy( ent, model, distance );
+	if ( !dummy ) {
+		return;
+	}
+
+	trap_SendServerCommand( ent - g_entities,
+		va( "print \"Dummy %i (%s) spawned at %i %i %i.\n\"",
+			(int)(dummy - g_entities), model,
+			(int)dummy->client->ps.origin[0],
+			(int)dummy->client->ps.origin[1],
+			(int)dummy->client->ps.origin[2] ) );
+}
+
+/*
+=================
+Cmd_DummyClear_f
+=================
+*/
+void Cmd_DummyClear_f( gentity_t *ent ) {
+	int		count;
+
+	if ( !CheatsOk( ent ) ) {
+		return;
+	}
+
+	count = G_RemoveDummies();
+	trap_SendServerCommand( ent - g_entities, va( "print \"Removed %i dummies.\n\"", count ) );
+}
