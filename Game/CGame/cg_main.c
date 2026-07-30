@@ -85,6 +85,7 @@ vmCvar_t	cg_bobpitch;
 vmCvar_t	cg_bobroll;
 vmCvar_t	cg_swingSpeed;
 vmCvar_t	cg_shadows;
+vmCvar_t	cg_auraScreenSpace;
 vmCvar_t	cg_gibs;
 vmCvar_t	cg_drawTimer;
 vmCvar_t	cg_drawFPS;
@@ -211,6 +212,9 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_fovAspectAdjust, "cg_fovAspectAdjust", "1", CVAR_ARCHIVE },
 	{ &cg_viewsize, "cg_viewsize", "100", CVAR_ARCHIVE },
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
+	// Off by default: the screen-space aura needs the GLSL pipeline, which is
+	// itself behind r_ext_vertex_shader and off by default.
+	{ &cg_auraScreenSpace, "cg_auraScreenSpace", "0", CVAR_ARCHIVE },
 	{ &cg_gibs, "cg_gibs", "1", CVAR_ARCHIVE  },
 	{ &cg_scripted2D, "cg_scripted2D", "1", CVAR_ARCHIVE  },
 	{ &cg_scriptedCamera, "cg_scriptedCamera", "1", CVAR_ARCHIVE  },

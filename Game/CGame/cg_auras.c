@@ -762,6 +762,116 @@ static void CG_Aura_DimLight( centity_t *player, auraState_t *state, auraConfig_
 /*========================
 CG_AddAuraToScene
 ========================*/
+/*
+===============
+CG_Aura_ScreenSpaceRender
+
+The screen-space aura: one ring mesh, reshaped entirely in the vertex program.
+
+This replaces the convex-hull path's fifty CPU-built quads with a single
+refEntity. The reason it can be a single entity is that everything varying -
+the force direction, the strength, the player's bounding box - travels in
+programParams, which the renderer hands to the shader per draw. Entities force
+a batch flush on entity number, so one aura's parameters can never bleed into
+another's geometry.
+
+The mesh itself never changes and carries no animation: each vertex holds its
+position relative to the ring centre in its colour channel, and the vertex
+program rebuilds the shape from that plus the parameters below.
+===============
+*/
+static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, auraConfig_t *config ){
+	static qhandle_t	auraMesh;
+	static qhandle_t	auraShader;
+	static qboolean		registered;
+	refEntity_t			ent;
+	vec3_t				mins, maxs, partMins, partMaxs;
+	vec3_t				force;
+	float				speed, strength;
+
+	if(!registered){
+		auraMesh = trap_R_RegisterModel("models/effects/aura.iqm");
+		auraShader = trap_R_RegisterShader("Aura_ScreenSpace");
+		registered = qtrue;
+	}
+	if(!auraMesh || !auraShader){return;}
+
+	// The bounds below come out of the pose CG_Player built, and CG_Player
+	// returns early - without building one - for a blinking player, one
+	// mid-zanzoken, or one missing any of its three models. In those frames the
+	// player is not drawn at all, so an aura would be wrapping thin air, and
+	// the refEntities still hold an earlier frame's values (or handle 0 on the
+	// very first frame, which measures the default model rather than a
+	// character). Skip instead: the pose stamp is the only way to tell.
+	if(player->pe.poseFrame != cg.clientFrame){return;}
+
+	// The bounding box the aura has to encompass, taken per animation frame
+	// rather than from the rest pose: a thrown kick reaches well outside it,
+	// and an aura sized to the rest pose visibly detaches mid-animation.
+	trap_R_ModelBounds( player->pe.legsRef.hModel, mins, maxs, player->pe.legs.frame );
+	trap_R_ModelBounds( player->pe.torsoRef.hModel, partMins, partMaxs, player->pe.torso.frame );
+	AddPointToBounds( partMins, mins, maxs );
+	AddPointToBounds( partMaxs, mins, maxs );
+	trap_R_ModelBounds( player->pe.headRef.hModel, partMins, partMaxs, player->pe.head.frame );
+	AddPointToBounds( partMins, mins, maxs );
+	AddPointToBounds( partMaxs, mins, maxs );
+
+	// Force is what the aura streams against: movement while the player is
+	// moving, gravity when they are not, so a standing aura still points up.
+	VectorCopy( player->currentState.pos.trDelta, force );
+	speed = VectorLength( force );
+	if(speed < 1.0f){
+		VectorSet( force, 0.0f, 0.0f, -1.0f );
+	}else{
+		VectorScale( force, 1.0f / speed, force );
+	}
+
+	// Faster movement means a longer, sharper tear-drop. Clamped so a fast
+	// player does not stretch the aura off the screen.
+	strength = config->auraScale * state->modulate;
+	strength *= 1.0f + (speed / 1000.0f > 1.0f ? 1.0f : speed / 1000.0f);
+
+	memset( &ent, 0, sizeof(ent) );
+	ent.reType = RT_MODEL;
+	ent.hModel = auraMesh;
+	ent.customShader = auraShader;
+	VectorCopy( state->origin, ent.origin );
+	VectorCopy( state->origin, ent.lightingOrigin );
+	VectorCopy( state->origin, ent.oldorigin );
+	AxisClear( ent.axis );
+	ent.renderfx = RF_NOSHADOW;
+
+	ent.shaderRGBA[0] = (byte)(config->auraColor[0] * state->modulate * 255.0f);
+	ent.shaderRGBA[1] = (byte)(config->auraColor[1] * state->modulate * 255.0f);
+	ent.shaderRGBA[2] = (byte)(config->auraColor[2] * state->modulate * 255.0f);
+	ent.shaderRGBA[3] = 255;
+
+	// Layout mirrors the header comment in glsl/aura_vp.glsl. Keep the two in
+	// step: nothing checks that they agree, and a mismatch shows up as a
+	// misshapen aura rather than any kind of error.
+	ent.programParams[0]  = force[0];
+	ent.programParams[1]  = force[1];
+	ent.programParams[2]  = force[2];
+	ent.programParams[3]  = strength;
+
+	ent.programParams[4]  = mins[0];
+	ent.programParams[5]  = mins[1];
+	ent.programParams[6]  = mins[2];
+	ent.programParams[7]  = 1.0f;		// origin distance
+
+	ent.programParams[8]  = maxs[0];
+	ent.programParams[9]  = maxs[1];
+	ent.programParams[10] = maxs[2];
+	ent.programParams[11] = 0.02f;		// bounding box padding, in NDC
+
+	ent.programParams[12] = 1.0f;		// amplitude
+	ent.programParams[13] = 4.0f;		// wavelength: wraps of the strip around the ring
+	ent.programParams[14] = 1.5f;		// scroll speed toward the tip
+	ent.programParams[15] = 0.0f;
+
+	trap_R_AddRefEntityToScene( &ent );
+}
+
 void CG_AddAuraToScene( centity_t *player){
 	int				clientNum, tier;
 	auraState_t		*state;
@@ -791,7 +901,11 @@ void CG_AddAuraToScene( centity_t *player){
 	CG_Aura_AddDLight( player, state, config);
 
 	// Render the aura
-	CG_Aura_ConvexHullRender( player, state, config);
+	if(cg_auraScreenSpace.integer){
+		CG_Aura_ScreenSpaceRender( player, state, config);
+	}else{
+		CG_Aura_ConvexHullRender( player, state, config);
+	}
 }
 
 

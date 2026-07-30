@@ -159,6 +159,7 @@ typedef struct {
 	// needed to obtain tag positions after player entity has been processed.
 	// For linking beam attacks, particle systems, etc.
 	refEntity_t		legsRef, torsoRef, headRef, cameraRef;
+
 	// cg.clientFrame in which the refEntities above were last built. CG_Player
 	// bails out early in several cases - the player is blinking, mid-zanzoken,
 	// or one of its three models is missing - and returns before writing them,
@@ -1066,6 +1067,7 @@ extern	vmCvar_t		cg_bobpitch;
 extern	vmCvar_t		cg_bobroll;
 extern	vmCvar_t		cg_swingSpeed;
 extern	vmCvar_t		cg_shadows;
+extern	vmCvar_t		cg_auraScreenSpace;
 extern	vmCvar_t		cg_gibs;
 extern	vmCvar_t		cg_drawTimer;
 extern	vmCvar_t		cg_drawFPS;
