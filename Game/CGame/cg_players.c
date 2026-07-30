@@ -2146,10 +2146,14 @@ qboolean CG_GetTagOrientationFromPlayerEntityHeadModel( centity_t *cent, char *t
 		return qfalse;
 	}
 
-	// HACK: Use this copy, which is sure to be stored correctly, unlike
-	//       reading it from cg_entities, which tends to clear out its
-	//       fields every now and then. WTF?!
-	pe = &playerInfoDuplicate[clientNum];
+	// Read the copy CG_Player stored rather than cent->pe: CG_ResetPlayerEntity
+	// zeroes the lerp frames every time the entity re-enters the PVS, and the
+	// frames are what the tag lookup below lerps between.
+	//
+	// Keyed by entity number, not clientNum. One client can own several corpses
+	// on the body queue at once, and each carries its own pose - keying by
+	// client made every one of them read the living player's.
+	pe = &playerInfoDuplicate[cent->currentState.number];
 	
 	// Prepare the destination orientation_t
 	AxisClear( tagOrient->axis );
@@ -2205,10 +2209,14 @@ qboolean CG_GetTagOrientationFromPlayerEntityTorsoModel( centity_t *cent, char *
 		return qfalse;
 	}
 
-	// HACK: Use this copy, which is sure to be stored correctly, unlike
-	//       reading it from cg_entities, which tends to clear out its
-	//       fields every now and then. WTF?!
-	pe = &playerInfoDuplicate[clientNum];
+	// Read the copy CG_Player stored rather than cent->pe: CG_ResetPlayerEntity
+	// zeroes the lerp frames every time the entity re-enters the PVS, and the
+	// frames are what the tag lookup below lerps between.
+	//
+	// Keyed by entity number, not clientNum. One client can own several corpses
+	// on the body queue at once, and each carries its own pose - keying by
+	// client made every one of them read the living player's.
+	pe = &playerInfoDuplicate[cent->currentState.number];
 	
 	// Prepare the destination orientation_t
 	AxisClear( tagOrient->axis );
@@ -2277,10 +2285,14 @@ qboolean CG_GetTagOrientationFromPlayerEntityLegsModel( centity_t *cent, char *t
 		return qfalse;
 	}
 
-	// HACK: Use this copy, which is sure to be stored correctly, unlike
-	//       reading it from cg_entities, which tends to clear out its
-	//       fields every now and then. WTF?!
-	pe = &playerInfoDuplicate[clientNum];
+	// Read the copy CG_Player stored rather than cent->pe: CG_ResetPlayerEntity
+	// zeroes the lerp frames every time the entity re-enters the PVS, and the
+	// frames are what the tag lookup below lerps between.
+	//
+	// Keyed by entity number, not clientNum. One client can own several corpses
+	// on the body queue at once, and each carries its own pose - keying by
+	// client made every one of them read the living player's.
+	pe = &playerInfoDuplicate[cent->currentState.number];
 	
 	// Prepare the destination orientation_t
 	AxisClear( tagOrient->axis );
@@ -2349,10 +2361,14 @@ qboolean CG_GetTagOrientationFromPlayerEntityCameraModel( centity_t *cent, char 
 		return qfalse;
 	}
 
-	// HACK: Use this copy, which is sure to be stored correctly, unlike
-	//       reading it from cg_entities, which tends to clear out its
-	//       fields every now and then. WTF?!
-	pe = &playerInfoDuplicate[clientNum];
+	// Read the copy CG_Player stored rather than cent->pe: CG_ResetPlayerEntity
+	// zeroes the lerp frames every time the entity re-enters the PVS, and the
+	// frames are what the tag lookup below lerps between.
+	//
+	// Keyed by entity number, not clientNum. One client can own several corpses
+	// on the body queue at once, and each carries its own pose - keying by
+	// client made every one of them read the living player's.
+	pe = &playerInfoDuplicate[cent->currentState.number];
 	
 	// Prepare the destination orientation_t
 	AxisClear( tagOrient->axis );
@@ -2443,10 +2459,14 @@ qboolean CG_GetTagOrientationFromPlayerEntity( centity_t *cent, char *tagName, o
 		return qfalse;
 	}
 
-	// HACK: Use this copy, which is sure to be stored correctly, unlike
-	//       reading it from cg_entities, which tends to clear out its
-	//       fields every now and then. WTF?!
-	pe = &playerInfoDuplicate[clientNum];
+	// Read the copy CG_Player stored rather than cent->pe: CG_ResetPlayerEntity
+	// zeroes the lerp frames every time the entity re-enters the PVS, and the
+	// frames are what the tag lookup below lerps between.
+	//
+	// Keyed by entity number, not clientNum. One client can own several corpses
+	// on the body queue at once, and each carries its own pose - keying by
+	// client made every one of them read the living player's.
+	pe = &playerInfoDuplicate[cent->currentState.number];
 	
 	// Prepare the destination orientation_t
 	AxisClear( tagOrient->axis );
