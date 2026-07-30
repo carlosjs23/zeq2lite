@@ -780,12 +780,66 @@ position relative to the ring centre in its colour channel, and the vertex
 program rebuilds the shape from that plus the parameters below.
 ===============
 */
+/*
+===============
+CG_Aura_AddPartBounds
+
+Merge one body part's bounds into mins/maxs, in world axes and relative to the
+aura entity's origin.
+
+trap_R_ModelBounds answers in the part's *own* model space, and the torso and
+head are placed on tags - their model space is centred on the tag, not on the
+player. Merging the three boxes raw therefore stacks all three at the player's
+origin, and the head's box lands somewhere around the waist instead of around
+the head. The result was an aura measured against a box far shorter than the
+character: too low at the top, so the hair stood outside it, and too high at
+the bottom, so the feet did.
+
+cg_drawBBox in cg_players.c does not have this problem, because it draws each
+box at its own part's origin rather than merging them - which is why the debug
+view looked correct while the aura did not.
+===============
+*/
+static void CG_Aura_AddPartBounds( const refEntity_t *part, int frame, const vec3_t origin, vec3_t mins, vec3_t maxs ){
+	vec3_t	partMins, partMaxs, world;
+	float	x, y, z;
+	int		i;
+
+	// A part CG_Player never filled in leaves handle 0 here, which measures the
+	// default model rather than a character.
+	if(!part->hModel){return;}
+
+	trap_R_ModelBounds( part->hModel, partMins, partMaxs, frame );
+
+	// All eight corners, not just the two extremes. The part carries a
+	// rotation, and the extremes of a rotated box are not the rotations of the
+	// original extremes - taking the shortcut collapses the box whenever the
+	// player is turned away from the world axes.
+	for(i = 0; i < 8; i++){
+		x = (i & 1) ? partMaxs[0] : partMins[0];
+		y = (i & 2) ? partMaxs[1] : partMins[1];
+		z = (i & 4) ? partMaxs[2] : partMins[2];
+
+		VectorCopy( part->origin, world );
+		VectorMA( world, x, part->axis[0], world );
+		VectorMA( world, y, part->axis[1], world );
+		VectorMA( world, z, part->axis[2], world );
+
+		// The shader is handed corners as offsets from the aura entity's
+		// origin: it multiplies them by a model-view-projection built from that
+		// origin with an identity rotation.
+		VectorSubtract( world, origin, world );
+
+		AddPointToBounds( world, mins, maxs );
+	}
+}
+
 static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, auraConfig_t *config ){
 	static qhandle_t	auraMesh;
 	static qhandle_t	auraShader;
 	static qboolean		registered;
 	refEntity_t			ent;
-	vec3_t				mins, maxs, partMins, partMaxs;
+	vec3_t				mins, maxs;
 	vec3_t				force;
 	float				speed, strength;
 
@@ -808,13 +862,10 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	// The bounding box the aura has to encompass, taken per animation frame
 	// rather than from the rest pose: a thrown kick reaches well outside it,
 	// and an aura sized to the rest pose visibly detaches mid-animation.
-	trap_R_ModelBounds( player->pe.legsRef.hModel, mins, maxs, player->pe.legs.frame );
-	trap_R_ModelBounds( player->pe.torsoRef.hModel, partMins, partMaxs, player->pe.torso.frame );
-	AddPointToBounds( partMins, mins, maxs );
-	AddPointToBounds( partMaxs, mins, maxs );
-	trap_R_ModelBounds( player->pe.headRef.hModel, partMins, partMaxs, player->pe.head.frame );
-	AddPointToBounds( partMins, mins, maxs );
-	AddPointToBounds( partMaxs, mins, maxs );
+	ClearBounds( mins, maxs );
+	CG_Aura_AddPartBounds( &player->pe.legsRef,  player->pe.legs.frame,  state->origin, mins, maxs );
+	CG_Aura_AddPartBounds( &player->pe.torsoRef, player->pe.torso.frame, state->origin, mins, maxs );
+	CG_Aura_AddPartBounds( &player->pe.headRef,  player->pe.head.frame,  state->origin, mins, maxs );
 
 	// Force is what the aura streams against: movement while the player is
 	// moving, gravity when they are not, so a standing aura still points up.
