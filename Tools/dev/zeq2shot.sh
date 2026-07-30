@@ -13,6 +13,9 @@
 #   zeq2shot.sh --menu                            # no map: shoot the main menu
 #   zeq2shot.sh -- +set cg_thirdPerson 0          # extra engine args after --
 #
+# The player's zeq2config.cfg is restored afterwards, so cvar overrides passed
+# here cannot leak into their saved settings.
+#
 # Prints the exit status, where the PNG landed, and any crash markers. Use
 # --stats for a colour histogram, which is how you tell "world rendered" from
 # "flat grey frame" without eyeballing anything.
@@ -41,6 +44,29 @@ done
 
 zeq2_require_bin
 cd "$ZEQ2_BUILD"
+
+# Put the player's saved config back afterwards.
+#
+# Every caller of this script passes cvar overrides, and the useful ones are
+# CVAR_ARCHIVE - cg_draw2D, the cg_thirdPerson* camera, the aura keys. They
+# have to be passed as bare commands rather than `+set`, because the config
+# execs after `+set` and would overwrite it (see Tools/dev/README.md). But a
+# bare command sets the cvar for real, and the engine writes every archived
+# cvar back out at shutdown. So a screenshot run silently rewrites the player's
+# config with whatever the harness wanted, and they next start the game with no
+# HUD and the camera parked in a screenshot pose. That is a genuinely confusing
+# failure, because nothing about it points back at a dev script.
+#
+# Restoring the file after the run is the only fix that holds: there is no way
+# to ask the engine not to persist, and enumerating the cvars to reset would
+# need updating every time a caller adds one.
+CONFIG="$ZEQ2_BUILD/$ZEQ2_GAME/zeq2config.cfg"
+CONFIG_BACKUP=""
+if [[ -f "$CONFIG" ]]; then
+	CONFIG_BACKUP="$(mktemp)"
+	cp "$CONFIG" "$CONFIG_BACKUP"
+	trap 'cp "$CONFIG_BACKUP" "$CONFIG"; rm -f "$CONFIG_BACKUP"' EXIT INT TERM
+fi
 
 SHOTDIR="$ZEQ2_GAME/screenshots"
 LOG="$ZEQ2_BUILD/zeq2shot.log"

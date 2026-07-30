@@ -19,7 +19,7 @@
 #   zeq2aura.sh --sweep auraAmplitude=0.5,1,2,4
 #   zeq2aura.sh --sweep auraScrollSpeed=0,1.5,4 --set auraAmplitude=2
 #   zeq2aura.sh --set auraColor="1 0.2 0.2" --out /tmp/red.png
-#   zeq2aura.sh --sweep auraScale=1,2,3 --map landing --hull
+#   zeq2aura.sh --set auraColor="1 0 0" --hull        # stock old aura, for A/B
 #   zeq2aura.sh --sweep auraScale=1,2,3 --crop none      # keep whole frames
 #   zeq2aura.sh --sweep auraScale=1,2,3 --range 160      # pull the camera back
 #
@@ -36,6 +36,14 @@ CROP=470x640
 RANGE=110
 HULL=0
 KEEP=0
+
+# Keys the hull path does not read at all - passing them to it does nothing.
+SS_ONLY="auraOriginDistance auraPadding auraAmplitude auraWavelength auraScrollSpeed"
+
+# Read by both, but tuned for the screen-space path, which wants it several
+# times larger than the hull path ever did. Overriding it under --hull is what
+# actually distorts the comparison.
+SS_SHARED="auraScale"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -56,6 +64,34 @@ done
 zeq2_require_bin
 
 TIER="$ZEQ2_BUILD/$ZEQ2_GAME/players/tierDefault.cfg"
+
+# --hull renders the old convex-hull aura, and the only reason to do that is to
+# A/B it against the new one. That comparison is worthless if the old path is
+# fed the new path's numbers.
+#
+# The two share auraColor and auraScale but nothing else. auraScale is the one
+# that does damage: both paths read it, and the screen-space path wants it
+# several times larger than the hull path ever did, so carrying it across
+# inflates the old aura into something it never looked like. The other five
+# keys the hull path never reads, so passing them is a no-op - but a silent one,
+# which is worse, because the run looks like it compared them.
+#
+# So --hull starts from the committed tierDefault.cfg rather than the staged
+# one, and drops any --set or --sweep on a screen-space key. auraColor still
+# passes through, because comparing the two paths at the same colour is the
+# whole point. Say so out loud: silently discarding what was asked for is worse
+# than the distortion it prevents.
+STOCK=""
+if [[ $HULL -eq 1 ]]; then
+	if STOCK="$(git -C "$ZEQ2_ROOT" show HEAD:GameData/players/tierDefault.cfg 2>/dev/null)" \
+	   && [[ -n "$STOCK" ]]; then
+		echo "hull: rendering the committed aura config, not the tuned one"
+	else
+		STOCK=""
+		echo "hull: warning - no committed tierDefault.cfg to fall back on;" \
+		     "using the staged one, which carries the screen-space tuning" >&2
+	fi
+fi
 [[ -f "$TIER" ]] || { echo "error: $TIER not found - run zeq2build.sh first" >&2; exit 1; }
 
 # The config is staged from GameData by every build, so a crash mid-sweep costs
@@ -95,13 +131,33 @@ echo "=== aura sweep: $SWEEP_KEY over ${#SWEEP_VALUES[@]} value(s), map $MAP ===
 
 shots=()
 for value in "${SWEEP_VALUES[@]}"; do
-	cp "$BACKUP" "$TIER"
+	if [[ -n "$STOCK" ]]; then
+		printf '%s\n' "$STOCK" > "$TIER"
+	else
+		cp "$BACKUP" "$TIER"
+	fi
 	set_key auraExists  True "$TIER"
 	set_key auraAlways  True "$TIER"
 	for kv in "${FIXED[@]}"; do
-		set_key "${kv%%=*}" "${kv#*=}" "$TIER"
+		key="${kv%%=*}"
+		if [[ $HULL -eq 1 && " $SS_ONLY " == *" $key "* ]]; then
+			echo "  (hull: ignoring $key - the hull path never reads it)" >&2
+			continue
+		fi
+		if [[ $HULL -eq 1 && " $SS_SHARED " == *" $key "* ]]; then
+			echo "  (hull: ignoring $key - read by both, but this value is" \
+			     "tuned for the screen-space path)" >&2
+			continue
+		fi
+		set_key "$key" "${kv#*=}" "$TIER"
 	done
-	[[ "$SWEEP_KEY" == "sample" ]] || set_key "$SWEEP_KEY" "$value" "$TIER"
+	if [[ "$SWEEP_KEY" != "sample" ]]; then
+		if [[ $HULL -eq 1 && " $SS_ONLY $SS_SHARED " == *" $SWEEP_KEY "* ]]; then
+			echo "  (hull: ignoring swept $SWEEP_KEY - see --hull notes)" >&2
+		else
+			set_key "$SWEEP_KEY" "$value" "$TIER"
+		fi
+	fi
 
 	label="$SWEEP_KEY $value"
 	safe="$(printf '%s' "$SWEEP_KEY-$value" | tr -c 'A-Za-z0-9._-' '-')"

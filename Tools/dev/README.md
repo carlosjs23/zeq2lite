@@ -72,7 +72,7 @@ Every join-time crash found in this codebase so far has been *in* cgame, so a
 server-only smoke test would have passed while the game was unplayable. Use
 `--dedicated` to add server coverage, not to replace client coverage.
 
-## Three traps these scripts exist to avoid
+## Four traps these scripts exist to avoid
 
 **`+set` loses to the config for any archived cvar.** Startup execs
 `default.cfg` and then `zeq2config.cfg`, and both are full of `seta` lines. A
@@ -101,6 +101,32 @@ Check which you got: the value is echoed in the startup log for some cvars
 `+set` appears to do nothing, this is why — reach for it before assuming the
 feature is broken. `zeq2aura.sh` passes its camera cvars as bare commands for
 exactly this reason.
+
+**The other half of that: a bare cvar command *persists*.** Winning the fight
+above means the cvar is genuinely set, and the engine writes every
+`CVAR_ARCHIVE` cvar back to `zeq2config.cfg` at shutdown. So a screenshot run
+rewrites the player's saved settings with whatever the harness wanted, and the
+next time they start the game by hand there is no HUD and the camera sits in a
+screenshot pose. Nothing about that points back at a dev script, which is what
+makes it expensive.
+
+`zeq2shot.sh` now backs up `zeq2config.cfg` before launching and restores it on
+exit, so every script that goes through it is safe. **Anything that launches
+the engine directly has to do the same.** Resetting the individual cvars
+afterwards is not good enough - it needs updating every time a caller adds one.
+
+The cvars the visual harness overrides, and the values the game ships with, so
+a polluted config can be repaired by hand:
+
+| cvar | harness uses | default | effect if it leaks |
+|---|---|---|---|
+| `cg_draw2D` | `0` | `1` | no HUD at all |
+| `cg_thirdPersonRange` | `90`–`130` | `80` | camera too far back |
+| `cg_thirdPersonSlide` | `0` | `-20` | player centred, not offset |
+| `cg_thirdPersonHeight` | `0` | `0` | harmless, same as default |
+| `cg_thirdPersonAngle` | `0` | `0` | not archived, never persists |
+| `cg_auraScreenSpace` | `1` | `1` | harmless; `0` is the old hull path |
+| `model` | per-test | `goku` | **worst case** - an unloadable model leaves the game sitting at the menu with the map loaded, and the logs read as a clean start |
 
 **Module staging.** `make` writes `Build/<cfg>/Base/cgame$(uname -p).dylib`
 (e.g. `cgamearm.dylib`), but the engine derives its module name from
