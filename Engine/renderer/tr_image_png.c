@@ -424,12 +424,74 @@ static qboolean BufferedFileSkip(struct BufferedFile *BF, unsigned Offset)
 }
 
 /*
+ *  Read a chunk header into an aligned struct.
+ *
+ *  Chunk headers are not necessarily aligned inside the file buffer,
+ *  so the bytes are copied out instead of being accessed in place.
+ */
+
+static qboolean BufferedFileReadChunkHeader(struct BufferedFile *BF, struct PNG_ChunkHeader *ChunkHeader)
+{
+	void *RawChunkHeader;
+
+	/*
+	 *  input verification
+	 */
+
+	if(!ChunkHeader)
+	{
+		return(qfalse);
+	}
+
+	RawChunkHeader = BufferedFileRead(BF, PNG_ChunkHeader_Size);
+	if(!RawChunkHeader)
+	{
+		return(qfalse);
+	}
+
+	memcpy(ChunkHeader, RawChunkHeader, PNG_ChunkHeader_Size);
+
+	return(qtrue);
+}
+
+/*
+ *  Read an IHDR chunk body into an aligned struct.
+ *
+ *  Like the chunk header this is copied out of the file buffer
+ *  because the buffer offset is not necessarily aligned.
+ */
+
+static qboolean BufferedFileReadChunkIHDR(struct BufferedFile *BF, struct PNG_Chunk_IHDR *ChunkIHDR)
+{
+	void *RawChunkIHDR;
+
+	/*
+	 *  input verification
+	 */
+
+	if(!ChunkIHDR)
+	{
+		return(qfalse);
+	}
+
+	RawChunkIHDR = BufferedFileRead(BF, PNG_Chunk_IHDR_Size);
+	if(!RawChunkIHDR)
+	{
+		return(qfalse);
+	}
+
+	memcpy(ChunkIHDR, RawChunkIHDR, PNG_Chunk_IHDR_Size);
+
+	return(qtrue);
+}
+
+/*
  *  Find a chunk
  */
 
 static qboolean FindChunk(struct BufferedFile *BF, uint32_t ChunkType)
 {
-	struct PNG_ChunkHeader *CH;
+	struct PNG_ChunkHeader CH;
 
 	uint32_t Length;
 	uint32_t Type;
@@ -453,8 +515,7 @@ static qboolean FindChunk(struct BufferedFile *BF, uint32_t ChunkType)
 		 *  Read the chunk-header.
 		 */
 
-		CH = BufferedFileRead(BF, PNG_ChunkHeader_Size);
-		if(!CH)
+		if(!BufferedFileReadChunkHeader(BF, &CH))
 		{
 			return(qfalse);
 		}
@@ -464,8 +525,8 @@ static qboolean FindChunk(struct BufferedFile *BF, uint32_t ChunkType)
 		 *  they might be needed later.
 		 */
 
-		Length = BigLong(CH->Length);
-		Type   = BigLong(CH->Type);
+		Length = BigLong(CH.Length);
+		Type   = BigLong(CH.Type);
 
 		/*
 		 *  We found it!
@@ -513,7 +574,7 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 	uint8_t  *CompressedDataPtr;
 	uint32_t  CompressedDataLength;
 
-	struct PNG_ChunkHeader *CH;
+	struct PNG_ChunkHeader CH;
 
 	uint32_t Length;
 	uint32_t Type;
@@ -567,8 +628,7 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 		 *  Read chunk header
 		 */
 
-		CH = BufferedFileRead(BF, PNG_ChunkHeader_Size);
-		if(!CH)
+		if(!BufferedFileReadChunkHeader(BF, &CH))
 		{
 			/*
 			 *  Rewind to the start of this adventure
@@ -584,8 +644,8 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 		 *  Length and Type of chunk
 		 */
 
-		Length = BigLong(CH->Length);
-		Type   = BigLong(CH->Type);
+		Length = BigLong(CH.Length);
+		Type   = BigLong(CH.Type);
 
 		/*
 		 *  We have reached the end of the IDAT chunks
@@ -642,10 +702,9 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 		 *  Read chunk header
 		 */
 
-		CH = BufferedFileRead(BF, PNG_ChunkHeader_Size);
-		if(!CH)
+		if(!BufferedFileReadChunkHeader(BF, &CH))
 		{
-			ri.Free(CompressedData); 
+			ri.Free(CompressedData);
 
 			return(-1);
 		}
@@ -654,8 +713,8 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 		 *  Length and Type of chunk
 		 */
 
-		Length = BigLong(CH->Length);
-		Type   = BigLong(CH->Type);
+		Length = BigLong(CH.Length);
+		Type   = BigLong(CH.Type);
 
 		/*
 		 *  We have reached the end of the IDAT chunks
@@ -1906,13 +1965,13 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	struct BufferedFile *ThePNG;
 	byte *OutBuffer;
 	uint8_t *Signature;
-	struct PNG_ChunkHeader *CH;
+	struct PNG_ChunkHeader CH;
 	uint32_t ChunkHeaderLength;
 	uint32_t ChunkHeaderType;
-	struct PNG_Chunk_IHDR *IHDR;
+	struct PNG_Chunk_IHDR IHDR;
 	uint32_t IHDR_Width;
 	uint32_t IHDR_Height;
-	PNG_ChunkCRC *CRC;
+	void *CRC;
 	uint8_t *InPal;
 	uint8_t *DecompressedData;
 	uint32_t DecompressedDataLength;
@@ -1993,20 +2052,19 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  Read the first chunk-header.
 	 */
 
-	CH = BufferedFileRead(ThePNG, PNG_ChunkHeader_Size);
-	if(!CH)
+	if(!BufferedFileReadChunkHeader(ThePNG, &CH))
 	{
 		CloseBufferedFile(ThePNG);
 
-		return; 
+		return;
 	}
 
 	/*
 	 *  PNG multi-byte types are in Big Endian
 	 */
 
-	ChunkHeaderLength = BigLong(CH->Length);
-	ChunkHeaderType   = BigLong(CH->Type);
+	ChunkHeaderLength = BigLong(CH.Length);
+	ChunkHeaderType   = BigLong(CH.Type);
 
 	/*
 	 *  Check if the first chunk is an IHDR.
@@ -2023,8 +2081,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  Read the IHDR.
 	 */ 
 
-	IHDR = BufferedFileRead(ThePNG, PNG_Chunk_IHDR_Size);
-	if(!IHDR)
+	if(!BufferedFileReadChunkIHDR(ThePNG, &IHDR))
 	{
 		CloseBufferedFile(ThePNG);
 
@@ -2051,8 +2108,8 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  multi-byte type swapping
 	 */
 
-	IHDR_Width  = BigLong(IHDR->Width);
-	IHDR_Height = BigLong(IHDR->Height);
+	IHDR_Width  = BigLong(IHDR.Width);
+	IHDR_Height = BigLong(IHDR.Height);
 
 	/*
 	 *  Check if Width and Height are valid.
@@ -2076,7 +2133,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  Check if CompressionMethod and FilterMethod are valid.
 	 */
 
-	if(!((IHDR->CompressionMethod == PNG_CompressionMethod_0) && (IHDR->FilterMethod == PNG_FilterMethod_0)))
+	if(!((IHDR.CompressionMethod == PNG_CompressionMethod_0) && (IHDR.FilterMethod == PNG_FilterMethod_0)))
 	{
 		CloseBufferedFile(ThePNG);
 
@@ -2087,7 +2144,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  Check if InterlaceMethod is valid.
 	 */
 
-	if(!((IHDR->InterlaceMethod == PNG_InterlaceMethod_NonInterlaced)  || (IHDR->InterlaceMethod == PNG_InterlaceMethod_Interlaced)))
+	if(!((IHDR.InterlaceMethod == PNG_InterlaceMethod_NonInterlaced)  || (IHDR.InterlaceMethod == PNG_InterlaceMethod_Interlaced)))
 	{
 		CloseBufferedFile(ThePNG);
 
@@ -2098,7 +2155,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  Read palette for an indexed image.
 	 */
 
-	if(IHDR->ColourType == PNG_ColourType_Indexed)
+	if(IHDR.ColourType == PNG_ColourType_Indexed)
 	{
 		/*
 		 *  We need the palette first.
@@ -2115,20 +2172,19 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 		 *  Read the chunk-header.
 		 */
 
-		CH = BufferedFileRead(ThePNG, PNG_ChunkHeader_Size);
-		if(!CH)
+		if(!BufferedFileReadChunkHeader(ThePNG, &CH))
 		{
 			CloseBufferedFile(ThePNG);
 
-			return; 
+			return;
 		}
 
 		/*
 		 *  PNG multi-byte types are in Big Endian
 		 */
 
-		ChunkHeaderLength = BigLong(CH->Length);
-		ChunkHeaderType   = BigLong(CH->Type);
+		ChunkHeaderLength = BigLong(CH.Length);
+		ChunkHeaderType   = BigLong(CH.Type);
 
 		/*
 		 *  Check if the chunk is an PLTE.
@@ -2217,20 +2273,19 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 		 *  Read the chunk-header.
 		 */
 
-		CH = BufferedFileRead(ThePNG, PNG_ChunkHeader_Size);
-		if(!CH)
+		if(!BufferedFileReadChunkHeader(ThePNG, &CH))
 		{
 			CloseBufferedFile(ThePNG);
 
-			return; 
+			return;
 		}
 
 		/*
 		 *  PNG multi-byte types are in Big Endian
 		 */
 
-		ChunkHeaderLength = BigLong(CH->Length);
-		ChunkHeaderType   = BigLong(CH->Type);
+		ChunkHeaderLength = BigLong(CH.Length);
+		ChunkHeaderType   = BigLong(CH.Type);
 
 		/*
 		 *  Check if the chunk is an tRNS.
@@ -2271,11 +2326,19 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 		 *  Only for Grey, True and Indexed ColourType should tRNS exist.
 		 */
 
-		switch(IHDR->ColourType)
+		switch(IHDR.ColourType)
 		{
 			case PNG_ColourType_Grey :
 			{
-				if(!ChunkHeaderLength == 2)
+				/*
+				 *  Grey transparency is a single 16 bit value.
+				 *  This was written "!ChunkHeaderLength == 2", which parses as
+				 *  "(!ChunkHeaderLength) == 2" - always false, so the length
+				 *  was never checked and Trans could be shorter than the reads
+				 *  below assume.
+				 */
+
+				if(ChunkHeaderLength != 2)
 				{
 					CloseBufferedFile(ThePNG);
 
@@ -2297,7 +2360,14 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 
 			case PNG_ColourType_True :
 			{
-				if(!ChunkHeaderLength == 6)
+				/*
+				 *  True colour transparency is three 16 bit values, and the
+				 *  branch below reads Trans[0] through Trans[5]. Same dead
+				 *  "!x == n" comparison as the grey case above, so a shorter
+				 *  chunk was accepted and then over-read.
+				 */
+
+				if(ChunkHeaderLength != 6)
 				{
 					CloseBufferedFile(ThePNG);
 
@@ -2412,11 +2482,11 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  Interlaced and Non-interlaced images need to be handled differently.
 	 */
 
-	switch(IHDR->InterlaceMethod)
+	switch(IHDR.InterlaceMethod)
 	{
 		case PNG_InterlaceMethod_NonInterlaced :
 		{
-			if(!DecodeImageNonInterlaced(IHDR, OutBuffer, DecompressedData, DecompressedDataLength, HasTransparentColour, TransparentColour, OutPal))
+			if(!DecodeImageNonInterlaced(&IHDR, OutBuffer, DecompressedData, DecompressedDataLength, HasTransparentColour, TransparentColour, OutPal))
 			{
 				ri.Free(OutBuffer); 
 				ri.Free(DecompressedData); 
@@ -2430,7 +2500,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 
 		case PNG_InterlaceMethod_Interlaced :
 		{
-			if(!DecodeImageInterlaced(IHDR, OutBuffer, DecompressedData, DecompressedDataLength, HasTransparentColour, TransparentColour, OutPal))
+			if(!DecodeImageInterlaced(&IHDR, OutBuffer, DecompressedData, DecompressedDataLength, HasTransparentColour, TransparentColour, OutPal))
 			{
 				ri.Free(OutBuffer); 
 				ri.Free(DecompressedData); 
