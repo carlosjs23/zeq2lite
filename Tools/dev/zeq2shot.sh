@@ -11,7 +11,13 @@
 #   zeq2shot.sh --map landing --out /tmp/a.png
 #   zeq2shot.sh --frames 900 --stats
 #   zeq2shot.sh --menu                            # no map: shoot the main menu
+#   zeq2shot.sh --after "dummy goku 300"          # run a command once in-game
 #   zeq2shot.sh -- +set cg_thirdPerson 0          # extra engine args after --
+#
+# --after runs its command after the map has settled, which is what lets you
+# shoot anything that only exists in response to a command. It implies --cheats
+# (the map is loaded with `devmap`), because the interesting commands are the
+# cheat-gated ones. Repeat --after to issue several, in order.
 #
 # The player's zeq2config.cfg is restored afterwards, so cvar overrides passed
 # here cannot leak into their saved settings.
@@ -27,6 +33,8 @@ FRAMES=700
 OUT=""
 STATS=0
 MENU=0
+CHEATS=0
+AFTER=()
 EXTRA=()
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +44,12 @@ while [[ $# -gt 0 ]]; do
 		--out) OUT="$2"; shift 2 ;;
 		--stats) STATS=1; shift ;;
 		--menu) MENU=1; shift ;;
+		--cheats) CHEATS=1; shift ;;
+		# One argv element per token: main() re-quotes any argument that
+		# contains a space, and a quoted argument is no longer a +command.
+		--after) read -ra after_words <<<"$2"
+			AFTER+=(+"${after_words[0]}" "${after_words[@]:1}")
+			CHEATS=1; shift 2 ;;
 		--) shift; EXTRA=("$@"); break ;;
 		-h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
@@ -76,9 +90,18 @@ rm -rf "$SHOTDIR"
 # buffer by N frames, which is what lets us shoot a settled in-game frame.
 cmds=()
 if (( ! MENU )); then
-	cmds+=(+map "$MAP")
+	# `map` clears sv_cheats and `devmap` sets it, so anything issued through
+	# --after that the game gates on cheats needs the map loaded as a devmap.
+	if (( CHEATS )); then
+		cmds+=(+devmap "$MAP")
+	else
+		cmds+=(+map "$MAP")
+	fi
 fi
-cmds+=(+wait "$FRAMES" +screenshot +wait 40 +quit)
+# The --after commands run once the map has settled, which is the only point a
+# command the server has to answer - anything ClientCommand handles - can be
+# forwarded at all.
+cmds+=(+wait "$FRAMES" "${AFTER[@]}" +wait 60 +screenshot +wait 40 +quit)
 
 mapfile -t base < <(zeq2_base_args)
 set +e
