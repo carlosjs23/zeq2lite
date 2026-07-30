@@ -14,6 +14,10 @@ Python scripts use only the standard library; shell scripts need bash.
 | `zeq2sanitize.sh` | build + run under ASan/UBSan and group the findings |
 | `zeq2test.sh` | **gate**: static checks, ASan demonstrations, sanitizer-log assertions |
 | `tga2png.py` | convert an ioquake3 TGA screenshot to PNG (+ colour histogram) |
+| `png_sheet.py` | flatten PNGs onto one background so transparent art can be looked at |
+| `make_ui_art.py` | generate the interface images the data set never shipped |
+| `make_aura_mesh.py` | generate the screen-space aura's ring mesh |
+| `make_aura_texture.py` | generate the screen-space aura's spike strip |
 | `zeq2env.sh` | shared paths/helpers, sourced by the others (not run directly) |
 
 `zeq2smoke.sh` and `zeq2test.sh` are gates (non-zero exit on failure). The rest
