@@ -133,14 +133,18 @@ void CG_DrawInformation( void ) {
 	trap_R_SetColor(NULL);
 	CG_DrawPic(qfalse,0,0,SCREEN_WIDTH,SCREEN_HEIGHT,levelshot);
 	CG_DrawLoadingIcons();
+	// RegisterShaderNoMip answers 0 for an image that is not there, and handle 0
+	// is the default shader - an opaque black and white block. "loading",
+	// "dots" and "ready" are all absent from the mod directory, so drawing them
+	// unguarded put that block over the top-left corner of the loading screen.
 	if(cg.infoScreenText[0]){
 		text = trap_R_RegisterShaderNoMip("loading");
-		CG_DrawPic(qfalse,0,18,127,64,text);
-		CG_DrawPic(qfalse,64,52,8,4,dots);
+		if(text){CG_DrawPic(qfalse,0,18,127,64,text);}
+		if(dots){CG_DrawPic(qfalse,64,52,8,4,dots);}
 	}
 	else{
 		text = trap_R_RegisterShaderNoMip("ready");
-		CG_DrawPic(qfalse,0,18,127,64,text);
+		if(text){CG_DrawPic(qfalse,0,18,127,64,text);}
 	}
 	y = 180-32;
 	// Remote Server only
