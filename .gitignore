@@ -11,6 +11,10 @@
 # untracked so it can differ per machine).
 Makefile.local
 
+# Python bytecode from the Tools/dev scripts
+__pycache__/
+*.pyc
+
 # Editor / OS noise
 .DS_Store
 *.swp
