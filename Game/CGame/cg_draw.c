@@ -602,16 +602,25 @@ void CG_DrawScreenEffects(){
 	tierConfig_cg	*tier;
 	playerState_t	*ps;
 	qhandle_t		effect;
+	int				state;
 	ci = &cgs.clientinfo[cg.snap->ps.clientNum];
 	tier = &ci->tierConfig[ci->tierCurrent];
 	ps = &cg.snap->ps;
-	effect = tier->screenEffect[ci->damageTextureState-1];
+	// damageTextureState is 1 based: it holds "damage state + 1" and is reset
+	// to 0 on spawn. Subtracting 1 unguarded indexed screenEffect[-1], which
+	// reads the qhandle_t in front of the struct and drew that garbage shader
+	// over the whole screen.
+	state = ci->damageTextureState - 1;
+	if(state < 0){state = 0;}
+	if(state >= (int)ARRAY_LEN(tier->screenEffect)){state = ARRAY_LEN(tier->screenEffect)-1;}
+	effect = tier->screenEffect[state];
 	if(ps->bitFlags & isBreakingLimit && tier->screenEffectPowering){
 		effect = tier->screenEffectPowering;
 	}
 	else if(ps->bitFlags & isTransforming && tier->screenEffectTransforming){
 		effect = tier->screenEffectTransforming;
 	}
+	if(!effect){return;}
 	CG_DrawPic(qfalse,0,0,640,480,effect);
 }
 /*================
