@@ -202,6 +202,9 @@ void R_ImageList_f( void ) {
 		case GL_CLAMP_TO_EDGE:
 			ri.Printf( PRINT_ALL, "clmp " );
 			break;
+		case GLWRAP_REPEAT_S_CLAMP_T:
+			ri.Printf( PRINT_ALL, "r/c  " );
+			break;
 		default:
 			ri.Printf( PRINT_ALL, "%4i ", image->wrapClampMode );
 			break;
@@ -776,7 +779,30 @@ R_CreateImage
 This is the only way any image_t are created
 ================
 */
-image_t *R_CreateImage( const char *name, const byte *pic, int width, int height, 
+/*
+================
+R_WrapModes
+
+Split a wrap mode into its S and T components.
+
+Almost every mode is a GL enum meant for both axes, so this is a copy. The
+exception is GLWRAP_REPEAT_S_CLAMP_T, which is a pseudo-mode rather than a GL
+enum and must be translated here - it is the only place that knows the two axes
+can differ, and passing it to glTexParameter unresolved would set an invalid
+wrap mode.
+================
+*/
+void R_WrapModes( int wrapClampMode, GLint *wrapS, GLint *wrapT ) {
+	if ( wrapClampMode == GLWRAP_REPEAT_S_CLAMP_T ) {
+		*wrapS = GL_REPEAT;
+		*wrapT = GL_CLAMP_TO_EDGE;
+		return;
+	}
+
+	*wrapS = *wrapT = wrapClampMode;
+}
+
+image_t *R_CreateImage( const char *name, const byte *pic, int width, int height,
 					   qboolean mipmap, qboolean allowPicmip, int glWrapClampMode ) {
 	image_t		*image;
 	qboolean	isLightmap = qfalse;
@@ -827,8 +853,13 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 								&image->uploadWidth,
 								&image->uploadHeight );
 
-	qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, glWrapClampMode );
-	qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, glWrapClampMode );
+	{
+		GLint	wrapS, wrapT;
+
+		R_WrapModes( glWrapClampMode, &wrapS, &wrapT );
+		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS );
+		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT );
+	}
 
 	qglBindTexture( GL_TEXTURE_2D, 0 );
 

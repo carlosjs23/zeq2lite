@@ -100,7 +100,7 @@ typedef struct image_s {
 
 	qboolean	mipmap;
 	qboolean	allowPicmip;
-	int			wrapClampMode;		// GL_CLAMP_TO_EDGE or GL_REPEAT
+	int			wrapClampMode;		// GL_CLAMP_TO_EDGE, GL_REPEAT or GLWRAP_REPEAT_S_CLAMP_T
 
 	struct image_s*	next;
 } image_t;
@@ -1373,6 +1373,17 @@ qboolean	R_GetEntityToken( char *buffer, int size );
 model_t		*R_AllocModel( void );
 
 void    	R_Init( void );
+// Wrap modes are ordinary GL enums applied to both axes, with one exception.
+// GL has always supported wrapping S and T independently; it is Quake 3's
+// shader language that does not, offering only `map` (repeat both) and
+// `clampmap` (clamp both). This pseudo-mode fills that gap for textures that
+// tile along one axis and run edge-to-edge along the other - a strip wrapped
+// around a ring, say, where repeating T would blend its two unlike ends
+// together. It is NOT a GL enum: R_WrapModes translates it before it reaches
+// glTexParameter, and nothing else may pass it to GL directly.
+#define GLWRAP_REPEAT_S_CLAMP_T		0x7F000001
+
+void		R_WrapModes( int wrapClampMode, GLint *wrapS, GLint *wrapT );
 image_t		*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmip, int glWrapClampMode );
 
 image_t		*R_CreateImage( const char *name, const byte *pic, int width, int height, qboolean mipmap

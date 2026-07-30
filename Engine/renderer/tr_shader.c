@@ -1047,6 +1047,32 @@ static qboolean ParseStage( shaderStage_t *stage, char **text )
 			}
 		}
 		//
+		// clampmapT <name>
+		//
+		// Repeats along S, clamps along T. For strips that tile in one
+		// direction but run edge-to-edge in the other - the screen-space aura's
+		// spike texture wraps its ring along S while T goes from the opaque
+		// body to transparent tips. Plain `map` would repeat T and blend those
+		// two unlike ends together, drawing a bright seam along the outer rim;
+		// `clampmap` would stop S tiling.
+		//
+		else if ( !Q_stricmp( token, "clampmapT" ) )
+		{
+			token = COM_ParseExt( text, qfalse );
+			if ( !token[0] )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: missing parameter for 'clampmapT' keyword in shader '%s'\n", shader.name );
+				return qfalse;
+			}
+
+			stage->bundle[0].image[0] = R_FindImageFile( token, stageMipmaps, !shader.noPicMip, GLWRAP_REPEAT_S_CLAMP_T );
+			if ( !stage->bundle[0].image[0] )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: R_FindImageFile could not find '%s' in shader '%s'\n", token, shader.name );
+				return qfalse;
+			}
+		}
+		//
 		// clampmap2 <name>
 		//
 		else if ( !Q_stricmp( token, "clampmap2" ) )
