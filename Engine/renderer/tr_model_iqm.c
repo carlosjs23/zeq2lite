@@ -192,6 +192,22 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 		return qfalse;
 	}
 
+	// The IQM format allows a static mesh with no frames, but this renderer's
+	// vertex path is skinning-only: every position comes out of poseMats, which
+	// is allocated as num_joints * num_frames matrices and is therefore empty
+	// when there are no frames. RB_IQMSurfaceAnim would then divide by zero
+	// reducing the frame index and read past that empty allocation.
+	//
+	// Rejecting here rather than clamping the frame index is deliberate: a
+	// frameless model has no pose to render, so anything drawn from one would
+	// be garbage. Author static meshes with a single identity joint and one
+	// frame, which is what the vertex path expects.
+	if ( header->num_frames < 1 ) {
+		ri.Printf(PRINT_WARNING, "R_LoadIQM: %s has no frames; static meshes need "
+				"one identity joint and a single frame.\n", mod_name);
+		return qfalse;
+	}
+
 	// check and swap vertex arrays
 	if( IQM_CheckRange( header, header->ofs_vertexarrays,
 			    header->num_vertexarrays,
