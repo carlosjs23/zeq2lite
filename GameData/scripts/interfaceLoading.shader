@@ -45,12 +45,14 @@ searching
 	}
 }
 
+// Four frames cycled at 4fps: none, one, two, three. Animating here rather than
+// in cg_info.c and ui_connect.c keeps both callers as a single unchanging draw.
 dots
 {
 	nopicmip
 	nomipmaps
 	{
-		map interface/art/dots.png
+		animMap 4 interface/art/dots0.png interface/art/dots1.png interface/art/dots2.png interface/art/dots3.png
 		blendfunc GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA
 	}
 }

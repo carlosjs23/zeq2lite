@@ -220,8 +220,10 @@ void UI_DrawConnectScreen( qboolean overlay ) {
 		case CA_CONNECTING:
 			text = trap_R_RegisterShaderNoMip("searching");
 			if(text){trap_R_DrawStretchPic(x,y,w,h, 0, 0, 1, 1, text);}
-			x = 70;
-			y = 52;
+			// Trailing the caption on its own line: "SEARCHING" is the longer
+			// word here and ends at x 103, on the same y 32 to 42 band.
+			x = 106;
+			y = 38;
 			w = 8;
 			h = 4;
 			break;

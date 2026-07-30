@@ -140,7 +140,9 @@ void CG_DrawInformation( void ) {
 	if(cg.infoScreenText[0]){
 		text = trap_R_RegisterShaderNoMip("loading");
 		if(text){CG_DrawPic(qfalse,0,18,127,64,text);}
-		if(dots){CG_DrawPic(qfalse,64,52,8,4,dots);}
+		// Trailing the caption on its own line: "LOADING" ends at x 94 and sits
+		// between y 32 and 42 inside the 0,18,127,64 the graphic occupies.
+		if(dots){CG_DrawPic(qfalse,97,38,8,4,dots);}
 	}
 	else{
 		text = trap_R_RegisterShaderNoMip("ready");

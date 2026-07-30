@@ -150,11 +150,16 @@ def caption_scale(width, height, words):
     return max(1, min((width * 8 // 10) // cells, (height * 6 // 10) // GLYPH_H))
 
 
-def caption(width, height, word, colour, scale, shadow=(0, 0, 0, 170)):
-    """A word centred in the canvas, over a dropped shadow.
+def caption(width, height, word, colour, scale, centre=0.30, shadow=(0, 0, 0, 170)):
+    """A word set across the canvas at `centre`, over a dropped shadow.
 
-    The shadow is what makes this readable: these captions are drawn on top of
-    the map's levelshot, which can be any colour at all.
+    Sat high rather than centred because the progress dots are drawn inside this
+    same rectangle - cg_info.c puts them at 64,52 within the caption's
+    0,18,127,64, which is 53% of the way down. A vertically centred word runs
+    straight through them.
+
+    The shadow is what keeps this readable: these are drawn on top of the map's
+    levelshot, which can be any colour at all.
     """
     word = word.upper()
     glyphs = [FONT[c] for c in word if c in FONT]
@@ -163,7 +168,8 @@ def caption(width, height, word, colour, scale, shadow=(0, 0, 0, 170)):
 
     cells = len(glyphs) * (GLYPH_W + 1) - 1
     ink_w, ink_h = cells * scale, GLYPH_H * scale
-    ox, oy = (width - ink_w) // 2, (height - ink_h) // 2
+    ox = (width - ink_w) // 2
+    oy = max(0, int(round(height * centre)) - ink_h // 2)
     drop = max(1, scale // 2)
 
     def lit(px, py):
@@ -186,11 +192,21 @@ def caption(width, height, word, colour, scale, shadow=(0, 0, 0, 170)):
     return pixel
 
 
-def ellipsis(width, height, count, colour):
-    """The progress dots, drawn beside a caption at 8x4 on screen."""
+def ellipsis(width, height, count, colour, lit=None):
+    """The progress dots, drawn after a caption at 8x4 on screen.
+
+    `lit` is how many of the `count` dots are shown, which is what makes the
+    animation: one frame per step, cycled by the shader's animMap.
+    """
+    if lit is None:
+        lit = count
+
     def pixel(x, y):
         span = width // count
-        cx, cy = span // 2 + (x // span) * span, height // 2
+        slot = x // span
+        if slot >= lit:
+            return (0, 0, 0, 0)
+        cx, cy = span // 2 + slot * span, height // 2
         r = min(span, height) // 2 - 1
         if r < 1:
             r = 1
@@ -212,6 +228,9 @@ def main():
                     help="solid border thickness in pixels (default: 2)")
     ap.add_argument("--glow", type=int, default=5,
                     help="pixels the border fades inward over (default: 5)")
+    ap.add_argument("--caption-centre", type=float, default=0.30,
+                    help="where the caption sits down the image, 0..1 "
+                         "(default: 0.30, clear of the progress dots)")
     ap.add_argument("--ink", default="240,240,245",
                     help="caption and border colour as 'R,G,B' (default: 240,240,245)")
     args = ap.parse_args()
@@ -248,12 +267,16 @@ def main():
     scale = caption_scale(254, 128, [w for _, w in captions])
     for name, word in captions:
         write_png(os.path.join(args.outdir, name + ".png"), 254, 128,
-                  caption(254, 128, word, ink + (255,), scale))
+                  caption(254, 128, word, ink + (255,), scale,
+                          args.caption_centre))
         written += 1
 
-    write_png(os.path.join(args.outdir, "dots.png"), 48, 16,
-              ellipsis(48, 16, 3, ink + (255,)))
-    written += 1
+    # One frame per step; scripts/interfaceLoading.shader cycles them with
+    # animMap, so the ellipsis animates without the drawing code knowing.
+    for step in range(4):
+        write_png(os.path.join(args.outdir, "dots%d.png" % step), 48, 16,
+                  ellipsis(48, 16, 3, ink + (255,), lit=step))
+        written += 1
 
     print("wrote %d images into %s" % (written, args.outdir))
 
