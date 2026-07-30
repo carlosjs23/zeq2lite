@@ -416,7 +416,11 @@ static void StartServer_LevelshotDraw( void *self ) {
 	y = b->generic.y;
 	w = b->width;
 	h =	b->height + 28;
-	if( b->generic.flags & QMF_HIGHLIGHT ) {	
+	// Guarded like the levelshot above: RegisterShaderNoMip answers 0 when the
+	// image is missing, and handle 0 draws the default shader - an opaque black
+	// and white box, painted here over the whole thumbnail. Selecting a map
+	// replaced its picture with that instead of highlighting it.
+	if( ( b->generic.flags & QMF_HIGHLIGHT ) && b->focusshader ) {
 		UI_DrawHandlePic( x, y, w, h, b->focusshader );
 	}
 }
