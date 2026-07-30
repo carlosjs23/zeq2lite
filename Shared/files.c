@@ -509,7 +509,16 @@ qboolean FS_CreatePath (char *OSPath) {
 
 	// Skip creation of the root directory as it will always be there
 	ofs = strchr( path, PATH_SEP );
-	ofs++;
+
+	// A path with no separator at all - "." or a bare directory name - makes
+	// strchr return NULL, and incrementing that is both undefined and non-NULL,
+	// so the loop's own NULL check could never save it: it went on to
+	// dereference 0x1. FS_Startup reaches this with fs_homepath, which is a
+	// bare "." whenever the engine is launched by a relative path, so any
+	// `+set fs_basepath ...` used to segfault here.
+	if ( ofs != NULL ) {
+		ofs++;
+	}
 
 	for (; ofs != NULL && *ofs ; ofs++) {
 		if (*ofs == PATH_SEP) {
