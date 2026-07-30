@@ -1819,17 +1819,12 @@ void RE_LoadWorldMap( const char *name ) {
 
 	tr.worldMapLoaded = qtrue;
 
-	fprintf( stderr, "RE_LoadWorldMap: loading map '%s'\n", name ); fflush( stderr );
-
 	buffer.v = NULL;
 	// load it
     long len = ri.FS_ReadFile( name, &buffer.v );
 	if ( len <= 0 || !buffer.b ) {
-		fprintf( stderr, "RE_LoadWorldMap: map '%s' NOT FOUND! (len=%ld)\n", name, len ); fflush( stderr );
 		ri.Error (ERR_DROP, "RE_LoadWorldMap: %s not found", name);
 	}
-
-	fprintf( stderr, "RE_LoadWorldMap: file read successfully (%ld bytes), buffer.b = %p, header check...\n", len, buffer.b ); fflush( stderr );
 
 	// clear tr.world so if the level fails to load, the next
 	// try will not look at the partially loaded version
@@ -1841,17 +1836,13 @@ void RE_LoadWorldMap( const char *name ) {
 	Q_strncpyz( s_worldData.baseName, COM_SkipPath( s_worldData.name ), sizeof( s_worldData.baseName ) );
 	COM_StripExtension(s_worldData.baseName, s_worldData.baseName, sizeof(s_worldData.baseName));
 
-	fprintf( stderr, "RE_LoadWorldMap: calling ri.Hunk_Alloc(0)...\n" ); fflush( stderr );
 	startMarker = ri.Hunk_Alloc(0, h_low);
-	fprintf( stderr, "RE_LoadWorldMap: Hunk_Alloc returned %p\n", startMarker ); fflush( stderr );
 	c_gridVerts = 0;
 
 	header = (dheader_t *)buffer.b;
 	fileBase = (byte *)header;
 
-	fprintf( stderr, "RE_LoadWorldMap: header pointer = %p, accessing version...\n", header ); fflush( stderr );
 	i = LittleLong (header->version);
-	fprintf( stderr, "RE_LoadWorldMap: bsp version %i (expected %i)\n", i, BSP_VERSION ); fflush( stderr );
 	if ( i != BSP_VERSION ) {
 		ri.Error (ERR_DROP, "RE_LoadWorldMap: %s has wrong version number (%i should be %i)", 
 			name, i, BSP_VERSION);
@@ -1863,29 +1854,29 @@ void RE_LoadWorldMap( const char *name ) {
 	}
 
 	// load into heap
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading shaders...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading shaders...\n" );
 	R_LoadShaders( &header->lumps[LUMP_SHADERS] );
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading lightmaps...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading lightmaps...\n" );
 	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS] );
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading planes...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading planes...\n" );
 	R_LoadPlanes (&header->lumps[LUMP_PLANES]);
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading fogs...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading fogs...\n" );
 	R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES] );
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading surfaces...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading surfaces...\n" );
 	R_LoadSurfaces( &header->lumps[LUMP_SURFACES], &header->lumps[LUMP_DRAWVERTS], &header->lumps[LUMP_DRAWINDEXES] );
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading marksurfaces...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading marksurfaces...\n" );
 	R_LoadMarksurfaces (&header->lumps[LUMP_LEAFSURFACES]);
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading nodes and leafs...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading nodes and leafs...\n" );
 	R_LoadNodesAndLeafs (&header->lumps[LUMP_NODES], &header->lumps[LUMP_LEAFS]);
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading submodels...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading submodels...\n" );
 	R_LoadSubmodels (&header->lumps[LUMP_MODELS]);
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading visibility...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading visibility...\n" );
 	R_LoadVisibility( &header->lumps[LUMP_VISIBILITY] );
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading entities...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading entities...\n" );
 	R_LoadEntities( &header->lumps[LUMP_ENTITIES] );
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: loading lightgrid...\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: loading lightgrid...\n" );
 	R_LoadLightGrid( &header->lumps[LUMP_LIGHTGRID] );
-	ri.Printf( PRINT_ALL, "RE_LoadWorldMap: all lumps loaded successfully!\n" );
+	ri.Printf( PRINT_DEVELOPER, "RE_LoadWorldMap: all lumps loaded successfully!\n" );
 
 	s_worldData.dataSize = (byte *)ri.Hunk_Alloc(0, h_low) - startMarker;
 
