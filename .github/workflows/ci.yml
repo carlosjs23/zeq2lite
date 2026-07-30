@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Unit tests (Criterion, ASan + UBSan)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Criterion
+        run: brew install criterion
+
+      # Cheap and catches a whole defect class, so it runs before the build.
+      - name: Lint
+        run: make lint
+
+      - name: Unit tests
+        run: make test
+
+      - name: JUnit report
+        if: always()
+        run: make test-report
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report
+          path: tests/bin/report/*.xml
+          if-no-files-found: warn
+
+  build:
+    name: Build engine and game modules
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Real SDL2, not sdl2-compat: see the SDL2_PREFIX comment in the Makefile.
+      - name: Install SDL2
+        run: brew install sdl2
+
+      - name: Build
+        run: make -j"$(sysctl -n hw.ncpu)"
+
+      - name: Verify SDL linkage is shim-free
+        run: |
+          bin=$(ls Build/Release-darwin-*/ZEQ2.* 2>/dev/null | head -1)
+          if [ -z "$bin" ]; then echo "no engine binary produced"; exit 1; fi
+          otool -L "$bin" | grep -i sdl || true
+          if otool -L "$bin" | grep -qiE "sdl12-compat|sdl2-compat|SDL3"; then
+            echo "ERROR: engine links an SDL shim instead of real SDL2"
+            exit 1
+          fi
+
+  # The smoke and sanitizer suites need the ~324MB game data, which is not in
+  # this repository, so they cannot run on a clean CI checkout. Run them locally:
+  #   Tools/dev/zeq2smoke.sh --seconds 20 --dedicated
+  #   Tools/dev/zeq2sanitize.sh
+  # Wire them up here once the data is available to CI (artifact, cache or LFS).
