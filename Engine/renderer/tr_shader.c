@@ -123,6 +123,34 @@ void R_RemapShader(const char *shaderName, const char *newShaderName, const char
 ParseVector
 ===============
 */
+/*
+===============
+ShaderColorToByte
+
+Scale a shader colour component (nominally 0..1) into a byte.
+
+Shader scripts are content: they arrive from pk3 files and are hand-edited, so a
+component can be out of range, absurd, or - when the surrounding parse failed -
+not a number at all. Converting a float that does not fit into the destination
+integer type is undefined behaviour, so clamp before the cast rather than after.
+
+Written as "!(scaled > 0.0f)" so NaN, for which every comparison is false, maps
+to 0 instead of being converted.
+===============
+*/
+static byte ShaderColorToByte( float component ) {
+	float	scaled = 255.0f * component;
+
+	if ( !( scaled > 0.0f ) ) {
+		return 0;
+	}
+	if ( scaled >= 255.0f ) {
+		return 255;
+	}
+
+	return (byte)scaled;
+}
+
 static qboolean ParseVector( char **text, int count, float *v ) {
 	char	*token;
 	int		i;
@@ -1799,10 +1827,22 @@ static qboolean ParseStage( shaderStage_t *stage, char **text )
 			{
 				vec3_t	color;
 
-				ParseVector( text, 3, color );
-				stage->constantColor[0] = 255 * color[0];
-				stage->constantColor[1] = 255 * color[1];
-				stage->constantColor[2] = 255 * color[2];
+				// ParseVector's result was discarded here and 'color' was left
+				// uninitialised, so a malformed "rgbGen const" - a missing
+				// parenthesis is enough, and ParseVector requires spaces around
+				// them - fed uninitialised stack straight into the conversions
+				// below. Converting a float that does not fit in a byte is
+				// undefined behaviour; UBSan caught it converting 1.7e+30.
+				VectorClear( color );
+
+				if ( !ParseVector( text, 3, color ) )
+				{
+					return qfalse;
+				}
+
+				stage->constantColor[0] = ShaderColorToByte( color[0] );
+				stage->constantColor[1] = ShaderColorToByte( color[1] );
+				stage->constantColor[2] = ShaderColorToByte( color[2] );
 
 				stage->rgbGen = CGEN_CONST;
 			}
@@ -1952,8 +1992,18 @@ static qboolean ParseStage( shaderStage_t *stage, char **text )
 			}
 			else if ( !Q_stricmp( token, "vector" ) )
 			{
-				ParseVector( text, 3, stage->bundle[0].tcGenVectors[0] );
-				ParseVector( text, 3, stage->bundle[0].tcGenVectors[1] );
+				// Same discarded result as the rgbGen const case. These write
+				// into the (zeroed) stage rather than a local, so a failed parse
+				// is not undefined here - but it silently produced a degenerate
+				// tcGen instead of reporting the malformed shader.
+				if ( !ParseVector( text, 3, stage->bundle[0].tcGenVectors[0] ) )
+				{
+					return qfalse;
+				}
+				if ( !ParseVector( text, 3, stage->bundle[0].tcGenVectors[1] ) )
+				{
+					return qfalse;
+				}
 
 				stage->bundle[0].tcGen = TCGEN_VECTOR;
 			}
