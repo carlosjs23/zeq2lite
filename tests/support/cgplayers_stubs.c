@@ -69,6 +69,11 @@ void CG_AddPlayerWeapon(refEntity_t *parent, playerState_t *ps, centity_t *cent,
 	(void)parent; (void)ps; (void)cent; (void)team;
 }
 
+// Called from CG_CopyClientInfoModel, which no case here reaches. ld64 lets the
+// reference go unresolved on that basis; GNU ld does not, so the suite only
+// linked on macOS until this existed.
+void CG_CopyUserWeaponGraphics(int from, int to) { (void)from; (void)to; }
+
 qboolean CG_RegisterClientModelnameWithTiers(clientInfo_t *ci, const char *modelName,
                                              const char *skinName) {
 	(void)ci; (void)modelName; (void)skinName;
