@@ -776,6 +776,10 @@ qboolean PM_CheckTransform(void){
 // fighter being chased gets windows of one to two and a half seconds and almost
 // nothing longer, so a threshold above that is one no losing fighter ever meets.
 #define	POWERLEVEL_RECOVERY_CLEAR	1500
+// Share of a power-up tick that goes into healing out of the health pool. The
+// pool itself is the zenkai loop and stays as it is - damage banks it, a charge
+// spends it - this only decides how fast a charge can hand it back.
+#define	POWERLEVEL_HEAL_RATE		0.12f
 
 void PM_CheckPowerLevel(void){
 	int plSpeed,amount,limit;
@@ -907,7 +911,13 @@ void PM_CheckPowerLevel(void){
 					pushLimit = powerLevel[plCurrent] + (int)fractionPool;
 					if(pushLimit > limit){pushLimit = limit;}
 					if((pm->ps->options & canOverheal) && powerLevel[plHealth] < powerLevel[plMaximum] && powerLevel[plHealthPool] > 0){
-						smaller = (powerLevel[plHealth] + raise * 0.3) < powerLevel[plMaximum] ? (raise * 0.3) : (powerLevel[plMaximum] - powerLevel[plHealth]);
+						// POWERLEVEL_HEAL_RATE, not the 0.3 the ceiling push
+						// uses below: at 0.3 a charge returns about 2200 health
+						// a second against damage arriving at 335, so a fighter
+						// undid a whole exchange in two seconds of aura and no
+						// beating ever stuck. Sixty seconds of continuous
+						// fighting left both fighters above ninety percent.
+						smaller = (powerLevel[plHealth] + raise * POWERLEVEL_HEAL_RATE) < powerLevel[plMaximum] ? (raise * POWERLEVEL_HEAL_RATE) : (powerLevel[plMaximum] - powerLevel[plHealth]);
 						if(powerLevel[plHealthPool] > smaller){
 							powerLevel[plHealth] += smaller;
 							powerLevel[plUseFatigue] += smaller * 0.84;
