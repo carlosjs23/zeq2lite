@@ -785,8 +785,12 @@ void PM_CheckPowerLevel(void){
 		recovery *=  fatigueScale < 0.15 ? 0.15 : fatigueScale;
 		recovery *= pm->ps->baseStats[stFatigueRecovery];
 		if(recovery < 1){recovery = 1;}
+		// A raised guard is not rest. Blocking spends fatigue on every hit it
+		// soaks and refills none of it, so the guard only ever runs down while
+		// it is up - holding it buys time at a price instead of for free.
 		if(pm->ps->bitFlags & usingAlter || pm->ps->bitFlags & isStruggling || pm->ps->bitFlags & usingSoar
 		|| pm->ps->bitFlags & usingJump || pm->ps->bitFlags & usingBoost || pm->ps->bitFlags & usingZanzoken
+		|| pm->ps->bitFlags & usingBlock
 		|| pm->ps->bitFlags & isBreakingLimit || pm->ps->weaponstate >= WEAPON_GUIDING){recovery = 0;}
 		// Nobody recovers mid-exchange. tmSafe is the time since this fighter
 		// last dealt or took damage, so a second of it is the price of breaking
