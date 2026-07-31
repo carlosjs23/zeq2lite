@@ -383,7 +383,9 @@ extern struct gclient_s {
 	gentity_t	*playerEntity;
 	char		*modelName;
 	tierConfig_g tiers[8];
-	
+	int			tierTransformCount[8];	// transforms into each tier this life; repeats compound the subsequent scales
+
+
 	// END ADDING
 
 	int			switchTeamTime;		// time the player switched teams

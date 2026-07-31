@@ -54,6 +54,24 @@ void syncTier(gclient_t *client){
 	ps->powerLevel[plDrainMaximum] = tier->effectMaximum;
 }
 
+// A transformation may exhaust the player, never kill them outright, and an
+// unscripted (zero) cost must leave the resource untouched.
+void applyTransformCosts(playerState_t *ps,int healthCost,int fatigueCost,int maximumEffect){
+	if(healthCost){
+		ps->powerLevel[plHealth] -= healthCost;
+		if(ps->powerLevel[plHealth] < 1){ps->powerLevel[plHealth] = 1;}
+	}
+	if(fatigueCost){
+		ps->powerLevel[plFatigue] -= fatigueCost;
+		if(ps->powerLevel[plFatigue] < 0){ps->powerLevel[plFatigue] = 0;}
+	}
+	if(maximumEffect){
+		ps->powerLevel[plMaximum] += maximumEffect;
+		if(ps->powerLevel[plLimit] > 0 && ps->powerLevel[plMaximum] > ps->powerLevel[plLimit]){ps->powerLevel[plMaximum] = ps->powerLevel[plLimit];}
+		if(ps->powerLevel[plMaximum] < 1){ps->powerLevel[plMaximum] = 1;}
+	}
+}
+
 qboolean checkTierUpTransformation(gclient_t *client, int nextTierIndex, int currentTierIndex, int tierChangeMode){
 	qboolean hasRequirementsToTransform = qfalse;
 	playerState_t *ps;
@@ -92,14 +110,29 @@ qboolean checkTierUpTransformation(gclient_t *client, int nextTierIndex, int cur
 					newPowerLevel = (int)(nextTier->requirementCurrent * 1.1 );
 					if(nextTierIndex > ps->powerLevel[plTierTotal]){
 						ps->powerLevel[plTierTotal] = nextTierIndex;
-						ps->timers[tmTransform] = client->tiers[ps->powerLevel[plTierCurrent]].transformTime;
+						ps->timers[tmTransform] = nextTier->transformFirstDuration > 0 ? nextTier->transformFirstDuration : nextTier->transformTime;
 						ps->stats[stTransformState] = 2;
+						applyTransformCosts(ps,nextTier->transformFirstHealth,nextTier->transformFirstFatigue,nextTier->transformFirstEffectMaximum);
 						if(ps->powerLevel[plCurrent] < nextTier->requirementCurrent) {
 							ps->powerLevel[plCurrent] = newPowerLevel ;
 						}
 					}
 					else {
+						// Repeat transforms compound the subsequent scales; an unscripted scale (<= 0) leaves the cost alone.
+						int repeat = client->tierTransformCount[nextTierIndex] > 0 ? client->tierTransformCount[nextTierIndex] - 1 : 0;
+						float duration = nextTier->transformDuration;
+						float healthCost = nextTier->transformHealth;
+						float fatigueCost = nextTier->transformFatigue;
+						float maximumEffect = nextTier->transformEffectMaximum;
+						while(repeat-- > 0){
+							duration += nextTier->transformSubsequentDuration;
+							if(nextTier->transformSubsequentHealthScale > 0){healthCost *= nextTier->transformSubsequentHealthScale;}
+							if(nextTier->transformSubsequentFatigueScale > 0){fatigueCost *= nextTier->transformSubsequentFatigueScale;}
+							if(nextTier->transformSubsequentMaximumScale > 0){maximumEffect *= nextTier->transformSubsequentMaximumScale;}
+						}
+						if(duration > 1){ps->timers[tmTransform] = (int)duration;}
 						ps->stats[stTransformState] = 1;
+						applyTransformCosts(ps,(int)healthCost,(int)fatigueCost,(int)maximumEffect);
 						if(tierChangeMode==3) {
 							if(ps->powerLevel[plCurrent] < nextTier->requirementCurrent) {
 								ps->powerLevel[plFatigue] -= (newPowerLevel - ps->powerLevel[plCurrent]) *(g_quickTransformCost.value +( (nextTierIndex - currentTierIndex) * g_quickTransformCostPerTier.value)) ;
@@ -107,6 +140,7 @@ qboolean checkTierUpTransformation(gclient_t *client, int nextTierIndex, int cur
 							}
 						}
 					}
+					client->tierTransformCount[nextTierIndex]++;
 					ps->powerLevel[plTierSelectionMode]=0;
 					return qtrue;
 				}
@@ -238,6 +272,7 @@ void setupTiers(gclient_t *client){
 	for(i=0;i<8;i++){
 		tier = &client->tiers[i];
 		memset(tier,0,sizeof(tierConfig_g));
+		client->tierTransformCount[i] = 0;
 		// Most thresholds are lower bounds, where the zero left by the memset
 		// reads as "no requirement". requirementHealthMaximum is an upper bound
 		// as a percentage of maximum, so zero would read as "only at zero

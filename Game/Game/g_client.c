@@ -991,6 +991,7 @@ void ClientSpawn(gentity_t *ent) {
 	if(g_pointGravity.value){client->ps.options |= pointGravity;}
 	client->ps.powerLevel[plTierCurrent] = 0;
 	client->ps.powerLevel[plTierTotal] = 0;
+	memset(client->tierTransformCount,0,sizeof(client->tierTransformCount));
 	client->ps.powerLevel[plTierDesired] = 0;
 	client->ps.powerLevel[plTierChanged] = 2;
 	client->ps.lockonData[lkLastLockedPlayer] = -1;

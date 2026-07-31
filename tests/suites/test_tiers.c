@@ -337,3 +337,102 @@ Test(tiers, a_stated_quick_zanzoken_is_left_alone) {
 	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickDistance], 0.4f, 0.001f, "stated distance wins");
 	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickCost], 0.5f, 0.001f, "stated cost wins");
 }
+
+/*
+The tier configs can price a transformation - transformFirst* for the first
+ascension to a tier in a life, transform* for every return to it - and syncTier
+has carried those numbers into the playerState since the fields were added, but
+nothing ever spent them: ascending swapped the multipliers and cost nothing.
+The tests below pin the prices to the transition itself.
+*/
+static void given_transform_priced_tiers(void) {
+	given_tiers(
+	    "transformTime 3000\n"
+	    "transformFirstDuration 5000\n"
+	    "transformFirstHealth 3000\n"
+	    "transformFirstFatigue 2000\n"
+	    "transformFirstEffectMaximum 1000\n"
+	    "transformDuration 800\n"
+	    "transformHealth 500\n"
+	    "transformFatigue 400\n"
+	    "transformEffectMaximum 100\n"
+	    "transformSubsequentDuration 200\n"
+	    "transformEffectSubsequentHealthScale 2.0\n"
+	    "transformEffectSubsequentFatigueScale 2.0\n"
+	    "transformEffectSubsequentMaximumScale 2.0\n");
+	given_a_healthy_fighter();
+	client.ps.powerLevel[plLimit] = 100000;
+}
+
+/* Power back down to base without touching the pools, the way a test steps
+   between ascensions. plTierTotal keeps the high-water mark, so the next
+   ascension is a repeat, not a first. */
+static void given_the_fighter_powered_back_down(void) {
+	client.ps.powerLevel[plTierCurrent] = 0;
+	client.ps.timers[tmTransform] = 0;
+	given_a_healthy_fighter();
+	client.ps.powerLevel[plLimit] = 100000;
+}
+
+Test(tiers, the_first_ascension_pays_its_scripted_toll) {
+	given_transform_priced_tiers();
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 17000, "transformFirstHealth must come out of health");
+	cr_assert_eq(client.ps.powerLevel[plFatigue], 18000, "transformFirstFatigue must come out of fatigue");
+	cr_assert_eq(client.ps.powerLevel[plMaximum], 21000, "transformFirstEffectMaximum must reach the maximum");
+	cr_assert_eq(client.ps.timers[tmTransform], 5000, "a scripted first duration overrides transformTime");
+}
+
+Test(tiers, a_first_ascension_without_its_own_duration_takes_transformTime) {
+	given_tiers("transformTime 3000\ntransformFirstHealth 100\n");
+	given_a_healthy_fighter();
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.timers[tmTransform], 3000, "transformTime is the default first duration");
+}
+
+Test(tiers, a_repeat_ascension_pays_the_per_transform_price) {
+	given_transform_priced_tiers();
+	checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP);
+	given_the_fighter_powered_back_down();
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 19500, "transformHealth prices the return trip");
+	cr_assert_eq(client.ps.powerLevel[plFatigue], 19600, "transformFatigue prices the return trip");
+	cr_assert_eq(client.ps.powerLevel[plMaximum], 20100, "transformEffectMaximum applies on the return trip");
+	cr_assert_eq(client.ps.timers[tmTransform], 800, "a scripted transformDuration replaces the instant switch");
+}
+
+Test(tiers, further_repeats_compound_the_subsequent_scales) {
+	given_transform_priced_tiers();
+	checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP);
+	given_the_fighter_powered_back_down();
+	checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP);
+	given_the_fighter_powered_back_down();
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 19000, "the second repeat costs transformHealth scaled once");
+	cr_assert_eq(client.ps.powerLevel[plFatigue], 19200, "the second repeat costs transformFatigue scaled once");
+	cr_assert_eq(client.ps.powerLevel[plMaximum], 20200, "the maximum effect scales with the repeats too");
+	cr_assert_eq(client.ps.timers[tmTransform], 1000, "each repeat stretches the duration by transformSubsequentDuration");
+}
+
+Test(tiers, an_unpriced_ascension_still_costs_nothing) {
+	given_tiers(NULL);
+	given_a_healthy_fighter();
+	client.ps.powerLevel[plLimit] = 100000;
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 20000, "no scripted price, no health charge");
+	cr_assert_eq(client.ps.powerLevel[plFatigue], 20000, "no scripted price, no fatigue charge");
+	cr_assert_eq(client.ps.powerLevel[plMaximum], 20000, "no scripted effect, the maximum stays put");
+}
+
+Test(tiers, the_toll_may_exhaust_the_fighter_but_never_kill) {
+	given_transform_priced_tiers();
+	client.ps.powerLevel[plHealth] = 2500;   /* under the 3000 the first ascension asks */
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 1, "the toll bottoms out at 1 health, not a death");
+}
