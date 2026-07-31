@@ -52,6 +52,7 @@ void CalcMuzzlePoint(gentity_t *ent, vec3_t f, vec3_t r, vec3_t u, vec3_t muzzle
 void G_GetMuzzleSettings(vec3_t m, vec3_t f, vec3_t r, vec3_t u) { (void)m; (void)f; (void)r; (void)u; }
 g_userWeapon_t *G_FindUserWeaponData(int clientNum, int weaponNum) { (void)clientNum; (void)weaponNum; return NULL; }
 g_userWeapon_t *G_FindUserAltWeaponData(int clientNum, int weaponNum) { (void)clientNum; (void)weaponNum; return NULL; }
+void G_RecordAttacker(gclient_t *victim, int attackerNum) { (void)victim; (void)attackerNum; }
 
 void SnapVectorTowards(vec3_t v, vec3_t to) { (void)v; (void)to; }
 

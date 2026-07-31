@@ -895,6 +895,8 @@ void ClientSpawn(gentity_t *ent) {
 	int		flags;
 	int		savedPing;
 	int		eventSequence;
+	int		newMaximum;
+	int		baseMaximum;
 	char	model[MAX_QPATH];
 	char	userinfo[MAX_INFO_STRING];
 	index = ent - g_entities;
@@ -947,6 +949,10 @@ void ClientSpawn(gentity_t *ent) {
 	client->sess = savedSess;
 	client->ps.ping = savedPing;
 	client->lastkilled_client = -1;
+	// A fresh body owes nobody a kill; without this the attacker who ended the
+	// last life is credited again the moment this one ends.
+	client->lastDamagedBy = -1;
+	client->lastDamagedAt = 0;
 
 	for ( i = 0 ; i < MAX_PERSISTANT ; i++ ) {
 		client->ps.persistant[i] = persistant[i];
@@ -999,7 +1005,14 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.bitFlags = 0;
 	client->ps.eFlags &= ~EF_AURA;
 	// END ADDING
-	client->ps.powerLevel[plMaximum] = client->ps.powerLevel[plMaximum] > g_powerlevel.value ? client->ps.powerLevel[plMaximum] * 0.75 : g_powerlevel.value;
+	// Dying never raises a ceiling. Snapping anyone below the baseline back up
+	// to it refunded the loss - dying at 15075 returned 20000 - so a fighter
+	// that had been beaten down to a quarter of its start could take a third of
+	// its ceiling back by dying on purpose. Above the baseline a death costs a
+	// quarter and stops at the baseline; at or below it, the ceiling stands.
+	newMaximum = client->ps.powerLevel[plMaximum] * 0.75;
+	baseMaximum = client->ps.powerLevel[plMaximum] < g_powerlevel.value ? client->ps.powerLevel[plMaximum] : g_powerlevel.value;
+	client->ps.powerLevel[plMaximum] = newMaximum > baseMaximum ? newMaximum : baseMaximum;
 	client->ps.powerLevel[plHealthPool] = client->ps.powerLevel[plMaximumPool] = client->ps.powerLevel[plMaximum] / 4;
 	client->ps.powerLevel[plLimit] = g_powerlevelMaximum.value;
 	client->ps.powerLevel[plCurrent] = client->ps.powerLevel[plHealth] = client->ps.powerLevel[plFatigue] = client->ps.powerLevel[plMaximum];

@@ -566,7 +566,10 @@ void G_UserWeaponDamage(gentity_t *target,gentity_t *inflictor,gentity_t *attack
 		if(tgClient){
 			// A missing attacker was replaced by the world entity above, and the
 			// world has no client - attacker-side credit is for players only.
-			if(attacker->client){attacker->client->ps.states |= causedDamage;}
+			if(attacker->client){
+				attacker->client->ps.states |= causedDamage;
+				G_RecordAttacker(tgClient,attacker->s.number);
+			}
 			G_LocationImpact(inflictor->r.currentOrigin,target,inflictor);
 			if(target == attacker){damage *= 0.2f;}
 			if(attacker->client){

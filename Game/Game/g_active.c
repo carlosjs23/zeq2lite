@@ -402,6 +402,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			ent->r.contents &= ~CONTENTS_BODY;
 			syncTier(client);
 			client->respawnTime = level.time + 10000;
+			G_AwardKill(ent);
 			break;
 		case EV_UNCONCIOUS:
 			syncTier(client);
@@ -790,6 +791,13 @@ void ClientThink_real( gentity_t *ent ) {
 	pm.pmove_fixed = pmove_fixed.integer | client->pers.pmoveFixed;
 	pm.pmove_msec = pmove_msec.integer;
 	VectorCopy(client->ps.origin,client->oldOrigin);
+	// Melee damage is dealt inside pmove, which has no reach into gclient_t.
+	// The attacker's own pmove has already posted the damage here and the melee
+	// lock still names them, so the credit is taken now - PM_BurnPowerLevel
+	// spends plDamageFromMelee and clears it a few lines into Pmove below.
+	if(client->ps.powerLevel[plDamageFromMelee] > 0 && client->ps.lockedTarget > 0){
+		G_RecordAttacker(client,client->ps.lockedTarget - 1);
+	}
 	Pmove(&pm);
 	checkTier(client);
 	if(pm.ps->powerLevel[plTierChanged] == 1)
