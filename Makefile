@@ -224,11 +224,6 @@ ifneq ($(BUILD_CLIENT),0)
     # 'sdl' module.  Beware: on systems where homebrew-style sdl2-compat is
     # installed, pkg-config's sdl2 can resolve to that shim, which reaches SDL3
     # by dlopen and breaks AddressSanitizer -- check the prefix it hands back.
-    #
-    # NOTE: only the darwin-arm branch below has actually been ported and tested.
-    # The other platforms still add the bundled SDL 1.2 headers in
-    # Engine/SDL12/include to their include path (search USE_LOCAL_HEADERS), which
-    # will shadow SDL2 and needs the same treatment before they build again.
     SDL_CFLAGS=$(shell pkg-config --silence-errors --cflags sdl2|sed 's/-Dmain=SDL_main//')
     SDL_LIBS=$(shell pkg-config --silence-errors --libs sdl2)
   endif
@@ -359,8 +354,20 @@ ifneq (,$(findstring "$(PLATFORM)", "linux" "gnu_kfreebsd" "kfreebsd-gnu"))
     CLIENT_LIBS += -lrt
   endif
 
-  ifeq ($(USE_LOCAL_HEADERS),1)
-    CLIENT_CFLAGS += -I$(SDLHDIR)/include
+  # Deliberately NOT adding -I$(SDLHDIR)/include here. Those are the bundled SDL
+  # 1.2 headers, and Engine/sdl/*.c are SDL2 sources - SDL_CreateWindow and
+  # SDL_GL_GetDrawableSize do not exist in 1.2. With both on the path the build
+  # only worked when SDL_CFLAGS happened to be searched first, and fell back to
+  # 1.2 with an unreadable wall of errors when sdl2 was not installed. The
+  # -DUSE_LOCAL_HEADERS define stays: it only picks quoted includes, which
+  # resolve against SDL_CFLAGS just as well.
+  ifeq ($(strip $(SDL_CFLAGS)),)
+    SDL2_CLEAN_GOALS := clean clean2 clean-debug clean-release distclean \
+      toolsclean toolsclean2 toolsclean-debug toolsclean-release
+    ifneq ($(if $(MAKECMDGOALS),$(filter-out $(SDL2_CLEAN_GOALS),$(MAKECMDGOALS)),build),)
+      $(error No SDL2 development files found. Install libsdl2-dev \
+        (Debian/Ubuntu) or SDL2-devel (Fedora), or put sdl2.pc on PKG_CONFIG_PATH)
+    endif
   endif
 
   ifeq ($(ARCH),i386)
