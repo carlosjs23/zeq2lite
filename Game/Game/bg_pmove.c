@@ -2486,7 +2486,12 @@ void PM_Melee(void){
 			if(pm->ps->timers[tmMeleeBreakerWait] < 0){pm->ps->timers[tmMeleeBreakerWait] = 0;}
 		}
 		if(pm->ps->timers[tmMeleeBreaker]){
-			damage = (pm->ps->powerLevel[plCurrent] * 0.05) * pm->ps->stats[stMeleeAttack];
+			// stMeleeAttack indexes baseStats, not stats - the two arrays have
+			// enums of their own and stats[stMeleeAttack] is stTransformState,
+			// which is zero except on the single frame a tier change starts.
+			// Every melee hit therefore landed for nothing at all, or for a
+			// negative amount while powering down.
+			damage = (pm->ps->powerLevel[plCurrent] * 0.05) * pm->ps->baseStats[stMeleeAttack];
 			if(pm->ps->timers[tmMeleeBreaker] > 0){
 				state = stMeleeUsingChargeBreaker;
 				if(enemyState == stMeleeUsingSpeed){
@@ -2560,7 +2565,7 @@ void PM_Melee(void){
 						PM_StopMelee();
 					}
 					else if(enemyState != stMeleeUsingEvade){
-						damage = (pm->ps->powerLevel[plCurrent] * 0.15) * pm->ps->stats[stMeleeAttack];
+						damage = (pm->ps->powerLevel[plCurrent] * 0.15) * pm->ps->baseStats[stMeleeAttack];
 						if(enemyState == stMeleeUsingBlock){damage *= 0.3;}
 						if(state != stMeleeStartPower){PM_AddEvent(EV_MELEE_KNOCKBACK);}
 					}
@@ -2682,7 +2687,7 @@ void PM_Melee(void){
 				}
 				// Speed Melee
 				else{
-					damage = (pm->ps->powerLevel[plFatigue] * 0.013) * pm->ps->stats[stMeleeAttack];
+					damage = (pm->ps->powerLevel[plFatigue] * 0.013) * pm->ps->baseStats[stMeleeAttack];
 					if(pm->ps->powerups[PW_DRIFTING]==1){damage *= 1.2;}
 					if(pm->ps->bitFlags & usingBoost){damage *= 1.5;}
 					pm->ps->timers[tmMeleeSpeed] += pml.msec;
