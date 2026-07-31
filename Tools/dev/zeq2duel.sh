@@ -14,6 +14,7 @@
 #   zeq2duel.sh --solo                           # one opponent, and you fight it
 #   zeq2duel.sh --sample 500                     # finer resource sampling
 #   zeq2duel.sh --distance 600                   # both spawn the same way out
+#   zeq2duel.sh --skill 5 --seconds 240          # g_aiSkill 1-5, default 3
 #   zeq2duel.sh -- +set g_powerlevel 5000        # extra engine args after --
 #
 # Reads the fight out of the log at the end: first and last state per fighter,
@@ -27,6 +28,11 @@ SECONDS_TOTAL=90
 FIGHTERS="goku,vegetaCell"
 SAMPLE=2000
 SOLO=0
+# Empty means "leave it alone". Set it and the value goes in the duel cfg, not
+# on the command line: g_aiSkill is CVAR_ARCHIVE and the saved config states it,
+# so `+set g_aiSkill 5` is applied before the config exec and then overwritten.
+# The cfg runs after, which is the only place a value of this kind survives.
+SKILL=""
 # Spawn distances. They differ by default so the two do not arrive together,
 # but who reaches whom first decides which fighter owns the exchange, so an
 # equal pair is how you tell a role assigned by the melee system apart from one
@@ -43,6 +49,7 @@ while [[ $# -gt 0 ]]; do
 		--sample) SAMPLE="$2"; shift 2 ;;
 		--solo) SOLO=1; shift ;;
 		--distance) DIST_A="$2"; DIST_B="$2"; shift 2 ;;
+		--skill) SKILL="$2"; shift 2 ;;
 		--) shift; EXTRA=("$@"); break ;;
 		-h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}"; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
@@ -69,6 +76,14 @@ IFS=',' read -ra names <<<"$FIGHTERS"
 
 {
 	echo "g_debugFight $SAMPLE"
+	if [[ -n "$SKILL" ]]; then
+		echo "g_aiSkill $SKILL"
+	fi
+	# Naming a cvar with no argument prints its value, so the log records the
+	# skill the fight actually ran at. Worth the line: the cvar is CVAR_ARCHIVE
+	# and the saved config states it, so "the value I asked for" and "the value
+	# the fight used" are not the same question.
+	echo "g_aiSkill"
 	echo "centerview"
 	echo "ai ${names[0]} $DIST_A"
 	if (( ! SOLO )); then
