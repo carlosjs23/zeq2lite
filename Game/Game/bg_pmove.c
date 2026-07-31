@@ -3509,8 +3509,13 @@ void PmoveSingle(pmove_t *pmove){
 			PM_CheckLockon();
 			PM_CheckZanzoken();
 			PM_CheckBlink();
+			// Not gated on meleeRange the way jump and footsteps are. This is
+			// the only thing that reads the block button, so skipping it inside
+			// 48 units latches usingBlock at whatever it held on the way in: a
+			// guard that cannot be raised against an exchange already underway
+			// and, once raised, cannot be lowered until the exchange ends.
+			PM_CheckBlock();
 			if(!meleeRange){
-				PM_CheckBlock();
 				PM_CheckJump();
 				PM_Footsteps();
 			}
