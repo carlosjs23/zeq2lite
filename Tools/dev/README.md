@@ -9,6 +9,7 @@ Python scripts use only the standard library; shell scripts need bash.
 | `zeq2build.sh` | `make`, then stage the game modules where the engine loads them |
 | `zeq2run.sh` | join a map, stay alive N seconds, report how the run ended |
 | `zeq2shot.sh` | join a map, grab an in-engine screenshot, convert it to PNG |
+| `zeq2duel.sh` | fight two AI opponents and report what each spent doing it |
 | `zeq2smoke.sh` | **gate**: load every map, assert the game survives joining it |
 | `zeq2audit.sh` | report where the code expects assets the data set never shipped |
 | `zeq2aura.sh` | sweep the aura's tuning and contact-sheet what each value renders as |
@@ -92,6 +93,28 @@ things are invisible on darwin-arm:
 - **`ld64` tolerates undefined symbols that GNU `ld` rejects.** A test suite
   missing a stub for a function it never calls links on macOS and fails on
   Linux.
+## Looking at a fight
+
+`zeq2duel.sh` puts two AI opponents in a map, lets them fight, and reads the
+result out of `g_debugFight` — one line per fighter per sample carrying the
+things a fight is actually made of and none of which are on screen as numbers:
+the guard behind the power bar, the two pools, the lock, the buttons held, and
+whether each defensive verb is in use.
+
+```bash
+Tools/dev/zeq2duel.sh --seconds 120       # long enough for guards to break
+```
+
+The summary is per fighter: what it opened and closed with, its guard's
+low-water mark, and how many samples it spent blocking, teleporting, boosting
+or struggling. **A verb with a count of zero is one the fight never had a
+reason to use**, which is the difference between a mechanic and a gimmick, and
+it is the signal to read after any balance change.
+
+The cvar works on its own for a fight involving a human: `g_debugFight 1000`
+reports every client every second, including yours.
+
+Counts are samples, not presses, so they measure how long a verb was held.
 
 ## Why the smoke test drives the client, not the dedicated server
 
