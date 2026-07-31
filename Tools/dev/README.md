@@ -93,6 +93,7 @@ things are invisible on darwin-arm:
 - **`ld64` tolerates undefined symbols that GNU `ld` rejects.** A test suite
   missing a stub for a function it never calls links on macOS and fails on
   Linux.
+
 ## Looking at a fight
 
 `zeq2duel.sh` puts two AI opponents in a map, lets them fight, and reads the
