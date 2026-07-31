@@ -68,10 +68,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	AI_GUARD_LOW		0.55f
 #define	AI_GUARD_READY		0.70f
 #define	AI_GUARD_PATIENCE	12000
+// How long it fights on after giving up on recovering the guard. Hysteresis in
+// time, because the one in level cannot work: the guard is still low the moment
+// patience runs out, so a level test alone re-arms on the very next frame.
+#define	AI_GUARD_COMMIT		6000
 // Far enough out to be worth calling an escape: a skill is charged at anything
 // past AI_SKILL_RANGE, so a retreat that stops short of this one only moves
 // from being punched to being shot.
 #define	AI_ESCAPE_RANGE		900
+// Close enough that a zanzoken is worth its fatigue. Past this the fighter is
+// already out of reach for the moment and flying away is free, so teleporting
+// again only spends the guard it is retreating to rebuild.
+#define	AI_ESCAPE_BREAK		200
 // Fatigue worth spending on leaving. PM_CheckZanzoken refuses outright under
 // 15% of the ceiling, so a fighter that waits much past this cannot leave at
 // all - which is the point of leaving early.
@@ -321,8 +329,16 @@ void G_AIThink( gentity_t *ent ) {
 		if ( ps->powerLevel[plFatigue] >= ps->powerLevel[plMaximum] * AI_GUARD_READY
 			|| level.time - client->aiRecoverAt > AI_GUARD_PATIENCE ) {
 			client->aiRecovering = qfalse;
+			// Giving up on the guard has to mean fighting without one for a
+			// while, not for a single frame. A recovering fighter sets no
+			// forwardmove, and PM_Melee's start sequence sits behind
+			// forwardmove, so it cannot open an exchange at all - it can only
+			// be struck, which drains the guard that keeps it here. Measured:
+			// nought exchanges initiated in ninety seconds against sixteen.
+			client->aiFightUntil = level.time + AI_GUARD_COMMIT;
 		}
-	} else if ( ps->powerLevel[plFatigue] < ps->powerLevel[plMaximum] * AI_GUARD_LOW ) {
+	} else if ( ps->powerLevel[plFatigue] < ps->powerLevel[plMaximum] * AI_GUARD_LOW
+		&& level.time >= client->aiFightUntil ) {
 		client->aiRecovering = qtrue;
 		client->aiRecoverAt = level.time;
 	}
@@ -359,11 +375,15 @@ void G_AIThink( gentity_t *ent ) {
 			return;
 		}
 
-		// Free of it: open the gap before the guard has to do it again. Past
-		// AI_ESCAPE_RANGE there is nothing left to spend fatigue on. Zanzoken
-		// is also what drops the lock, so this is the step that turns being
-		// disengaged into being genuinely out of the fight.
-		if ( distance < AI_ESCAPE_RANGE
+		// Free of it: open the gap before the guard has to do it again, then fly
+		// rather than teleport. Zanzoken costs about three percent of the ceiling
+		// a time and only moves the fighter a few hundred units, while the
+		// opponent closes a thousand in two seconds - so spending it at every
+		// range inside AI_ESCAPE_RANGE buys a gap that cannot be held and pays
+		// for it over and over. Measured: seven zanzokens in one duel, about a
+		// quarter of everything that guard lost, while the distance came back
+		// anyway. Spend it to break contact, and coast once contact is broken.
+		if ( distance < AI_ESCAPE_BREAK
 			&& ps->powerLevel[plFatigue] > ps->powerLevel[plMaximum] * AI_ESCAPE_FLOOR ) {
 			cmd->forwardmove = -127;
 			cmd->buttons |= BUTTON_TELEPORT;
