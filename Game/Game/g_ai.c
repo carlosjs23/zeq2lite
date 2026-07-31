@@ -80,6 +80,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // already out of reach for the moment and flying away is free, so teleporting
 // again only spends the guard it is retreating to rebuild.
 #define	AI_ESCAPE_BREAK		200
+// Least time between two escapes. The range test alone re-fires on every frame
+// it is true, and a fighter drifting across the boundary pays each time - three
+// zanzokens every two seconds, measured, which outspends recovery several times
+// over. One breaks contact; the wait is what lets the guard it bought grow.
+#define	AI_ESCAPE_COOLDOWN	3000
+// Speed the fighter wants before a zanzoken is worth spending. The teleport has
+// no push of its own - it raises the step rate and lets the velocity already in
+// hand carry the fighter - so one fired from a standstill costs the fatigue and
+// moves nobody. Lean away first, spend once actually travelling.
+#define	AI_ESCAPE_SPEED		200
 // Fatigue worth spending on leaving. PM_CheckZanzoken refuses outright under
 // 15% of the ceiling, so a fighter that waits much past this cannot leave at
 // all - which is the point of leaving early.
@@ -384,9 +394,13 @@ void G_AIThink( gentity_t *ent ) {
 		// quarter of everything that guard lost, while the distance came back
 		// anyway. Spend it to break contact, and coast once contact is broken.
 		if ( distance < AI_ESCAPE_BREAK
+			&& level.time >= client->aiEscapeAt
 			&& ps->powerLevel[plFatigue] > ps->powerLevel[plMaximum] * AI_ESCAPE_FLOOR ) {
 			cmd->forwardmove = -127;
-			cmd->buttons |= BUTTON_TELEPORT;
+			if ( VectorLength( ps->velocity ) > AI_ESCAPE_SPEED ) {
+				client->aiEscapeAt = level.time + AI_ESCAPE_COOLDOWN;
+				cmd->buttons |= BUTTON_TELEPORT;
+			}
 			return;
 		}
 
