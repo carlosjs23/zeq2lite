@@ -261,11 +261,15 @@ void Think_Homing (gentity_t *self) {
 		target_dir[2] /= target_length;
 
 		// We don't home in on this entity if its outside our view 'funnel' either.
-		if ( DotProduct(forward, target_dir) < cos(DEG2RAD(self->homAngle)) ) continue;
+		// homAngle is the full width of that funnel, so half of it lies either
+		// side of the direction of travel.
+		if ( DotProduct(forward, target_dir) < cos(DEG2RAD(self->homAngle * 0.5f)) ) continue;
 
-		trap_Trace( &tr,  self->r.currentOrigin, NULL, NULL, 
-			self->r.currentOrigin, ENTITYNUM_NONE, MASK_SHOT );
-		if ( target_ent != &g_entities[tr.entityNum] ) continue;
+		// The candidate has to be something the missile can see: trace from the
+		// missile to it and take either clear air or the candidate itself.
+		trap_Trace( &tr, self->r.currentOrigin, NULL, NULL,
+			midbody, self->s.number, MASK_SHOT );
+		if ( tr.fraction < 1.0f && target_ent != &g_entities[tr.entityNum] ) continue;
 
 		// Only pick this target if it's the closest to the missile,
 		// but keep in account that there might not have been a pick
@@ -368,10 +372,11 @@ void Think_CylinderHoming (gentity_t *self) {
 		target_dir[1] /= target_length;
 		target_dir[2] /= target_length;
 
-
-		trap_Trace( &tr,  self->r.currentOrigin, NULL, NULL, 
-			self->r.currentOrigin, ENTITYNUM_NONE, MASK_SHOT );
-		if ( target_ent != &g_entities[tr.entityNum] ) continue;
+		// The candidate has to be something the missile can see: trace from the
+		// missile to it and take either clear air or the candidate itself.
+		trap_Trace( &tr, self->r.currentOrigin, NULL, NULL,
+			midbody, self->s.number, MASK_SHOT );
+		if ( tr.fraction < 1.0f && target_ent != &g_entities[tr.entityNum] ) continue;
 
 		// Only pick this target if it's the closest to the missile,
 		// but keep in account that there might not have been a pick
@@ -619,7 +624,10 @@ qboolean G_UserRadiusDamage ( vec3_t origin, gentity_t *attacker, gentity_t *ign
 			continue;
 		if (!ent->takedamage)
 			continue;
-		if (ent == owner && ignore->isBlindable)
+		// Your own explosion never bills you. The exemption used to be keyed to
+		// the blind flag, which decides a visual effect and says nothing about
+		// who owns the blast.
+		if (ent == owner)
 			continue;
 		
 		// Find the distance between the perimeter of the entities' bounding box
@@ -639,7 +647,9 @@ qboolean G_UserRadiusDamage ( vec3_t origin, gentity_t *attacker, gentity_t *ign
 			continue;
 		}
 
-		realDamage = centerDamage /** ( 1.0 - distance / radius )*/;
+		// Distance from the blast is what a blast radius means: the edge of the
+		// sphere costs nothing and only the centre costs everything.
+		realDamage = centerDamage * ( 1.0 - distance / radius );
 
 		if(CanDamage(ent, origin)){
 			VectorSubtract (ent->r.currentOrigin, origin, dir);
@@ -906,7 +916,7 @@ void Fire_UserWeapon( gentity_t *self, vec3_t start, vec3_t dir, qboolean altfir
 			self->client->ps.stats[stChargePercentPrimary] = 0; // Only reset it here!
 		}
 		bolt->s.powerups = bolt->chargelvl; // Use this free field to transfer chargelvl
-		bolt->powerLevelCurrent = bolt->powerLevelTotal = bolt->damage * ((float)bolt->chargelvl / 100.0f) * powerScale;
+		bolt->powerLevelCurrent = bolt->powerLevelTotal = G_UserWeaponFiredPower( weaponInfo, bolt->chargelvl, powerScale );
 		bolt->s.dashDir[0] = bolt->powerLevelTotal; // Use this free field to transfer total power level
 		
 		bolt->clipmask = MASK_SHOT;
@@ -990,12 +1000,16 @@ void Fire_UserWeapon( gentity_t *self, vec3_t start, vec3_t dir, qboolean altfir
 				bolt->think = Think_Homing;
 				bolt->nextthink = level.time + FRAMETIME;
 				bolt->homRange = weaponInfo->homing_range;
+				// A script that names no field of view is not describing a blind
+				// missile, so an unset cone opens all the way round.
+				bolt->homAngle = weaponInfo->homing_FOV > 0 ? weaponInfo->homing_FOV : 360;
 				//bolt->homAccel = weaponInfo->homing_accel;
 				break;
 			case HOM_CYLINDER:
 				bolt->think = Think_CylinderHoming;
 				bolt->nextthink = level.time + FRAMETIME;
 				bolt->homRange = weaponInfo->homing_range;
+				bolt->homAngle = weaponInfo->homing_FOV > 0 ? weaponInfo->homing_FOV : 360;
 				//bolt->homAccel = weaponInfo->homing_accel;
 				break;
 			case HOM_ARCH:
@@ -1078,7 +1092,7 @@ void Fire_UserWeapon( gentity_t *self, vec3_t start, vec3_t dir, qboolean altfir
 			self->client->ps.stats[stChargePercentPrimary] = 0;
 		}
 		bolt->s.powerups = bolt->chargelvl;
-		bolt->powerLevelCurrent = bolt->powerLevelTotal = bolt->damage * (1.0f+(float)bolt->chargelvl / 100.0f) * powerScale;
+		bolt->powerLevelCurrent = bolt->powerLevelTotal = G_UserWeaponFiredPower( weaponInfo, bolt->chargelvl, powerScale );
 		bolt->s.dashDir[0] = bolt->powerLevelTotal; // Use this free field to transfer total power level
 		// FIXME: Hack into the old mod style, since it's still needed for now
 		bolt->takedamage = qtrue;
