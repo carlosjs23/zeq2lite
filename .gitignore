@@ -1,6 +1,9 @@
-# Build output
+# Build output. The per-arch test directories come from Tools/dev/zeq2linux.sh:
+# the suites are native binaries, so a linux run cannot share tests/bin with the
+# mac one.
 /Build/
 /tests/bin/
+/tests/bin-linux-*/
 .sanitize-build.log
 
 # Game data. The ~324MB asset set ships separately from the source; a populated

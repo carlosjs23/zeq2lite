@@ -1,0 +1,38 @@
+# Linux build and test parity for a tree developed on darwin-arm.
+#
+# Two things only this image reaches. x86_64 sets HAVE_VM_COMPILED, so it is the
+# only configuration that runs the q3lcc/q3asm toolchain and actually compiles
+# the QVM bytecode - darwin-arm and linux-aarch64 both set BUILD_GAME_QVM=0 and
+# skip it entirely. And GNU ld rejects undefined symbols that ld64 lets through.
+# Both gaps hid real defects until this existed.
+#
+# Built and driven by Tools/dev/zeq2linux.sh; see Tools/dev/README.md.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# bison: lburg/gram.c is checked in, but make's builtin %.c: %.y rule still
+#   fires whenever a checkout leaves gram.y no older than gram.c, and without
+#   yacc that is a bare "Error 127" nowhere near anything mentioning yacc.
+# libcriterion-dev: the unit-test framework, same as brew's on the mac side.
+# gcc rather than clang for the sanitizer builds: Ubuntu's clang package ships
+#   no compiler-rt, so -fsanitize=address fails to link, while libasan comes
+#   with gcc. -fno-sanitize-recover=undefined behaves the same on both.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        bison \
+        libsdl2-dev \
+        libgl1-mesa-dev \
+        libogg-dev \
+        libvorbis-dev \
+        libcriterion-dev \
+        python3 \
+        file \
+    && rm -rf /var/lib/apt/lists/*
+
+# tests/Makefile defaults both of these to /opt/homebrew, which is a mac path.
+ENV CRITERION_PREFIX=/usr \
+    SDL2_PREFIX=/usr \
+    CC=gcc
+
+WORKDIR /src

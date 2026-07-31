@@ -65,6 +65,33 @@ Tools/dev/zeq2shot.sh --stats    # look at a settled in-game frame
 Tools/dev/zeq2smoke.sh           # regression gate over every map
 ```
 
+## Checking Linux (`zeq2linux.sh`)
+
+```bash
+Tools/dev/zeq2linux.sh build      # native arm64 Linux, about a minute
+Tools/dev/zeq2linux.sh test       # lint + every suite under ASan/UBSan
+Tools/dev/zeq2linux.sh --amd64 build   # exactly what CI runs; emulated, slow
+```
+
+First run builds a container from `Dockerfile.linux` and caches it; after that
+the apt install is free. Outputs go to `Build/linux-<arch>/` and
+`tests/bin-linux-<arch>/`, so nothing collides with the mac tree — the suites
+are native binaries and running an x86_64 one under arm64 gets you a rosetta
+error rather than a test failure.
+
+**Run this before pushing anything that touches `Shared/` or `Game/`.** Two
+things are invisible on darwin-arm:
+
+- **The QVM bytecode is never compiled here.** arm64 has no bytecode JIT, so the
+  Makefile sets `BUILD_GAME_QVM=0` and the whole q3lcc/q3asm toolchain is
+  skipped. `Com_ScreenFovX` calling `atan()` therefore built fine on the mac and
+  broke every QVM link, because the bytecode's maths are engine syscalls
+  (`g_syscalls.asm`) and there is no `atan` trap — only `atan2`. The script
+  passes `BUILD_GAME_QVM=1` on both arches so the toolchain always runs.
+- **`ld64` tolerates undefined symbols that GNU `ld` rejects.** A test suite
+  missing a stub for a function it never calls links on macOS and fails on
+  Linux.
+
 ## Why the smoke test drives the client, not the dedicated server
 
 The dedicated build excludes `cl_cgame.o`, so it never loads the cgame module.
