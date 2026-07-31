@@ -485,11 +485,68 @@ them out is how any question about combat gets answered. The timestamps are
 per client because a single one would only ever print whoever thought first.
 ==============
 */
+/*
+==============
+G_MeleeStateName
+G_WeaponStateName
+
+Names, not indices. Both of these enums have been misread straight off the log
+- a meleeState of 11 and a weaponstate of 7 say nothing at a glance, and
+guessing at them sent two diagnoses the wrong way. Anything outside the enum
+prints as its number so a bad value stays visible rather than reading as a
+state that exists.
+==============
+*/
+static const char *G_MeleeStateName( int state ) {
+	static const char	*names[] = {
+		"inactive", "aggressing", "degressing", "idle",
+		"startPower", "startAttack", "startDodge", "startHit",
+		"usingSpeed", "usingPower", "usingStun", "usingBlock", "usingEvade",
+		"usingSpeedBreaker", "usingChargeBreaker", "usingZanzoken",
+		"chargingPower", "chargingStun"
+	};
+
+	if ( state < 0 || state >= (int)( sizeof( names ) / sizeof( names[0] ) ) ) {
+		return va( "%i", state );
+	}
+	return names[state];
+}
+
+static const char *G_WeaponStateName( int state ) {
+	static const char	*names[] = {
+		"ready", "firing", "guiding", "charging",
+		"altFiring", "altGuiding", "altCharging",
+		"cooling", "raising", "dropping"
+	};
+
+	if ( state < 0 || state >= (int)( sizeof( names ) / sizeof( names[0] ) ) ) {
+		return va( "%i", state );
+	}
+	return names[state];
+}
+
+// Verbs worth counting rather than sampling, and how many uses of each a
+// fighter is credited with.
+typedef enum {
+	fightUseBlock,
+	fightUseZanzoken,
+	fightUseQuickZan,
+	fightUseBoost,
+	fightUseStruggle,
+	fightUseCount
+} fightUse_t;
+
 static void G_DebugFight( gentity_t *ent ) {
 	static int		reported[MAX_CLIENTS];
+	static int		wasUsing[MAX_CLIENTS][fightUseCount];
+	static int		uses[MAX_CLIENTS][fightUseCount];
 	gclient_t		*client;
 	playerState_t	*ps;
+	gentity_t		*foe;
+	int				using[fightUseCount];
 	int				clientNum;
+	int				dist;
+	int				i;
 
 	if ( !g_debugFight.integer ) {
 		return;
@@ -499,34 +556,79 @@ static void G_DebugFight( gentity_t *ent ) {
 	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
 		return;
 	}
+
+	client = ent->client;
+	ps = &client->ps;
+
+	// Counted on the rising edge, every frame, because sampling a level cannot
+	// see a verb that lasts less time than the gap between samples. A zanzoken
+	// is up for a few hundred milliseconds; sampled every couple of seconds it
+	// reads as never used, and reporting that a fighter never reached for a
+	// verb it reached for repeatedly is worse than reporting nothing.
+	using[fightUseBlock] = ( ps->bitFlags & usingBlock ) ? 1 : 0;
+	// Split by kind: the deliberate one is a button, the quick one falls out of
+	// a double tap on a movement key, and they answer different questions about
+	// whether a fighter chose to leave or simply moved that way.
+	using[fightUseZanzoken] = ( ( ps->bitFlags & usingZanzoken ) && !( ps->bitFlags & usingQuickZanzoken ) ) ? 1 : 0;
+	using[fightUseQuickZan] = ( ps->bitFlags & usingQuickZanzoken ) ? 1 : 0;
+	using[fightUseBoost] = ( ps->bitFlags & usingBoost ) ? 1 : 0;
+	using[fightUseStruggle] = ( ps->bitFlags & isStruggling ) ? 1 : 0;
+
+	for ( i = 0 ; i < fightUseCount ; i++ ) {
+		if ( using[i] && !wasUsing[clientNum][i] ) {
+			uses[clientNum][i]++;
+		}
+		wasUsing[clientNum][i] = using[i];
+	}
+
 	if ( level.time - reported[clientNum] < g_debugFight.integer ) {
 		return;
 	}
 	reported[clientNum] = level.time;
 
-	client = ent->client;
-	ps = &client->ps;
+	// Distance to whatever it is locked to, because every melee gate below is
+	// really a question about range and none of the rest of the line answers
+	// it. -1 when there is no lock to measure against.
+	dist = -1;
+	if ( ps->lockedTarget > 0 && ps->lockedTarget <= MAX_CLIENTS ) {
+		foe = &g_entities[ps->lockedTarget - 1];
+		if ( foe->client ) {
+			dist = (int)Distance( ps->origin, foe->client->ps.origin );
+		}
+	}
 
-	// The four that decide whether a guard refills, none of which are visible
-	// on screen: safe is the delay since damage, alter covers powering up in
-	// either direction, and melee against meleeState separates being held in
-	// an exchange from doing anything inside one. A fighter that never
-	// recovers is one of these stuck on.
+	// Everything PM_Melee can refuse on, so a fighter that stands in range
+	// hitting nothing says which gate stopped it rather than leaving it to be
+	// guessed at. It returns outright on mIdle below zero and on a charging
+	// weapon, and skips all melee logic while freeze is non-zero or dist is
+	// over 64; wpn is there because a skill left selected is what puts the
+	// weapon into a charge in the first place.
+	//
+	// safe is the delay since damage, alter covers powering up in either
+	// direction, and melee against meleeState separates being held in an
+	// exchange from doing anything inside one.
+	//
+	// The four verbs read now/total: whether it is up at this instant, and how
+	// many times it has been reached for since the map loaded.
 	G_Printf( "fight c%i t%i.%i: health %i/%i fatigue %i pools %i/%i lock %i buttons %i"
-		" safe %i alter %i melee %i meleeState %i"
-		" block %i zanzoken %i boost %i struggle %i dead %i\n",
+		" dist %i freeze %i mIdle %i wst %s wpn %i"
+		" safe %i alter %i melee %i meleeState %s"
+		" block %i/%i zanzoken %i/%i quickzan %i/%i boost %i/%i struggle %i/%i dead %i\n",
 		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
 		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
 		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool],
 		ps->lockedTarget, client->pers.cmd.buttons,
+		dist, ps->timers[tmFreeze], ps->timers[tmMeleeIdle],
+		G_WeaponStateName( ps->weaponstate ), ps->weapon,
 		ps->timers[tmSafe],
 		( ps->bitFlags & usingAlter ) ? 1 : 0,
 		( ps->bitFlags & usingMelee ) ? 1 : 0,
-		ps->stats[stMeleeState],
-		( ps->bitFlags & usingBlock ) ? 1 : 0,
-		( ps->bitFlags & usingZanzoken ) ? 1 : 0,
-		( ps->bitFlags & usingBoost ) ? 1 : 0,
-		( ps->bitFlags & isStruggling ) ? 1 : 0,
+		G_MeleeStateName( ps->stats[stMeleeState] ),
+		using[fightUseBlock], uses[clientNum][fightUseBlock],
+		using[fightUseZanzoken], uses[clientNum][fightUseZanzoken],
+		using[fightUseQuickZan], uses[clientNum][fightUseQuickZan],
+		using[fightUseBoost], uses[clientNum][fightUseBoost],
+		using[fightUseStruggle], uses[clientNum][fightUseStruggle],
 		( ps->bitFlags & isDead ) ? 1 : 0 );
 }
 

@@ -141,14 +141,20 @@ for who in $(grep -o "^fight c[0-9]*" "$LOG" | sort -u | sed 's/fight c//' | sor
 	echo "  closed  ${last#fight c$who }"
 	printf '  guard low-water %s\n' \
 		"$(grep "^fight c$who " "$LOG" | grep -o 'fatigue [0-9]*' | cut -d' ' -f2 | sort -n | head -1)"
-	printf '  blocked %s   zanzoken %s   boosted %s   struggled %s   died %s\n' \
-		"$(grep -c "^fight c$who .*block 1" "$LOG")" \
-		"$(grep -c "^fight c$who .*zanzoken 1" "$LOG")" \
-		"$(grep -c "^fight c$who .*boost 1" "$LOG")" \
-		"$(grep -c "^fight c$who .*struggle 1" "$LOG")" \
+	# Read the running totals out of the last line rather than counting the
+	# samples that happened to catch a verb. A zanzoken is up for a few hundred
+	# milliseconds and the samples are seconds apart, so counting samples
+	# reports the burst verbs as unused however often they are used.
+	printf '  used: block %s   zanzoken %s   quickzan %s   boost %s   struggle %s   died %s\n' \
+		"$(sed -E 's/.* block [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
+		"$(sed -E 's/.* zanzoken [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
+		"$(sed -E 's/.* quickzan [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
+		"$(sed -E 's/.* boost [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
+		"$(sed -E 's/.* struggle [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
 		"$(grep -c "^fight c$who .*dead 1" "$LOG")"
 done
 
 echo
-echo "counts are samples at ${SAMPLE}ms, so they measure how long a verb was held,"
-echo "not how many times it was pressed. A zero is a verb the fight never wanted."
+echo "'used' counts are running totals kept every frame, not samples, so a verb"
+echo "that is only up for an instant still shows. A zero is a verb the fight"
+echo "never wanted."
