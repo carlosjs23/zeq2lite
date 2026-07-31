@@ -667,26 +667,31 @@ int main( int argc, char **argv )
 
 	CON_Init( );
 
-	// ZEQ2_NO_SIGHANDLER leaves the fault signals to whatever is watching. This
-	// handler catches SIGSEGV, so a sanitizer or a debugger never sees the
-	// fault: the crash surfaces as "caught signal 11" and nothing else, no
-	// faulting address and no stack. A duel crash went a whole session
-	// unattributed for exactly that reason - both ASan and the smoke gate
-	// reported clean while runs died.
-	if( !getenv( "ZEQ2_NO_SIGHANDLER" ) )
 	{
 		struct sigaction sa;
 		memset(&sa, 0, sizeof(sa));
 		sa.sa_handler = Sys_SigHandler;
 		sigemptyset(&sa.sa_mask);
 		sa.sa_flags = 0;
-		sigaction( SIGILL, &sa, NULL );
-		sigaction( SIGFPE, &sa, NULL );
-		sigaction( SIGSEGV, &sa, NULL );
+
+		// ZEQ2_NO_SIGHANDLER leaves the fault signals to whatever is watching.
+		// Catching SIGSEGV means a sanitizer, a debugger or the OS crash
+		// reporter never sees the fault: it surfaces as one line of ours with
+		// no faulting address and no stack.
+		if( !getenv( "ZEQ2_NO_SIGHANDLER" ) )
+		{
+			sigaction( SIGILL, &sa, NULL );
+			sigaction( SIGFPE, &sa, NULL );
+			sigaction( SIGSEGV, &sa, NULL );
+			sigaction( SIGABRT, &sa, NULL );
+			sigaction( SIGBUS, &sa, NULL );
+		}
+
+		// Termination is not a fault, and the flag it sets is what runs the
+		// orderly shutdown. Always handled, so a debugging run can drop the
+		// fault handlers and still exercise that path.
 		sigaction( SIGTERM, &sa, NULL );
 		sigaction( SIGINT, &sa, NULL );
-		sigaction( SIGABRT, &sa, NULL );
-		sigaction( SIGBUS, &sa, NULL );
 	}
 
 	while( 1 )

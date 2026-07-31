@@ -151,10 +151,13 @@ genuinely unported.
 ZEQ2-Lite clients, servers and demos. The gameplay work on `combat-and-ai`
 widens `powerLevel[]` on the wire and moves to 72; keep that off this branch.
 
-**`Sys_SigHandler` (`Engine/sys/sys_main.c`) installs a `SIGABRT` handler**, so a
-stack-protector abort or sanitizer abort surfaces only as
-`Sys_SigHandler: caught signal 6` with no diagnostic. A silent `Abort trap: 6`
-with a log that just stops is the signature — disable the handler to debug it.
+**`Sys_SigHandler` catches the fault signals**, so a stack-protector abort, a
+sanitizer abort or a segfault surfaces only as `=== fatal signal, exiting ===`
+with no address and no stack. A log that just stops is the signature. Set
+`ZEQ2_NO_SIGHANDLER=1` to leave the fault signals to a debugger, a sanitizer or
+the OS crash reporter; `SIGTERM`/`SIGINT` stay handled either way, so a run that
+sets it still exercises the orderly shutdown. The handler installs from two
+places — `main()` and `Sys_PlatformInit` (`Engine/sys/sys_unix.c`).
 
 **Config exec order bites.** Startup execs `default.cfg` (all 47 binds) and *then*
 the saved `zeq2config.cfg`, which begins with `unbindall`. A config saved from a

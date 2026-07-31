@@ -825,11 +825,18 @@ void Sys_PlatformInit( void )
 {
 	const char* term = getenv( "TERM" );
 
-	signal( SIGHUP, Sys_SigHandler );
-	signal( SIGQUIT, Sys_SigHandler );
-	signal( SIGTRAP, Sys_SigHandler );
-	signal( SIGIOT, Sys_SigHandler );
-	signal( SIGBUS, Sys_SigHandler );
+	// Gated the same way as the set main() installs, and for the same reason:
+	// every one of these takes the handler's fatal path, so leaving them hooked
+	// here defeated ZEQ2_NO_SIGHANDLER. A run asking for the raw fault still
+	// had SIGBUS, SIGIOT and SIGTRAP taken out from under the debugger.
+	if( !getenv( "ZEQ2_NO_SIGHANDLER" ) )
+	{
+		signal( SIGHUP, Sys_SigHandler );
+		signal( SIGQUIT, Sys_SigHandler );
+		signal( SIGTRAP, Sys_SigHandler );
+		signal( SIGIOT, Sys_SigHandler );
+		signal( SIGBUS, Sys_SigHandler );
+	}
 
 	stdinIsATTY = isatty( STDIN_FILENO ) &&
 		!( term && ( !strcmp( term, "raw" ) || !strcmp( term, "dumb" ) ) );

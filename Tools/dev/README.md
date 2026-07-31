@@ -226,9 +226,11 @@ Reading the output:
 
 Two environment notes. ASan misbehaves under a sandboxed shell (`Checking file
 existence is not allowed under sandbox`), so run it unsandboxed. And
-`Sys_SigHandler` (`Engine/sys/sys_main.c`) installs a `SIGABRT` handler, so a
-sanitizer abort surfaces only as `Sys_SigHandler: caught signal 6` with no
-diagnostic — disable that handler if you need to debug an abort directly.
+`Sys_SigHandler` catches the fault signals, so a sanitizer abort surfaces only
+as `=== fatal signal, exiting ===` with no diagnostic — set
+`ZEQ2_NO_SIGHANDLER=1` to hand the fault straight to the sanitizer.
+`SIGTERM`/`SIGINT` stay handled with it set, so the orderly shutdown is still
+under test.
 
 ## Environment overrides
 
