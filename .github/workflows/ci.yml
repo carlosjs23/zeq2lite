@@ -55,7 +55,7 @@ jobs:
           fi
 
   unit-tests:
-    name: Unit tests (Criterion, ASan + UBSan)
+    name: macOS unit tests (Criterion, ASan + UBSan)
     runs-on: macos-latest
     needs: sdl2
     steps:
@@ -97,7 +97,7 @@ jobs:
           if-no-files-found: warn
 
   build:
-    name: Build engine and game modules
+    name: macOS build (engine, renderer, game modules)
     runs-on: macos-latest
     needs: sdl2
     steps:
@@ -131,6 +131,112 @@ jobs:
             echo "ERROR: engine links an SDL shim instead of real SDL2"
             exit 1
           fi
+
+  # Linux is a first-class target again: the port replaced Engine/sdl/*.c with
+  # SDL2 sources, and until this job existed nothing checked that any platform
+  # other than darwin-arm still compiled them. Distro SDL2 is real SDL2, so
+  # there is no from-source build and no shim dance here - the whole macOS
+  # SDL2_VERSION apparatus is a Homebrew problem, not a Linux one.
+  linux-unit-tests:
+    name: Linux unit tests (Criterion, ASan + UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # gcc rather than clang for parity with the macOS job's sanitizers:
+      # Ubuntu's clang package ships no compiler-rt, so -fsanitize=address
+      # fails at link with a missing libclang_rt.asan. libasan comes with gcc,
+      # and -fno-sanitize-recover=undefined means the same thing to both.
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libcriterion-dev libsdl2-dev
+
+      # Both default to /opt/homebrew in tests/Makefile, which is a macOS path.
+      - name: Point the test build at the distro packages
+        run: |
+          {
+            echo "CRITERION_PREFIX=/usr"
+            echo "SDL2_PREFIX=/usr"
+            echo "CC=gcc"
+          } >> "$GITHUB_ENV"
+
+      - name: Lint
+        run: make lint
+
+      - name: Unit tests
+        run: make test
+
+      - name: JUnit report
+        if: always()
+        run: make test-report
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report-linux
+          path: tests/bin/report/*.xml
+          if-no-files-found: warn
+
+  linux-build:
+    name: Linux build (engine, renderer, game modules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # libgl1-mesa-dev for the renderer's -lGL, the ogg/vorbis pair for the
+      # client's codec support, which is on by default.
+      #
+      # bison because lburg/gram.c is checked in but make's builtin %.c: %.y
+      # rule still fires whenever the checkout leaves gram.y no older than
+      # gram.c, which for a fresh clone is a coin toss. Without yacc that is a
+      # bare "Error 127" a long way from anything that mentions yacc.
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bison libsdl2-dev libgl1-mesa-dev \
+            libogg-dev libvorbis-dev
+
+      - name: Build
+        run: make -j"$(nproc)"
+
+      # The failure this guards is the one the port left behind: Engine/sdl/*.c
+      # are SDL2 sources, and the bundled SDL 1.2 headers used to be on the
+      # include path beside them. Linking real SDL2 is the proof that the right
+      # headers won.
+      - name: Verify the engine links real SDL2
+        run: |
+          set -euo pipefail
+          bin=$(ls Build/Release-linux-*/ZEQ2.* 2>/dev/null | head -1)
+          if [ -z "$bin" ]; then echo "no engine binary produced"; exit 1; fi
+          ldd "$bin" | grep -i sdl || true
+          if ! ldd "$bin" | grep -q "libSDL2-2.0"; then
+            echo "ERROR: engine does not link libSDL2"
+            exit 1
+          fi
+          if ldd "$bin" | grep -qiE "libSDL-1|libSDL3"; then
+            echo "ERROR: engine links SDL 1.2 or SDL3"
+            exit 1
+          fi
+
+      # x86_64 sets HAVE_VM_COMPILED, so this is the only job anywhere that
+      # runs the q3lcc/q3asm toolchain: darwin-arm and linux-aarch64 both set
+      # BUILD_GAME_QVM=0 for want of a bytecode JIT. Two defects reached this
+      # branch precisely because nothing compiled the bytecode - assert the
+      # QVMs exist so that stays true.
+      - name: Verify the game modules and QVMs were produced
+        run: |
+          set -euo pipefail
+          ls -la Build/Release-linux-*/Base/*.so Build/Release-linux-*/Base/vm/*.qvm
+          for m in cgame game ui; do
+            ls Build/Release-linux-*/Base/${m}*.so >/dev/null
+            ls Build/Release-linux-*/Base/vm/${m}.qvm >/dev/null
+          done
 
   # The smoke and sanitizer suites need the ~324MB game data, which is not in
   # this repository, so they cannot run on a clean CI checkout. Run them locally:
