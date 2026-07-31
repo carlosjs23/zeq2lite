@@ -409,12 +409,16 @@ void PM_UsePowerLevel(){
 		useType += 1;
 	}
 }
+// Fatigue spent per point of damage the guard soaks. The one number that
+// decides whether holding a guard is a decision or a default.
+#define	FATIGUE_ABSORB_COST	1.0f
+
 void PM_BurnPowerLevel(){
 	float percent;
 	// float: it holds a multiplier, and rounding it makes the guard bonuses
 	// below no-ops
 	float defense;
-	int burn,initial;
+	int burn,initial,absorbed;
 	int newValue;
 	int burnType;
 	int limit;
@@ -444,7 +448,15 @@ void PM_BurnPowerLevel(){
 		defense = (pm->cmd.buttons & BUTTON_WALKING) && pm->ps->bitFlags & atopGround ? defense * 1.5 : defense;
 		initial = burn;
 		percent = 1.0 - ((float)pm->ps->powerLevel[plCurrent] / (float)pm->ps->powerLevel[plMaximum]);
-		burn -= (int)(((float)pm->ps->powerLevel[plFatigue] * 0.1) * defense);
+		absorbed = (int)(((float)pm->ps->powerLevel[plFatigue] * 0.1) * defense);
+		if(absorbed > burn){absorbed = burn;}
+		burn -= absorbed;
+		// The guard is fatigue, so what it soaks comes out of it - mitigation is
+		// spent, never free, and a guard therefore weakens as it works. Paying
+		// through plUseFatigue rather than plFatigue directly carries the
+		// overdraft into health like every other cost, which is what a guard
+		// breaking under a hit too big for it looks like.
+		pm->ps->powerLevel[plUseFatigue] += (int)(absorbed * FATIGUE_ABSORB_COST);
 		// Only damage that survived the guard pays into the pools. A blocked
 		// hit leaves burn negative, and crediting that took the pools down
 		// past zero - the fighter was paying to be defended.
