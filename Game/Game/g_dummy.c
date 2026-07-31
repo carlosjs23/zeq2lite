@@ -38,6 +38,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	DUMMY_DISTANCE_DEFAULT	200
 #define	DUMMY_DISTANCE_MIN		64
 #define	DUMMY_DISTANCE_MAX		8000
+#define	DUMMY_DROP_MAX			256
 
 /*
 =================
@@ -162,12 +163,20 @@ static void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance ) {
 		VectorMA( origin, -( dummy->r.maxs[0] + 8 ), forward, origin );
 	}
 
-	// settle it on the ground under that point, if there is any
+	// Stand it at the height the player is standing at, then settle it onto
+	// whatever it is above. The drop is deliberately short: on a map with any
+	// relief the point ahead of the player is often over a canyon, and a dummy
+	// that teleports to the floor of it is a dummy nobody can see or hit.
+	origin[2] = owner->client->ps.origin[2];
 	VectorCopy( origin, start );
 	start[2] += 32;
-	origin[2] -= 4096;
+	origin[2] -= DUMMY_DROP_MAX;
 	trap_Trace( &trace, start, dummy->r.mins, dummy->r.maxs, origin, dummy->s.number, MASK_PLAYERSOLID );
-	VectorCopy( trace.endpos, origin );
+	if ( trace.fraction < 1.0f ) {
+		VectorCopy( trace.endpos, origin );
+	} else {
+		origin[2] = owner->client->ps.origin[2];
+	}
 
 	trap_UnlinkEntity( dummy );
 
