@@ -563,8 +563,9 @@ it from the handler and faulted. That is why killing the engine mid-frame died
 about one time in four while a clean "quit" never did, and why the second fault
 landed on top of the first with no usable diagnostic.
 
-A termination request now only sets a flag; the main loop performs the same
-shutdown it would for a typed "quit", on its own stack, between frames.
+A termination request - SIGTERM, SIGINT or SIGHUP - now only sets a flag; the
+main loop performs the same shutdown it would for a typed "quit", on its own
+stack, between frames.
 
 A fault signal cannot be handled that way - there is no safe frame to return to
 - so it writes a fixed string with write(), which is on the safe list, and
@@ -576,7 +577,13 @@ void Sys_SigHandler( int signal )
 {
 	static volatile sig_atomic_t	signalcaught = 0;
 
-	if( signal == SIGTERM || signal == SIGINT )
+	// SIGHUP is conditional because the C standard does not require it and the
+	// mingw headers do not always define it.
+	if( signal == SIGTERM || signal == SIGINT
+#ifdef SIGHUP
+		|| signal == SIGHUP
+#endif
+		)
 	{
 		sys_quitRequested = signal;
 		return;
@@ -689,7 +696,9 @@ int main( int argc, char **argv )
 
 		// Termination is not a fault, and the flag it sets is what runs the
 		// orderly shutdown. Always handled, so a debugging run can drop the
-		// fault handlers and still exercise that path.
+		// fault handlers and still exercise that path. SIGHUP is the third of
+		// these and installs in Sys_PlatformInit, with the rest of the signals
+		// that only exist on unix.
 		sigaction( SIGTERM, &sa, NULL );
 		sigaction( SIGINT, &sa, NULL );
 	}
