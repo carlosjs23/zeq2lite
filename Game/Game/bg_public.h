@@ -858,3 +858,6 @@ int		BG_IntMergeBits( const int hi, const int lo );
 #define ARENAS_PER_TIER		4
 #define MAX_ARENAS			1024
 #define	MAX_ARENAS_TEXT		8192
+
+const char *BG_WeaponStateName( int state );
+const char *BG_MeleeStateName( int state );

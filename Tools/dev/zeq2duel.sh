@@ -16,6 +16,8 @@
 #   zeq2duel.sh --distance 600                   # both spawn the same way out
 #   zeq2duel.sh --skill 5 --seconds 240          # g_aiSkill 1-5, default 3
 #   zeq2duel.sh -- +set g_powerlevel 5000        # extra engine args after --
+#   zeq2duel.sh --assert                         # gate: non-zero if the fight
+#                                                # has stopped working at all
 #
 # Reads the fight out of the log at the end: first and last state per fighter,
 # how often each defensive verb was used, and the low-water mark of each guard.
@@ -40,6 +42,12 @@ SKILL=""
 DIST_A=500
 DIST_B=700
 EXTRA=()
+# Gate mode, off by default. The thresholds are floors for "a fight happened",
+# not balance targets - see the assertions at the bottom.
+DO_ASSERT=0
+ASSERT_FIGHTERS=2
+ASSERT_INITIATE=1
+ASSERT_READY_RATIO=0.10
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -50,8 +58,10 @@ while [[ $# -gt 0 ]]; do
 		--solo) SOLO=1; shift ;;
 		--distance) DIST_A="$2"; DIST_B="$2"; shift 2 ;;
 		--skill) SKILL="$2"; shift 2 ;;
+		--assert) DO_ASSERT=1; shift ;;
+		--assert-ready-ratio) ASSERT_READY_RATIO="$2"; DO_ASSERT=1; shift 2 ;;
 		--) shift; EXTRA=("$@"); break ;;
-		-h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}"; exit 0 ;;
+		-h|--help) sed -n '2,24p' "${BASH_SOURCE[0]}"; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
 	esac
 done
@@ -149,6 +159,11 @@ if ! grep -q "^fight c" "$LOG"; then
 	exit 1
 fi
 
+FIGHTERS_SEEN=0
+TOTAL_CHARGED=0
+TOTAL_READY=0
+TOTAL_INITIATE=0
+
 echo
 for who in $(grep -o "^fight c[0-9]*" "$LOG" | sort -u | sed 's/fight c//' | sort -n); do
 	samples=$(grep -c "^fight c$who " "$LOG")
@@ -162,8 +177,11 @@ for who in $(grep -o "^fight c[0-9]*" "$LOG" | sort -u | sed 's/fight c//' | sor
 	echo "--- client $who ---"
 	echo "  opened  ${first#fight c$who }"
 	echo "  closed  ${last#fight c$who }"
+	# Read from the line rather than sorting the samples: the engine tracks this
+	# every frame, and a guard that broke and refilled between two samples never
+	# appears in a minimum taken over the printed lines.
 	printf '  guard low-water %s\n' \
-		"$(grep "^fight c$who " "$LOG" | grep -o 'fatigue [0-9]*' | cut -d' ' -f2 | sort -n | head -1)"
+		"$(sed -E 's/.* guardLow ([0-9]+) .*/\1/' <<<"$last")"
 	# Read the running totals out of the last line rather than counting the
 	# samples that happened to catch a verb. A zanzoken is up for a few hundred
 	# milliseconds and the samples are seconds apart, so counting samples
@@ -185,9 +203,63 @@ for who in $(grep -o "^fight c[0-9]*" "$LOG" | sort -u | sed 's/fight c//' | sor
 		"$(sed -E 's/.* charge [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
 		"$(sed -E 's/.* ready [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
 		"$(sed -E 's/.* fired [0-9]+\/([0-9]+) .*/\1/' <<<"$last")"
+	# Where the windups went. A charge below its ready threshold is discarded by
+	# whatever interrupted it, so this names the interrupt rather than leaving
+	# "began 90, fired 6" to be guessed at.
+	printf '  charges lost to: %s\n' \
+		"$(sed -E 's/.* lost ([^ ]+).*/\1/' <<<"$last")"
+
+	# Kept for the assertions below. Read from the same last line as the report,
+	# so a threshold can never disagree with the number printed above it.
+	FIGHTERS_SEEN=$(( FIGHTERS_SEEN + 1 ))
+	TOTAL_CHARGED=$(( TOTAL_CHARGED + $(sed -E 's/.* charge [0-9]+\/([0-9]+) .*/\1/' <<<"$last") ))
+	TOTAL_READY=$(( TOTAL_READY + $(sed -E 's/.* ready [0-9]+\/([0-9]+) .*/\1/' <<<"$last") ))
+	TOTAL_INITIATE=$(( TOTAL_INITIATE + $(sed -E 's/.* initiate [0-9]+\/([0-9]+) .*/\1/' <<<"$last") ))
 done
 
 echo
 echo "'used' counts are running totals kept every frame, not samples, so a verb"
 echo "that is only up for an instant still shows. A zero is a verb the fight"
 echo "never wanted."
+
+# ----------------------------------------------------------------------------
+# Gate mode. Without --assert this stays a report and exits 0 whatever the
+# fight looked like.
+#
+# The thresholds are deliberately loose. They are not a balance target - they
+# are the shape of a fight that has stopped working at all, which is a thing a
+# code change can cause silently and no unit test can see. The charge ratio is
+# here because it is exactly the regression that went unnoticed: windups that
+# never reach their ready threshold read as a busy fight in every other number.
+if (( DO_ASSERT )); then
+	echo
+	echo "=============================================================="
+	echo " assertions"
+	echo "=============================================================="
+	fails=0
+
+	check() { # name, actual, op, want
+		if awk "BEGIN{exit !($2 $3 $4)}"; then
+			printf '  PASS  %s (%s %s %s)\n' "$1" "$2" "$3" "$4"
+		else
+			printf '  FAIL  %s (%s, wanted %s %s)\n' "$1" "$2" "$3" "$4"
+			fails=$(( fails + 1 ))
+		fi
+	}
+
+	check "fighters reported" "$FIGHTERS_SEEN" ">=" "$ASSERT_FIGHTERS"
+	check "melee exchanges opened" "$TOTAL_INITIATE" ">=" "$ASSERT_INITIATE"
+	if (( TOTAL_CHARGED > 0 )); then
+		ratio=$(awk "BEGIN{printf \"%.3f\", $TOTAL_READY / $TOTAL_CHARGED}")
+		check "charges reaching ready" "$ratio" ">=" "$ASSERT_READY_RATIO"
+	else
+		echo "  SKIP  charges reaching ready (no charge was begun)"
+	fi
+
+	echo
+	if (( fails )); then
+		echo "$fails assertion(s) failed"
+		exit 1
+	fi
+	echo "all assertions passed"
+fi

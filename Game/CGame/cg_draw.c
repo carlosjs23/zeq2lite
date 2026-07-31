@@ -1337,6 +1337,77 @@ void CG_DrawScripted2D(void){
 		}
 	}
 }
+
+/*
+=====================
+CG_DrawFightDebug
+
+The fight line answers "what did this cost" after the fact; this answers "what
+is it looking at" while it happens. Everything here gates a melee or a charge,
+and none of it is otherwise on screen - the power bar shows one of five values
+the HUD tracks and the decisions are all about the other four.
+
+Drawn from cg.snap->ps, so following a fighter as a spectator shows that
+fighter's state. That is what the duel harness leaves you in.
+=====================
+*/
+static void CG_DrawFightDebug( void ) {
+	const playerState_t	*ps;
+	char				line[128];
+	int					y;
+	int					ready;
+	int					dist;
+
+	if ( !cg_debugFight.integer ) {
+		return;
+	}
+
+	ps = &cg.snap->ps;
+	y = 140;
+	ready = ( ps->currentSkill[WPSTAT_BITFLAGS] & WPF_READY ) ? 1 : 0;
+
+	// -1 rather than 0 for "no lock": zero is a real distance and this is the
+	// number every melee gate is really asking about.
+	dist = -1;
+	if ( ps->lockedTarget > 0 && ps->lockedTarget <= MAX_CLIENTS ) {
+		const centity_t *foe = &cg_entities[ps->lockedTarget - 1];
+		if ( foe->currentValid ) {
+			dist = (int)Distance( ps->origin, foe->lerpOrigin );
+		}
+	}
+
+	Com_sprintf( line, sizeof( line ), "hp %i/%i  guard %i  pool %i/%i",
+		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
+		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool] );
+	CG_DrawSmallString( 8, y, line, 1.0f );
+	y += SMALLCHAR_HEIGHT;
+
+	// The charge funnel, on screen: a windup below its ready threshold is
+	// thrown away by any interrupt, so "charging 40%" and "charging, ready"
+	// are entirely different situations and the bar does not distinguish them.
+	Com_sprintf( line, sizeof( line ), "wpn %i %s  charge %i%%%s",
+		ps->weapon, BG_WeaponStateName( ps->weaponstate ),
+		ps->stats[stChargePercentPrimary], ready ? " READY" : "" );
+	CG_DrawSmallString( 8, y, line, 1.0f );
+	y += SMALLCHAR_HEIGHT;
+
+	Com_sprintf( line, sizeof( line ), "melee %s %s  lock %i dist %i",
+		( ps->bitFlags & usingMelee ) ? "yes" : "no",
+		BG_MeleeStateName( ps->stats[stMeleeState] ),
+		ps->lockedTarget, dist );
+	CG_DrawSmallString( 8, y, line, 1.0f );
+	y += SMALLCHAR_HEIGHT;
+
+	// Everything that makes a melee branch or a recovery refuse itself. A
+	// fighter standing in range doing nothing is always one of these.
+	Com_sprintf( line, sizeof( line ), "freeze %i  safe %i  mIdle %i  %s%s%s",
+		ps->timers[tmFreeze], ps->timers[tmSafe], ps->timers[tmMeleeIdle],
+		( ps->bitFlags & usingBlock ) ? "block " : "",
+		( ps->bitFlags & usingAlter ) ? "alter " : "",
+		( ps->bitFlags & usingZanzoken ) ? "zanzoken " : "" );
+	CG_DrawSmallString( 8, y, line, 1.0f );
+}
+
 static void CG_Draw2D( void ) {
 	// if we are taking a levelshot for the menu, don't draw anything
 	if ( cg.levelShot ) {
@@ -1376,6 +1447,7 @@ static void CG_Draw2D( void ) {
 	CG_DrawVote();
 	CG_DrawTeamVote();
 	CG_DrawUpperRight();
+	CG_DrawFightDebug();
 	if ( cg.showScores ) {
 		CG_DrawScoreboard();
 	}

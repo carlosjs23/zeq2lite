@@ -512,20 +512,6 @@ prints as its number so a bad value stays visible rather than reading as a
 state that exists.
 ==============
 */
-static const char *G_MeleeStateName( int state ) {
-	static const char	*names[] = {
-		"inactive", "aggressing", "degressing", "idle",
-		"startPower", "startAttack", "startDodge", "startHit",
-		"usingSpeed", "usingPower", "usingStun", "usingBlock", "usingEvade",
-		"usingSpeedBreaker", "usingChargeBreaker", "usingZanzoken",
-		"chargingPower", "chargingStun"
-	};
-
-	if ( state < 0 || state >= (int)( sizeof( names ) / sizeof( names[0] ) ) ) {
-		return va( "%i", state );
-	}
-	return names[state];
-}
 
 /*
 ==============
@@ -581,18 +567,6 @@ static const char *G_ButtonNames( int buttons ) {
 	return out[0] ? out : "-";
 }
 
-static const char *G_WeaponStateName( int state ) {
-	static const char	*names[] = {
-		"ready", "firing", "guiding", "charging",
-		"altFiring", "altGuiding", "altCharging",
-		"cooling", "raising", "dropping"
-	};
-
-	if ( state < 0 || state >= (int)( sizeof( names ) / sizeof( names[0] ) ) ) {
-		return va( "%i", state );
-	}
-	return names[state];
-}
 
 // Verbs worth counting rather than sampling, and how many uses of each a
 // fighter is credited with.
@@ -629,10 +603,38 @@ typedef enum {
 	fightUseCount
 } fightUse_t;
 
+// Why a windup ended without becoming a shot. "began 90, fired 6" says the
+// charge is being lost but not to what, and the answer decides whether the
+// fix is the threshold, the plant range or the interrupt itself. Classified on
+// the falling edge of charging, from the state that is up at that moment - the
+// same set PM_WeaponRelease is called for.
+typedef enum {
+	fightLossMelee,
+	fightLossKnockback,
+	fightLossTransform,
+	fightLossSoar,
+	fightLossDied,
+	// The windup ended with none of the above up. A weapon change or a
+	// sub-threshold release by the fighter's own hand lands here.
+	fightLossOther,
+	fightLossCount
+} fightLoss_t;
+
+static const char *fightLossNames[fightLossCount] = {
+	"melee", "knock", "trans", "soar", "died", "other"
+};
+
 static void G_DebugFight( gentity_t *ent ) {
 	static int		reported[MAX_CLIENTS];
 	static int		wasUsing[MAX_CLIENTS][fightUseCount];
 	static int		uses[MAX_CLIENTS][fightUseCount];
+	static int		losses[MAX_CLIENTS][fightLossCount];
+	// The lowest the guard has been at any point, not the lowest any sample
+	// caught it at. A guard that breaks and refills between two samples is
+	// invisible to a minimum taken over the printed lines.
+	static int		guardLow[MAX_CLIENTS];
+	char			lossText[128];
+	char			lossPart[32];
 	gclient_t		*client;
 	playerState_t	*ps;
 	gentity_t		*foe;
@@ -674,6 +676,29 @@ static void G_DebugFight( gentity_t *ent ) {
 	using[fightUseFired] = ( ps->weaponstate == WEAPON_COOLING ) ? 1 : 0;
 	using[fightUseDied] = ( ps->bitFlags & isDead ) ? 1 : 0;
 
+	// A windup that ends without entering a firing state was lost. Attribute it
+	// to whatever is up on the frame it ended: PM_WeaponRelease is called for
+	// exactly these, and the first match wins because a knockback that arrives
+	// mid-melee is still the melee's doing.
+	if ( wasUsing[clientNum][fightUseCharge] && !using[fightUseCharge]
+		&& ps->weaponstate != WEAPON_COOLING
+		&& ps->weaponstate != WEAPON_GUIDING
+		&& ps->weaponstate != WEAPON_ALTGUIDING ) {
+		if ( ps->bitFlags & isDead ) {
+			losses[clientNum][fightLossDied]++;
+		} else if ( ps->bitFlags & usingMelee ) {
+			losses[clientNum][fightLossMelee]++;
+		} else if ( ps->timers[tmKnockback] > 0 ) {
+			losses[clientNum][fightLossKnockback]++;
+		} else if ( ps->timers[tmTransform] > 1 ) {
+			losses[clientNum][fightLossTransform]++;
+		} else if ( ps->bitFlags & usingSoar ) {
+			losses[clientNum][fightLossSoar]++;
+		} else {
+			losses[clientNum][fightLossOther]++;
+		}
+	}
+
 	for ( i = 0 ; i < fightUseCount ; i++ ) {
 		if ( using[i] && !wasUsing[clientNum][i] ) {
 			uses[clientNum][i]++;
@@ -681,10 +706,30 @@ static void G_DebugFight( gentity_t *ent ) {
 		wasUsing[clientNum][i] = using[i];
 	}
 
+	// Every frame, so a dip between two samples still counts.
+	if ( !guardLow[clientNum] || ps->powerLevel[plFatigue] < guardLow[clientNum] ) {
+		guardLow[clientNum] = ps->powerLevel[plFatigue];
+	}
+
 	if ( level.time - reported[clientNum] < g_debugFight.integer ) {
 		return;
 	}
 	reported[clientNum] = level.time;
+
+	// Only the causes that have happened, so the line does not carry five
+	// zeroes for a fight that never lost a charge.
+	lossText[0] = '\0';
+	for ( i = 0 ; i < fightLossCount ; i++ ) {
+		if ( !losses[clientNum][i] ) {
+			continue;
+		}
+		Com_sprintf( lossPart, sizeof( lossPart ), "%s%s:%i",
+			lossText[0] ? "," : "", fightLossNames[i], losses[clientNum][i] );
+		Q_strcat( lossText, sizeof( lossText ), lossPart );
+	}
+	if ( !lossText[0] ) {
+		Q_strncpyz( lossText, "none", sizeof( lossText ) );
+	}
 
 	// Distance to whatever it is locked to, because every melee gate below is
 	// really a question about range and none of the rest of the line answers
@@ -714,19 +759,20 @@ static void G_DebugFight( gentity_t *ent ) {
 		" dist %i freeze %i mIdle %i wst %s wpn %s"
 		" safe %i alter %s soar %s jump %s melee %s meleeState %s"
 		" block %i/%i zanzoken %i/%i quickzan %i/%i boost %i/%i struggle %i/%i"
-		" initiate %i/%i struck %i/%i stunned %i/%i charge %i/%i ready %i/%i fired %i/%i dead %i/%i\n",
+		" initiate %i/%i struck %i/%i stunned %i/%i charge %i/%i ready %i/%i fired %i/%i dead %i/%i"
+		" guardLow %i lost %s\n",
 		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
 		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
 		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool],
 		ps->lockedTarget, G_ButtonNames( client->pers.cmd.buttons ),
 		dist, ps->timers[tmFreeze], ps->timers[tmMeleeIdle],
-		G_WeaponStateName( ps->weaponstate ), ps->weapon ? va( "%i", ps->weapon ) : "none",
+		BG_WeaponStateName( ps->weaponstate ), ps->weapon ? va( "%i", ps->weapon ) : "none",
 		ps->timers[tmSafe],
 		( ps->bitFlags & usingAlter ) ? "yes" : "no",
 		( ps->bitFlags & usingSoar ) ? "yes" : "no",
 		( ps->bitFlags & usingJump ) ? "yes" : "no",
 		( ps->bitFlags & usingMelee ) ? "yes" : "no",
-		G_MeleeStateName( ps->stats[stMeleeState] ),
+		BG_MeleeStateName( ps->stats[stMeleeState] ),
 		using[fightUseBlock], uses[clientNum][fightUseBlock],
 		using[fightUseZanzoken], uses[clientNum][fightUseZanzoken],
 		using[fightUseQuickZan], uses[clientNum][fightUseQuickZan],
@@ -738,7 +784,8 @@ static void G_DebugFight( gentity_t *ent ) {
 		using[fightUseCharge], uses[clientNum][fightUseCharge],
 		using[fightUseReady], uses[clientNum][fightUseReady],
 		using[fightUseFired], uses[clientNum][fightUseFired],
-		using[fightUseDied], uses[clientNum][fightUseDied] );
+		using[fightUseDied], uses[clientNum][fightUseDied],
+		guardLow[clientNum], lossText );
 }
 
 /*

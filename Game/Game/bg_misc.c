@@ -244,6 +244,45 @@ void BG_EvaluateTrajectoryDelta( entityState_t *es, const trajectory_t *tr, int 
 // Indexed directly by entity_event_t, so this must stay in the same order and
 // hold the same number of entries as that enum in bg_public.h - a name missing
 // here shifts every event after it and reads off the end of the table.
+
+/*
+==============
+BG_WeaponStateName / BG_MeleeStateName
+
+Names, not indices. Both of these enums have been misread straight off the log -
+a meleeState of 11 and a weaponstate of 7 say nothing at a glance. Shared so the
+fight line and the on-screen overlay cannot drift apart. Anything outside the
+enum prints as its number, so a bad value stays visible rather than reading as a
+state that exists.
+==============
+*/
+const char *BG_WeaponStateName( int state ) {
+	static const char	*names[] = {
+		"ready", "firing", "guiding", "charging",
+		"altFiring", "altGuiding", "altCharging",
+		"cooling", "raising", "dropping"
+	};
+
+	if ( state < 0 || state >= (int)( sizeof( names ) / sizeof( names[0] ) ) ) {
+		return va( "%i", state );
+	}
+	return names[state];
+}
+const char *BG_MeleeStateName( int state ) {
+	static const char	*names[] = {
+		"inactive", "aggressing", "degressing", "idle",
+		"startPower", "startAttack", "startDodge", "startHit",
+		"usingSpeed", "usingPower", "usingStun", "usingBlock", "usingEvade",
+		"usingSpeedBreaker", "usingChargeBreaker", "usingZanzoken",
+		"chargingPower", "chargingStun"
+	};
+
+	if ( state < 0 || state >= (int)( sizeof( names ) / sizeof( names[0] ) ) ) {
+		return va( "%i", state );
+	}
+	return names[state];
+}
+
 char *eventnames[] = {
 	"EV_NONE",
 	"EV_FOOTSTEP",
