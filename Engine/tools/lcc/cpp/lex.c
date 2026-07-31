@@ -46,14 +46,20 @@ int	tottok;
 int	tokkind[256];
 struct	fsm {
 	int	state;		/* if in this state */
-	uchar	ch[4];		/* and see one of these characters */
+	uchar	ch[5];		/* and see one of these characters, NUL-terminated:
+				   the loop over it stops on the NUL, so this must
+				   stay one wider than the longest set below */
 	int	nextstate;	/* enter this state if +ve */
 };
 
 /*const*/ struct fsm fsm[] = {
 	/* start state */
 	{START,	{ C_XX },	ACT(UNCLASS,S_SELF)},
-	{START,	{ ' ', '\t', '\v' },	WS1},
+	// '\r' is whitespace, not an unclassified token. Several game sources are
+	// CRLF, and without this the CR after a directive's last token survives as
+	// a token of its own - doinclude() then finds the row longer than the
+	// argument it parsed and rejects a perfectly good #include.
+	{START,	{ ' ', '\t', '\v', '\r' },	WS1},
 	{START,	{ C_NUM },	NUM1},
 	{START,	{ '.' },	NUM3},
 	{START,	{ C_ALPH },	ID1},
@@ -167,7 +173,7 @@ struct	fsm {
 
 	/* saw white space, eat it up */
 	{WS1,	{ C_XX },	S_WS},
-	{WS1,	{ ' ', '\t', '\v' },	WS1},
+	{WS1,	{ ' ', '\t', '\v', '\r' },	WS1},
 
 	/* saw -, check --, -=, -> */
 	{MINUS1,	{ C_XX },	ACT(MINUS, S_SELFB)},
