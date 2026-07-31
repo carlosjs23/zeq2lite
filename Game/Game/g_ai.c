@@ -60,6 +60,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	AI_POWERUP_TIME		2500
 // Health below this fraction of the ceiling is worth spending a health pool on
 #define	AI_POWERUP_HURT		0.85f
+// Guard thin enough to break off on, and recovered enough to go back in. The
+// gap between them is what stops a fighter flickering in and out of contact.
+#define	AI_GUARD_LOW		0.35f
+#define	AI_GUARD_READY		0.70f
+#define	AI_GUARD_PATIENCE	6000
 
 /*
 =================
@@ -79,6 +84,35 @@ static int G_AISkill( playerState_t *ps ) {
 	}
 
 	return ps->weapon;
+}
+
+/*
+=================
+G_AIGuardBreaker
+
+A skill a raised guard cannot swat aside, or 0 if the character has none.
+G_ImpactUserWeapon pushes a swattable attack away when it lands on a block and
+drives a non-swattable one into a power struggle, so the heavy skills are the
+only ones a guard has to answer - which is what the swat flag in the .phys
+scripts is marking.
+=================
+*/
+static int G_AIGuardBreaker( playerState_t *ps ) {
+	g_userWeapon_t	*weapon;
+	int				i;
+
+	for ( i = 1 ; i <= MAX_PLAYERWEAPONS ; i++ ) {
+		if ( !( ps->stats[stSkills] & ( 1 << i ) ) ) {
+			continue;
+		}
+
+		weapon = G_FindUserWeaponData( ps->clientNum, i );
+		if ( weapon && !weapon->physics_swat ) {
+			return i;
+		}
+	}
+
+	return 0;
 }
 
 /*
@@ -267,6 +301,30 @@ void G_AIThink( gentity_t *ent ) {
 	}
 	client->aiLeashedAt = 0;
 
+	// The guard decides fights, so it is what the fighter watches. It comes back
+	// up at AI_GUARD_READY rather than at the threshold it dropped on, or it
+	// would flicker in and out of contact, and it gives up on the attempt after
+	// AI_GUARD_PATIENCE so an opponent who never lets go cannot keep it out of
+	// its own fight.
+	if ( client->aiRecovering ) {
+		if ( ps->powerLevel[plFatigue] >= ps->powerLevel[plMaximum] * AI_GUARD_READY
+			|| level.time - client->aiRecoverAt > AI_GUARD_PATIENCE ) {
+			client->aiRecovering = qfalse;
+		}
+	} else if ( ps->powerLevel[plFatigue] < ps->powerLevel[plMaximum] * AI_GUARD_LOW ) {
+		client->aiRecovering = qtrue;
+		client->aiRecoverAt = level.time;
+	}
+
+	// Guard up rather than away. Two fighters fly at the same speed, so
+	// retreating from one is being chased while not fighting back; a raised
+	// guard doubles what it absorbs and takes a fifth of the melee, and it
+	// works at the range the fight is already at.
+	if ( client->aiRecovering ) {
+		cmd->buttons |= BUTTON_BLOCK;
+		return;
+	}
+
 	// Break off to convert. Both fighters earn pool in an exchange - dealing
 	// damage pays in as well as taking it - and converting it is the half of
 	// the loop that turns a beating into a higher ceiling and a full bar.
@@ -300,6 +358,20 @@ void G_AIThink( gentity_t *ent ) {
 	// that range only walks it back out of melee.
 	if ( distance > AI_MELEE_RANGE ) {
 		G_AIAvoid( ent, cmd );
+	}
+
+	// A raised guard stops melee outright - the engine breaks the attacker's
+	// melee off against it - so answer it with something it cannot swat away.
+	// A character with nothing heavy enough keeps swinging; there is nothing
+	// better for it to do.
+	if ( target->client->ps.bitFlags & usingBlock ) {
+		int	breaker = G_AIGuardBreaker( ps );
+
+		if ( breaker ) {
+			cmd->weapon = breaker;
+			G_AICharge( client );
+			return;
+		}
 	}
 
 	if ( distance > AI_SKILL_RANGE ) {
