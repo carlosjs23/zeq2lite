@@ -755,6 +755,12 @@ void PM_CheckPowerLevel(void){
 	powerLevel = pm->ps->powerLevel;
 	timers[tmPowerAuto] += pml.msec;
 	limit = powerLevel[plLimit];
+	// Both pools are credited from half a dozen places - every melee branch
+	// pays the attacker, PM_BurnPowerLevel pays the target, G_UserWeaponDamage
+	// pays across the module boundary - and only one of them clamped. Doing it
+	// once a frame here covers all of them.
+	if(powerLevel[plHealthPool] > limit){powerLevel[plHealthPool] = limit;}
+	if(powerLevel[plMaximumPool] > limit){powerLevel[plMaximumPool] = limit;}
 	while(timers[tmPowerAuto] >= 100){
 		timers[tmPowerAuto] -= 100;
 		idleScale = (!pm->cmd.forwardmove && !pm->cmd.rightmove && !pm->cmd.upmove) ? 2.8 : 1;
