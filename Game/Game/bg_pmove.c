@@ -2442,7 +2442,7 @@ void PM_Melee(void){
 			PM_StopMelee();
 			return;
 		}
-		if(pm->ps->lockedPlayer){
+		if(pm->ps->lockedPlayer && pm->ps->lockedPosition){
 			if(pm->ps->lockedPlayer->bitFlags & usingZanzoken){
 				PM_StopMelee();
 				return;
@@ -3302,7 +3302,14 @@ void PM_UpdateViewAngles(playerState_t *ps, const usercmd_t *cmd){
 		pml.gravityNormal[2] = 1;
 	}
 	VectorScale(pml.gravityNormal,pm->ps->gravity[2],pml.gravityDirection);
-	if((pm->ps->lockedTarget > 0) && !(pm->ps->bitFlags & usingAlter) && *ps->lockedPosition){
+	// lockedPosition has to be tested, not dereferenced: lockedTarget gets set
+	// on its own - PM_Melee points a victim at its attacker, and lockedTarget
+	// is the only one of the three lock fields that crosses the network -
+	// while the two pointers are filled in by LockonCheck, which the server
+	// runs after Pmove. Between the two there is a frame with a target and no
+	// position, and reading *lockedPosition there is a null dereference rather
+	// than the value test it looks like.
+	if((pm->ps->lockedTarget > 0) && !(pm->ps->bitFlags & usingAlter) && ps->lockedPosition){
 		vec3_t dir;
 		vec3_t angles;
 		VectorSubtract(*(ps->lockedPosition),ps->origin,dir);
@@ -3447,7 +3454,7 @@ void PmoveSingle(pmove_t *pmove){
 	if(pm->cmd.buttons != 0 && pm->cmd.buttons != 2048){
 		//Com_Printf("%i\n",pm->cmd.buttons);
 	}
-	if(pm->ps->lockedTarget > 0){
+	if(pm->ps->lockedTarget > 0 && pm->ps->lockedPosition){
 		meleeRange = Distance(pm->ps->origin,*(pm->ps->lockedPosition)) <= 48 ? qtrue : qfalse;
 	}
 	if(!(pm->ps->bitFlags & isTransforming)){
