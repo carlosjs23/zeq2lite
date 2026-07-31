@@ -69,6 +69,7 @@ void PM_ContinueLegsAnim(int anim);
 void PM_ContinueTorsoAnim(int anim);
 void PM_Accelerate(vec3_t wishdir,float wishspeed,float accel);
 void PM_WeaponRelease(void);
+void PM_WeaponDiscard(void);
 float PM_CmdScale(usercmd_t *cmd);
 void PM_CheckContextOperations(void);
 /*===================
@@ -538,7 +539,8 @@ void PM_CheckStatus(void){
 
 			PM_StopMovement();
 			PM_StopFlight();
-			PM_WeaponRelease();
+			// The dead do not fire: a charge dies with its owner.
+			PM_WeaponDiscard();
 			PM_AddEvent(EV_DEATH);
 		}
 		else{
@@ -2993,15 +2995,96 @@ void PM_CheckWeaponSelectionMode(void)
 	if(weaponIndex == 16){pm->cmd.weapon = originalWeaponIndex;}
 }
 
-void PM_WeaponRelease(void){
+/*==============
+PM_FireCharge
+Looses a charge that has reached its ready threshold, and reports whether it
+did. The costs of a windup are debited per percent as it runs and are never
+refunded, so a charge past the threshold has to resolve as a shot no matter
+what ended it - the shot is the thing that was paid for.
+'guidable' is false when an interrupt ended the charge: a fighter taking a hit
+is in no position to steer, so the shot leaves on its own rather than entering
+a guiding state the interrupt would tear down again on the next frame.
+The charge percentage is deliberately left standing; the server sizes the shot
+from it when it handles the fire event, and clears it there.
+==============*/
+static qboolean PM_FireCharge(qboolean guidable){
+	int	*weaponInfo;
+	int	*alt_weaponInfo;
+
+	weaponInfo = pm->ps->currentSkill;
+	if(weaponInfo[WPSTAT_NUMCHECK] != pm->ps->weapon){return qfalse;}
+	if(weaponInfo[WPSTAT_BITFLAGS] & WPF_ALTWEAPONPRESENT){
+		alt_weaponInfo = &weaponInfo[WPSTAT_ALT_POWER];
+	} else{
+		alt_weaponInfo = weaponInfo;
+	}
+	if(pm->ps->weaponstate == WEAPON_CHARGING){
+		if(!(weaponInfo[WPSTAT_BITFLAGS] & WPF_READY)){return qfalse;}
+		weaponInfo[WPSTAT_BITFLAGS] &= ~WPF_READY;
+		pm->ps->timers[tmAttack1] = 0;
+		if(guidable && weaponInfo[WPSTAT_BITFLAGS] & WPF_GUIDED){
+			pm->ps->weaponstate = WEAPON_GUIDING;
+			pm->ps->bitFlags |= isGuiding;
+		} else{
+			pm->ps->weaponstate = WEAPON_COOLING;
+			pm->ps->weaponTime += weaponInfo[WPSTAT_COOLTIME];
+		}
+		PM_AddEvent(EV_FIRE_WEAPON);
+		PM_StartTorsoAnim(ANIM_KI_ATTACK1_FIRE + (pm->ps->weapon - 1) * 2 );
+		return qtrue;
+	}
+	if(pm->ps->weaponstate == WEAPON_ALTCHARGING){
+		if(!(alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_READY)){return qfalse;}
+		alt_weaponInfo[WPSTAT_BITFLAGS] &= ~WPF_READY;
+		pm->ps->timers[tmAttack2] = 0;
+		if(guidable && alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_GUIDED){
+			pm->ps->weaponstate = WEAPON_ALTGUIDING;
+			pm->ps->bitFlags |= isGuiding;
+		} else{
+			pm->ps->weaponstate = WEAPON_COOLING;
+			pm->ps->weaponTime += alt_weaponInfo[WPSTAT_COOLTIME];
+		}
+		PM_AddEvent(EV_ALTFIRE_WEAPON);
+		PM_StartTorsoAnim(ANIM_KI_ATTACK1_ALT_FIRE + (pm->ps->weapon - 1) * 2 );
+		return qtrue;
+	}
+	return qfalse;
+}
+
+/*==============
+PM_WeaponDiscard
+Throws away whatever the weapon was doing, charge included. Only the states
+that have no shot left to give use this - death, and a windup that never
+reached its ready threshold.
+==============*/
+void PM_WeaponDiscard(void){
 	if(pm->ps->bitFlags & isStruggling){return;}
 	if(pm->ps->bitFlags & isGuiding){
 		PM_AddEvent(EV_DETONATE_WEAPON);
 		pm->ps->bitFlags &= ~isGuiding;
 	}
+	// A charge only exists while it is being wound up. Zeroing outside that
+	// would eat the percentage a fire event queued earlier this frame has not
+	// been sized from yet.
+	if(pm->ps->weaponstate == WEAPON_CHARGING || pm->ps->weaponstate == WEAPON_ALTCHARGING){
+		pm->ps->stats[stChargePercentPrimary] = 0;
+		pm->ps->stats[stChargePercentSecondary] = 0;
+	}
 	pm->ps->weaponstate = WEAPON_READY;
-	pm->ps->stats[stChargePercentPrimary] = 0;
-	pm->ps->stats[stChargePercentSecondary] = 0;
+}
+
+/*==============
+PM_WeaponRelease
+Ends the weapon for everything that interrupts a fighter - knockback, melee,
+a transform, the start of a soar. A charge past its ready threshold fires; the
+investment resolves as a shot that may well be badly aimed, rather than
+evaporating. Below the threshold it is still lost, which is the risk the
+windup carries.
+==============*/
+void PM_WeaponRelease(void){
+	if(pm->ps->bitFlags & isStruggling){return;}
+	if(PM_FireCharge(qfalse)){return;}
+	PM_WeaponDiscard();
 }
 void PM_Weapon(void){
 	int	*weaponInfo;
@@ -3077,6 +3160,10 @@ void PM_Weapon(void){
 		if(pm->ps->weapon == pm->cmd.weapon){
 			if(pm->cmd.buttons & BUTTON_ATTACK) {
 				if(weaponInfo[WPSTAT_BITFLAGS] & WPF_NEEDSCHARGE){
+					// A windup starts from nothing. Owning that here rather than in
+					// whatever ended the last one keeps a percentage a fired shot has
+					// not been sized from yet out of the teardown's way.
+					pm->ps->stats[stChargePercentPrimary] = 0;
 					pm->ps->weaponstate = WEAPON_CHARGING;
 					PM_StartTorsoAnim(ANIM_KI_ATTACK1_PREPARE + (pm->ps->weapon - 1) * 2 );
 					break;
@@ -3096,6 +3183,7 @@ void PM_Weapon(void){
 			}
 			if(pm->cmd.buttons & BUTTON_ALT_ATTACK){
 				if(alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_NEEDSCHARGE){
+					pm->ps->stats[stChargePercentSecondary] = 0;
 					pm->ps->weaponstate = WEAPON_ALTCHARGING;
 					PM_StartTorsoAnim(ANIM_KI_ATTACK1_ALT_PREPARE + (pm->ps->weapon - 1) * 2 );
 					break;
@@ -3160,19 +3248,8 @@ void PM_Weapon(void){
 		}
 		if(!(pm->cmd.buttons & BUTTON_ATTACK)) {
 			pm->ps->timers[tmAttack1] = 0;
-			if(weaponInfo[WPSTAT_BITFLAGS] & WPF_READY){
-				weaponInfo[WPSTAT_BITFLAGS] &= ~WPF_READY;
-				if(weaponInfo[WPSTAT_BITFLAGS] & WPF_GUIDED){
-					pm->ps->weaponstate = WEAPON_GUIDING;
-					pm->ps->bitFlags |= isGuiding;
-				} else{
-					pm->ps->weaponstate = WEAPON_COOLING;
-					pm->ps->weaponTime += weaponInfo[WPSTAT_COOLTIME];
-				}
-				PM_AddEvent(EV_FIRE_WEAPON);
-				PM_StartTorsoAnim(ANIM_KI_ATTACK1_FIRE + (pm->ps->weapon - 1) * 2 );
-			}
-			else{
+			// Letting go on purpose is the one release that gets to guide.
+			if(!PM_FireCharge(qtrue)){
 				pm->ps->weaponTime = 0;
 				pm->ps->weaponstate = WEAPON_READY;
 				pm->ps->stats[stChargePercentPrimary] = 0;
@@ -3183,37 +3260,30 @@ void PM_Weapon(void){
 	case WEAPON_ALTCHARGING:
 		chargeRate = (pm->ps->bitFlags & usingBoost) ? 2 : 1;
 		pm->ps->timers[tmAttack2] += pml.msec;
-		pm->ps->timers[tmImpede] = weaponInfo[WPSTAT_ALT_RESTRICT_MOVEMENT];
-		pm->ps->attackPower = weaponInfo[WPSTAT_ALT_POWER] * ((float)pm->ps->stats[stChargePercentSecondary] / 100.0f) * powerScale;
-		if(pm->ps->timers[tmAttack2] >= weaponInfo[WPSTAT_ALT_CHRGTIME]){
-			pm->ps->timers[tmAttack2] -= weaponInfo[WPSTAT_ALT_CHRGTIME];
+		// alt_weaponInfo is the altfire's own base, and falls back to the primary
+		// set when a skill has no altfire. Reaching the alt fields off the primary
+		// base lands on the same words only while an altfire exists.
+		pm->ps->timers[tmImpede] = alt_weaponInfo[WPSTAT_RESTRICT_MOVEMENT];
+		pm->ps->attackPower = alt_weaponInfo[WPSTAT_POWER] * ((float)pm->ps->stats[stChargePercentSecondary] / 100.0f) * powerScale;
+		if(pm->ps->timers[tmAttack2] >= alt_weaponInfo[WPSTAT_CHRGTIME]){
+			pm->ps->timers[tmAttack2] -= alt_weaponInfo[WPSTAT_CHRGTIME];
 			if(pm->ps->stats[stChargePercentSecondary] < 100){
-				if(pm->ps->stats[stChargePercentPrimary] == 0 && pm->ps->bitFlags & usingBoost){
-					pm->ps->stats[stChargePercentPrimary] = 25;
-					costSecondary *= 25;
+				if(pm->ps->stats[stChargePercentSecondary] == 0 && pm->ps->bitFlags & usingBoost){
+					pm->ps->stats[stChargePercentSecondary] = 25;
+					costSecondary *= 40;
 				}
 				pm->ps->stats[stChargePercentSecondary] += chargeRate;
 				if(pm->ps->stats[stChargePercentSecondary] > 100){
 					pm->ps->stats[stChargePercentSecondary] = 100;
 				}
 				pm->ps->powerLevel[plUseFatigue] += costSecondary * pm->ps->baseStats[stEnergyAttackCost] * energyScale;
-				pm->ps->powerLevel[plUseHealth] += weaponInfo[WPSTAT_ALT_HEALTHCOST] * ((float)pm->ps->powerLevel[plMaximum] * 0.0001);
-				pm->ps->powerLevel[plUseMaximum] += weaponInfo[WPSTAT_ALT_MAXIMUMCOST] * ((float)pm->ps->powerLevel[plMaximum] * 0.0001);
+				pm->ps->powerLevel[plUseHealth] += alt_weaponInfo[WPSTAT_HEALTHCOST] * ((float)pm->ps->powerLevel[plMaximum] * 0.0001);
+				pm->ps->powerLevel[plUseMaximum] += alt_weaponInfo[WPSTAT_MAXIMUMCOST] * ((float)pm->ps->powerLevel[plMaximum] * 0.0001);
 			}
 		}
 		if(!(pm->cmd.buttons & BUTTON_ALT_ATTACK)) {
-			if(alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_READY){
-				alt_weaponInfo[WPSTAT_BITFLAGS] &= ~WPF_READY;
-				if(alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_GUIDED){
-					pm->ps->weaponstate = WEAPON_ALTGUIDING;
-					pm->ps->bitFlags |= isGuiding;
-				} else{
-					pm->ps->weaponstate = WEAPON_COOLING;
-					pm->ps->weaponTime += alt_weaponInfo[WPSTAT_COOLTIME];
-				}
-				PM_AddEvent(EV_ALTFIRE_WEAPON );
-				PM_StartTorsoAnim(ANIM_KI_ATTACK1_ALT_FIRE + (pm->ps->weapon - 1) * 2 );
-			} else{
+			// Letting go on purpose is the one release that gets to guide.
+			if(!PM_FireCharge(qtrue)){
 				pm->ps->weaponTime = 0;
 				pm->ps->weaponstate = WEAPON_READY;
 				pm->ps->stats[stChargePercentSecondary] = 0;
@@ -3229,7 +3299,10 @@ void PM_Weapon(void){
 			break;
 		}
 		pm->ps->weaponTime += pml.msec;
+		// Continuous fire bills fatigue per whole 100ms held; the leftover carries
+		// into the next frame, so every step has to be taken out of weaponTime.
 		while(pm->ps->weaponTime > 100){
+			pm->ps->weaponTime -= 100;
 			pm->ps->powerLevel[plUseFatigue] += costPrimary * pm->ps->baseStats[stEnergyAttackCost] * energyScale;
 		}
 		break;
@@ -3241,7 +3314,10 @@ void PM_Weapon(void){
 			break;
 		}
 		pm->ps->weaponTime += pml.msec;
+		// Continuous fire bills fatigue per whole 100ms held; the leftover carries
+		// into the next frame, so every step has to be taken out of weaponTime.
 		while(pm->ps->weaponTime > 100){
+			pm->ps->weaponTime -= 100;
 			pm->ps->powerLevel[plUseFatigue] += costSecondary * pm->ps->baseStats[stEnergyAttackCost] * energyScale;
 		}
 		break;
