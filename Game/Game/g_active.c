@@ -512,6 +512,60 @@ static const char *G_MeleeStateName( int state ) {
 	return names[state];
 }
 
+/*
+==============
+G_ButtonNames
+
+What the fighter is holding, spelled out. A bitfield printed as a decimal is the
+worst of both worlds - 8192 and 4096 and 512 look alike at a glance and have
+been read for each other more than once - and the whole reason this line exists
+is to be read quickly.
+==============
+*/
+static const char *G_ButtonNames( int buttons ) {
+	static char		out[128];
+	static const struct {
+		int			bit;
+		const char	*name;
+	} named[] = {
+		{ BUTTON_ATTACK, "atk" },
+		{ BUTTON_ALT_ATTACK, "altAtk" },
+		{ BUTTON_BLOCK, "block" },
+		{ BUTTON_BOOST, "boost" },
+		{ BUTTON_TELEPORT, "teleport" },
+		{ BUTTON_POWERLEVEL, "powerLevel" },
+		{ BUTTON_JUMP, "jump" },
+		{ BUTTON_GESTURE, "gesture" },
+		{ BUTTON_WALKING, "walk" }
+	};
+	int				i;
+	int				left;
+
+	out[0] = '\0';
+	left = buttons;
+	for ( i = 0 ; i < (int)( sizeof( named ) / sizeof( named[0] ) ) ; i++ ) {
+		if ( !( buttons & named[i].bit ) ) {
+			continue;
+		}
+		if ( out[0] ) {
+			Q_strcat( out, sizeof( out ), "+" );
+		}
+		Q_strcat( out, sizeof( out ), named[i].name );
+		left &= ~named[i].bit;
+	}
+
+	// Anything left over keeps its bits rather than vanishing, so a button this
+	// list has not been taught about still shows up as something to look into.
+	if ( left ) {
+		if ( out[0] ) {
+			Q_strcat( out, sizeof( out ), "+" );
+		}
+		Q_strcat( out, sizeof( out ), va( "0x%x", left ) );
+	}
+
+	return out[0] ? out : "-";
+}
+
 static const char *G_WeaponStateName( int state ) {
 	static const char	*names[] = {
 		"ready", "firing", "guiding", "charging",
@@ -533,6 +587,13 @@ typedef enum {
 	fightUseQuickZan,
 	fightUseBoost,
 	fightUseStruggle,
+	// Which end of an exchange this fighter is on. The melee start sequence puts
+	// stMeleeStartAttack on whoever opened it and stMeleeStartHit on whoever it
+	// opened against, so counting both says whether a fighter ever gets a turn
+	// attacking or only ever receives - which no level in this line answers,
+	// since both fighters read melee 1 either way.
+	fightUseInitiate,
+	fightUseStruck,
 	fightUseCount
 } fightUse_t;
 
@@ -573,6 +634,8 @@ static void G_DebugFight( gentity_t *ent ) {
 	using[fightUseQuickZan] = ( ps->bitFlags & usingQuickZanzoken ) ? 1 : 0;
 	using[fightUseBoost] = ( ps->bitFlags & usingBoost ) ? 1 : 0;
 	using[fightUseStruggle] = ( ps->bitFlags & isStruggling ) ? 1 : 0;
+	using[fightUseInitiate] = ( ps->stats[stMeleeState] == stMeleeStartAttack ) ? 1 : 0;
+	using[fightUseStruck] = ( ps->stats[stMeleeState] == stMeleeStartHit ) ? 1 : 0;
 
 	for ( i = 0 ; i < fightUseCount ; i++ ) {
 		if ( using[i] && !wasUsing[clientNum][i] ) {
@@ -610,26 +673,29 @@ static void G_DebugFight( gentity_t *ent ) {
 	//
 	// The four verbs read now/total: whether it is up at this instant, and how
 	// many times it has been reached for since the map loaded.
-	G_Printf( "fight c%i t%i.%i: health %i/%i fatigue %i pools %i/%i lock %i buttons %i"
-		" dist %i freeze %i mIdle %i wst %s wpn %i"
-		" safe %i alter %i melee %i meleeState %s"
-		" block %i/%i zanzoken %i/%i quickzan %i/%i boost %i/%i struggle %i/%i dead %i\n",
+	G_Printf( "fight c%i t%i.%i: health %i/%i fatigue %i pools %i/%i lock %i buttons %s"
+		" dist %i freeze %i mIdle %i wst %s wpn %s"
+		" safe %i alter %s melee %s meleeState %s"
+		" block %i/%i zanzoken %i/%i quickzan %i/%i boost %i/%i struggle %i/%i"
+		" initiate %i/%i struck %i/%i dead %s\n",
 		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
 		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
 		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool],
-		ps->lockedTarget, client->pers.cmd.buttons,
+		ps->lockedTarget, G_ButtonNames( client->pers.cmd.buttons ),
 		dist, ps->timers[tmFreeze], ps->timers[tmMeleeIdle],
-		G_WeaponStateName( ps->weaponstate ), ps->weapon,
+		G_WeaponStateName( ps->weaponstate ), ps->weapon ? va( "%i", ps->weapon ) : "none",
 		ps->timers[tmSafe],
-		( ps->bitFlags & usingAlter ) ? 1 : 0,
-		( ps->bitFlags & usingMelee ) ? 1 : 0,
+		( ps->bitFlags & usingAlter ) ? "yes" : "no",
+		( ps->bitFlags & usingMelee ) ? "yes" : "no",
 		G_MeleeStateName( ps->stats[stMeleeState] ),
 		using[fightUseBlock], uses[clientNum][fightUseBlock],
 		using[fightUseZanzoken], uses[clientNum][fightUseZanzoken],
 		using[fightUseQuickZan], uses[clientNum][fightUseQuickZan],
 		using[fightUseBoost], uses[clientNum][fightUseBoost],
 		using[fightUseStruggle], uses[clientNum][fightUseStruggle],
-		( ps->bitFlags & isDead ) ? 1 : 0 );
+		using[fightUseInitiate], uses[clientNum][fightUseInitiate],
+		using[fightUseStruck], uses[clientNum][fightUseStruck],
+		( ps->bitFlags & isDead ) ? "yes" : "no" );
 }
 
 /*
