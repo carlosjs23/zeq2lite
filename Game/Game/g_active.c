@@ -617,7 +617,15 @@ typedef enum {
 	// half-made and one that fires look identical in every level on the line,
 	// and cooling is only entered by having fired.
 	fightUseCharge,
+	// The stage between starting a windup and firing one. A charge below
+	// costs_chargeReady is discarded by any interrupt, so "began 90, fired 6"
+	// has two very different explanations - never reached the threshold, or
+	// reached it and the release did not fire - and only this separates them.
+	fightUseReady,
 	fightUseFired,
+	// Deaths, for the same reason as the rest: counting the samples that caught
+	// a fighter dead measures how long it stayed down, not how often it went.
+	fightUseDied,
 	fightUseCount
 } fightUse_t;
 
@@ -662,7 +670,9 @@ static void G_DebugFight( gentity_t *ent ) {
 	using[fightUseStruck] = ( ps->stats[stMeleeState] == stMeleeStartHit ) ? 1 : 0;
 	using[fightUseStunned] = ( ps->stats[stMeleeState] == stMeleeUsingStun ) ? 1 : 0;
 	using[fightUseCharge] = ( ps->weaponstate == WEAPON_CHARGING || ps->weaponstate == WEAPON_ALTCHARGING ) ? 1 : 0;
+	using[fightUseReady] = ( ps->currentSkill[WPSTAT_BITFLAGS] & WPF_READY ) ? 1 : 0;
 	using[fightUseFired] = ( ps->weaponstate == WEAPON_COOLING ) ? 1 : 0;
+	using[fightUseDied] = ( ps->bitFlags & isDead ) ? 1 : 0;
 
 	for ( i = 0 ; i < fightUseCount ; i++ ) {
 		if ( using[i] && !wasUsing[clientNum][i] ) {
@@ -704,7 +714,7 @@ static void G_DebugFight( gentity_t *ent ) {
 		" dist %i freeze %i mIdle %i wst %s wpn %s"
 		" safe %i alter %s soar %s jump %s melee %s meleeState %s"
 		" block %i/%i zanzoken %i/%i quickzan %i/%i boost %i/%i struggle %i/%i"
-		" initiate %i/%i struck %i/%i stunned %i/%i charge %i/%i fired %i/%i dead %s\n",
+		" initiate %i/%i struck %i/%i stunned %i/%i charge %i/%i ready %i/%i fired %i/%i dead %i/%i\n",
 		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
 		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
 		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool],
@@ -726,8 +736,9 @@ static void G_DebugFight( gentity_t *ent ) {
 		using[fightUseStruck], uses[clientNum][fightUseStruck],
 		using[fightUseStunned], uses[clientNum][fightUseStunned],
 		using[fightUseCharge], uses[clientNum][fightUseCharge],
+		using[fightUseReady], uses[clientNum][fightUseReady],
 		using[fightUseFired], uses[clientNum][fightUseFired],
-		( ps->bitFlags & isDead ) ? "yes" : "no" );
+		using[fightUseDied], uses[clientNum][fightUseDied] );
 }
 
 /*
