@@ -1763,5 +1763,8 @@ float Com_ScreenFovX( float fovX, int vidWidth, int vidHeight ) {
 	aspect = (float)vidWidth / (float)vidHeight;
 	halfTan = tan( fovX * 0.5f * ( M_PI / 180.0f ) ) * ( aspect / baseAspect );
 
-	return Com_Clamp( 1.0f, 179.0f, 2.0f * atan( halfTan ) * ( 180.0f / M_PI ) );
+	// atan2 rather than atan: this file is compiled into the QVMs too, and the
+	// bytecode's math comes from the engine syscalls in g_syscalls.asm, which
+	// have atan2 and no atan. For x = 1 the two are the same function.
+	return Com_Clamp( 1.0f, 179.0f, 2.0f * atan2( halfTan, 1.0f ) * ( 180.0f / M_PI ) );
 }
