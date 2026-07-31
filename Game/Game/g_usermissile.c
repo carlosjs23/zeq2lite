@@ -588,10 +588,8 @@ void UserHitscan_Fire (gentity_t *self, g_userWeapon_t *weaponInfo, int weaponNu
 	} else if ( weaponInfo->physics_range_max ) {
 		physics_range = weaponInfo->physics_range_max;
 	} else {
-		// A hitscan whose script names no range traces from the muzzle to the
-		// muzzle and can never hit anything - the shipped scripts leave range
-		// off the hitscan skills entirely, so those skills charge, cost power
-		// and land on nothing. Reach as far as the crosshair trace does.
+		// A script that names no range would trace from the muzzle to the
+		// muzzle. Reach as far as the crosshair trace instead.
 		physics_range = 131072;
 	}
 	VectorMA (muzzle, physics_range, forward, end);

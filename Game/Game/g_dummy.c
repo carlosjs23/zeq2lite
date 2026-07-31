@@ -22,13 +22,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // g_dummy.c -- training dummies: player-shaped targets to hit
 //
-// This tree has no bot support at all - the engine ships no sv_bot.c and the
-// game module no ai_*.c - so there is no way to get a second player-shaped
-// entity into a map, and none of the combat code can be exercised. A dummy is
-// therefore an ordinary client slot that the game module connects, spawns and
-// feeds usercmds to itself. Nothing in the engine knows the difference: the
-// slot's client_t stays CS_FREE, so the server never tries to send it a
-// snapshot, while the entity it owns is transmitted like any other.
+// There is no bot support in this tree, so a dummy is an ordinary client slot
+// that the game module connects, spawns and feeds usercmds to itself. The
+// engine is not involved: the slot's client_t stays CS_FREE, so the server
+// never sends it a snapshot or expects one back, while the entity it owns is
+// transmitted like any other player.
 //
 // A dummy does not move or fight. It stands where it was put, turns to face
 // the nearest player, and takes damage.
@@ -44,11 +42,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 =================
 G_DummySlot
 
-Client slots are handed out from the top down, because the engine hands real
-connections out from the bottom up (SV_DirectConnect scans from slot 0). A
-dummy holds a slot the engine still believes is free, so keeping the two
-allocators at opposite ends of the array is what stops a joining player from
-landing on top of one.
+Top down, because the engine hands real connections out from the bottom up
+(SV_DirectConnect scans from slot 0) and a dummy holds a slot the engine still
+believes is free.
 =================
 */
 static int G_DummySlot( void ) {
@@ -148,10 +144,8 @@ static void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance ) {
 	angles[ROLL] = 0;
 	AngleVectors( angles, forward, NULL, NULL );
 
-	// Aim the search from chest height with a point hull rather than sweeping
-	// the player box along the floor: the box sits flush on the ground, so on
-	// any real terrain it starts solid and the sweep stops where it began -
-	// which puts the dummy inside the player who asked for it.
+	// Search from chest height with a point hull: the player box sits flush on
+	// the ground and starts solid on any real terrain.
 	VectorCopy( owner->client->ps.origin, start );
 	start[2] += owner->client->ps.viewheight;
 	VectorMA( start, distance, forward, origin );
@@ -163,10 +157,8 @@ static void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance ) {
 		VectorMA( origin, -( dummy->r.maxs[0] + 8 ), forward, origin );
 	}
 
-	// Stand it at the height the player is standing at, then settle it onto
-	// whatever it is above. The drop is deliberately short: on a map with any
-	// relief the point ahead of the player is often over a canyon, and a dummy
-	// that teleports to the floor of it is a dummy nobody can see or hit.
+	// Stand it at the player's own height, and only settle onto ground that is
+	// close underneath - the point ahead is often over a canyon.
 	origin[2] = owner->client->ps.origin[2];
 	VectorCopy( origin, start );
 	start[2] += 32;
@@ -229,9 +221,8 @@ static gentity_t *G_SpawnDummy( gentity_t *owner, const char *model, float dista
 		return NULL;
 	}
 
-	// ClientConnect clears the whole client, so the slot can only be marked
-	// once it has returned - and it has to be marked before ClientBegin, which
-	// runs a client frame that G_RunDummy has to recognise.
+	// ClientConnect clears the client, and ClientBegin runs a client frame that
+	// G_RunDummy has to recognise, so the mark goes between the two.
 	level.clients[clientNum].pers.isDummy = qtrue;
 
 	ClientBegin( clientNum );
@@ -287,9 +278,8 @@ static int G_RemoveDummies( void ) {
 		if ( !level.clients[i].pers.isDummy ) {
 			continue;
 		}
-		// the engine has no client here, so this is the game-side half of a
-		// disconnect only - trap_DropClient would be talking about a client_t
-		// that was never allocated.
+		// game-side half of a disconnect only: trap_DropClient would be talking
+		// about a client_t that was never allocated
 		ClientDisconnect( i );
 		level.clients[i].pers.isDummy = qfalse;
 		count++;
