@@ -62,7 +62,8 @@ G_AwardKill
 Pays the fighter who put this one down: a point of score, and a share of the
 ceiling it took to do it into both pools. Growth costs pool and nothing else
 handed pool out for winning, so a fight that ended was worth exactly as much as
-a fight that never started.
+a fight that never started. Also prints the obituary, credited or not - this
+is the one place every death passes through.
 ==============
 */
 void G_AwardKill( gentity_t *victim ) {
@@ -72,20 +73,23 @@ void G_AwardKill( gentity_t *victim ) {
 	if ( !victim->client ) {
 		return;
 	}
-	if ( victim->client->lastDamagedBy < 0 || victim->client->lastDamagedBy >= level.maxclients ) {
-		return;
+	killer = NULL;
+	if ( victim->client->lastDamagedBy >= 0 && victim->client->lastDamagedBy < level.maxclients
+		&& level.time - victim->client->lastDamagedAt <= KILL_CREDIT_WINDOW ) {
+		killer = &level.clients[victim->client->lastDamagedBy];
+		if ( killer == victim->client || killer->pers.connected != CON_CONNECTED
+			|| killer->sess.sessionTeam == TEAM_SPECTATOR ) {
+			killer = NULL;
+		}
 	}
-	if ( level.time - victim->client->lastDamagedAt > KILL_CREDIT_WINDOW ) {
-		return;
-	}
-	killer = &level.clients[victim->client->lastDamagedBy];
 	victim->client->lastDamagedBy = -1;
-	if ( killer == victim->client || killer->pers.connected != CON_CONNECTED ) {
+	if ( !killer ) {
+		trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " was defeated.\n\"",
+			victim->client->pers.netname ) );
 		return;
 	}
-	if ( killer->sess.sessionTeam == TEAM_SPECTATOR ) {
-		return;
-	}
+	trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " was defeated by %s" S_COLOR_WHITE ".\n\"",
+		victim->client->pers.netname, killer->pers.netname ) );
 	killer->ps.persistant[PERS_SCORE] += 1;
 	killer->lastkilled_client = victim->client->ps.clientNum;
 	killer->lastKillTime = level.time;
@@ -96,6 +100,8 @@ void G_AwardKill( gentity_t *victim ) {
 	killer->ps.powerLevel[plMaximumPool] += award;
 	if ( killer->ps.powerLevel[plHealthPool] > limit ) { killer->ps.powerLevel[plHealthPool] = limit; }
 	if ( killer->ps.powerLevel[plMaximumPool] > limit ) { killer->ps.powerLevel[plMaximumPool] = limit; }
+	// the score change is what CS_SCORES1/2 and the fraglimit check read
+	CalculateRanks();
 }
 
 int RaySphereIntersections( vec3_t origin, float radius, vec3_t point, vec3_t dir, vec3_t intersections[2] ) {

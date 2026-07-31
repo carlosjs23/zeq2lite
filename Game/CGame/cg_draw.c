@@ -631,16 +631,32 @@ void CG_DrawScreenEffects(){
 CG_Scoreboard
 ================*/
 void CG_DrawScoreboard(){
-	int clientNum;
+	int		i;
+	int		clientNum;
+	int		y;
 	vec3_t	angles;
-	for(clientNum=0;clientNum<MAX_CLIENTS;++clientNum){
-		if(cgs.clientinfo[clientNum].infoValid){
-			CG_DrawHead(180,(36*clientNum)+180,50,50,clientNum,angles);
-			CG_DrawSmallStringHalfHeight(240,(36*clientNum)+200,cgs.clientinfo[clientNum].name,1.0F);
-			CG_DrawSmallStringHalfHeight(320,(36*clientNum)+200,va("%i",cg.scores[clientNum].score),1.0F);
-			CG_DrawSmallStringHalfHeight(380,(36*clientNum)+200,va("%i",cg.scores[clientNum].ping),1.0F);
-			CG_DrawSmallStringHalfHeight(420,(36*clientNum)+200,va("%i",cg.scores[clientNum].time),1.0F);
-		}
+	// the server pushes scores on its own only at intermission; while the
+	// board is up, keep asking so it tracks the fight
+	if(cg.scoresRequestTime + 2000 < cg.time){
+		cg.scoresRequestTime = cg.time;
+		trap_SendClientCommand("score");
+	}
+	VectorClear(angles);
+	CG_DrawSmallStringHalfHeight(240,160,"Name",1.0F);
+	CG_DrawSmallStringHalfHeight(320,160,"Score",1.0F);
+	CG_DrawSmallStringHalfHeight(380,160,"Ping",1.0F);
+	CG_DrawSmallStringHalfHeight(420,160,"Time",1.0F);
+	// cg.scores is packed in rank order, so the row index is the rank and the
+	// client number has to come from the entry
+	for(i=0;i<cg.numScores;++i){
+		clientNum = cg.scores[i].client;
+		if(!cgs.clientinfo[clientNum].infoValid){continue;}
+		y = (36*i)+180;
+		CG_DrawHead(180,y,50,50,clientNum,angles);
+		CG_DrawSmallStringHalfHeight(240,y+20,cgs.clientinfo[clientNum].name,1.0F);
+		CG_DrawSmallStringHalfHeight(320,y+20,va("%i",cg.scores[i].score),1.0F);
+		CG_DrawSmallStringHalfHeight(380,y+20,va("%i",cg.scores[i].ping),1.0F);
+		CG_DrawSmallStringHalfHeight(420,y+20,va("%i",cg.scores[i].time),1.0F);
 	}
 }
 /*================
@@ -752,8 +768,7 @@ static void CG_DrawStatusBar( void ) {
 	if(cg_drawStatus.integer == 0){return;}
 	cent = &cg_entities[cg.snap->ps.clientNum];
 	tier = (float)ps->powerLevel[plTierCurrent];
-	CG_CheckChat();	
-	//CG_DrawScoreboard();
+	CG_CheckChat();
 	CG_DrawScreenEffects();
 	if(ps->lockedTarget > 0 && cgs.clientinfo[ps->lockedTarget-1].infoValid){
 		playerState_t lockedTargetPS;
@@ -1331,6 +1346,7 @@ static void CG_Draw2D( void ) {
 		return;
 	}
 	if ( cg.snap->ps.pm_type == PM_INTERMISSION ) {
+		CG_DrawScoreboard();
 		return;
 	}
 	if(cg_scripted2D.integer != 0){
@@ -1360,6 +1376,9 @@ static void CG_Draw2D( void ) {
 	CG_DrawVote();
 	CG_DrawTeamVote();
 	CG_DrawUpperRight();
+	if ( cg.showScores ) {
+		CG_DrawScoreboard();
+	}
 }
 void CG_DrawScreenFlash ( void ) {
 	float		*color;
