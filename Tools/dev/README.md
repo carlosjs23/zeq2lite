@@ -221,8 +221,8 @@ Reading the output:
   whether they appear depends on ASLR. If the `is located` line says the access
   sits inside a global large enough for it, ignore it.
 - UBSan findings are a latent-UB inventory, not necessarily live bugs.
-- About one run in four dies early with SIGSEGV or SIGTERM. Re-run;
-  `reached in-game: yes` is what tells you the run was usable.
+- `reached in-game: yes` is what tells you the run was usable — a run that stops
+  short covers only loading, so the absence of a finding means nothing.
 
 Two environment notes. ASan misbehaves under a sandboxed shell (`Checking file
 existence is not allowed under sandbox`), so run it unsandboxed. And

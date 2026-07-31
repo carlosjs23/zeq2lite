@@ -42,8 +42,8 @@
 #   ASLR. A report whose "is located" line says 0 bytes inside a global big
 #   enough for the access is one of these; ignore it.
 #
-# - Roughly one run in four dies early with SIGSEGV or SIGTERM instead of
-#   completing. Just re-run; "reached in-game: yes" tells you the run was good.
+# "reached in-game: yes" is what tells you the run was good: a run that stops
+# short covers only loading, so the absence of a finding means nothing.
 #
 # usage:
 #   zeq2sanitize.sh                 # build (if needed), run 'desert', report
