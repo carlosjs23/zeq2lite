@@ -411,7 +411,9 @@ void PM_UsePowerLevel(){
 }
 void PM_BurnPowerLevel(){
 	float percent;
-	int defense;
+	// float: it holds a multiplier, and rounding it makes the guard bonuses
+	// below no-ops
+	float defense;
 	int burn,initial;
 	int newValue;
 	int burnType;
@@ -434,12 +436,8 @@ void PM_BurnPowerLevel(){
 			burnType += 1;
 			continue;
 		}
-		// FIXME: stDefenseMelee and stDefenseEnergy index baseStats, not stats,
-		// so this reads two slots nothing writes and defense is always 0.
-		// Reading the right array is a balance change, not just a fix: the
-		// multiplier is 1.0, and the subtraction below is a tenth of fatigue,
-		// which absorbs every melee hit whole at full fatigue.
-		defense = burnType == 1 ? pm->ps->stats[stDefenseMelee] : pm->ps->stats[stDefenseEnergy];
+		// stDefense* index baseStats, not stats
+		defense = burnType == 1 ? pm->ps->baseStats[stDefenseMelee] : pm->ps->baseStats[stDefenseEnergy];
 		defense = pm->ps->bitFlags & usingBlock ? defense * 2.0 : defense;
 		defense = pm->ps->bitFlags & usingBallFlip ? defense * 1.5 : defense;
 		defense = pm->ps->bitFlags & atopGround ? defense * 1.1 : defense;
@@ -447,7 +445,10 @@ void PM_BurnPowerLevel(){
 		initial = burn;
 		percent = 1.0 - ((float)pm->ps->powerLevel[plCurrent] / (float)pm->ps->powerLevel[plMaximum]);
 		burn -= (int)(((float)pm->ps->powerLevel[plFatigue] * 0.1) * defense);
-		if(burnType != 2){
+		// Only damage that survived the guard pays into the pools. A blocked
+		// hit leaves burn negative, and crediting that took the pools down
+		// past zero - the fighter was paying to be defended.
+		if(burn > 0 && burnType != 2){
 			pm->ps->powerLevel[plHealthPool] += burn * 0.5;
 			pm->ps->powerLevel[plMaximumPool] += burn * 0.7;
 		}
@@ -736,6 +737,8 @@ qboolean PM_CheckTransform(void){
 	}
 	return qfalse;
 }
+#define	POWERLEVEL_RECOVERY_DELAY	1000
+
 void PM_CheckPowerLevel(void){
 	int plSpeed,amount,limit;
 	int *timers,*powerLevel;
@@ -767,6 +770,11 @@ void PM_CheckPowerLevel(void){
 		if(pm->ps->bitFlags & usingAlter || pm->ps->bitFlags & isStruggling || pm->ps->bitFlags & usingSoar
 		|| pm->ps->bitFlags & usingJump || pm->ps->bitFlags & usingBoost || pm->ps->bitFlags & usingZanzoken
 		|| pm->ps->bitFlags & isBreakingLimit || pm->ps->weaponstate >= WEAPON_GUIDING){recovery = 0;}
+		// Nobody recovers mid-exchange. tmSafe is the time since this fighter
+		// last dealt or took damage, so a second of it is the price of breaking
+		// off: without that, fatigue refills faster than a fight can spend it
+		// and nothing that costs fatigue ever costs anything.
+		if(timers[tmSafe] < POWERLEVEL_RECOVERY_DELAY){recovery = 0;}
 		/*if(powerLevel[plCurrent] > powerLevel[plFatigue]){
 			newValue = powerLevel[plCurrent] - (powerLevel[plMaximum] * 0.005);
 			powerLevel[plCurrent] = (powerLevel[plCurrent] - newValue >= 0) ? newValue : 0;
@@ -2703,6 +2711,13 @@ void PM_Melee(void){
 							pm->ps->powerLevel[plHealthPool] += damage * 0.7;
 							pm->ps->powerLevel[plMaximumPool] += damage * 0.5;
 							pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+							// A landed hit costs the target guard whether or not
+							// it gets through it. Fatigue is what
+							// PM_BurnPowerLevel measures incoming damage
+							// against, so without this the guard is a wall
+							// pressure can never wear down and light melee is
+							// worthless for as long as its target stands there.
+							pm->ps->lockedPlayer->powerLevel[plUseFatigue] += damage;
 						}
 						else{
 							pm->ps->lockedPlayer->powerLevel[plUseFatigue] += damage;
