@@ -526,14 +526,33 @@ charge gauge with.
 static void G_AICharge( gclient_t *client ) {
 	playerState_t	*ps = &client->ps;
 
+	// Let go, which is what fires it.
 	if ( ps->currentSkill[WPSTAT_BITFLAGS] & WPF_READY ) {
-		client->aiNextAttack = level.time + AI_ATTACK_PAUSE;
 		return;
 	}
 
-	if ( level.time >= client->aiNextAttack ) {
-		client->pers.cmd.buttons |= BUTTON_ATTACK;
+	// The shot has already left. Pressing again here would begin a second
+	// windup inside the cooldown the caller is about to price, and on a guided
+	// weapon the button means something else entirely.
+	if ( ps->weaponstate == WEAPON_COOLING
+		|| ps->weaponstate == WEAPON_GUIDING
+		|| ps->weaponstate == WEAPON_ALTGUIDING ) {
+		return;
 	}
+
+	// Held every frame, deferring to nothing. This used to wait on
+	// aiNextAttack, which is the melee tap pacing: G_AIAttack sets it
+	// AI_ATTACK_HOLD + AI_ATTACK_PAUSE ahead so that melee reads as taps rather
+	// than a hold. A fighter that tapped melee and then disengaged to plant
+	// carried that timer into the windup and stopped pressing part-way through
+	// it, and a charge below its ready threshold is discarded outright - so the
+	// shot was thrown away by the fighter's own pacing, with nothing on the
+	// line to say so. Tapping and holding are opposite intentions; they no
+	// longer share a clock.
+	//
+	// Nothing is needed in place of it. Entry is already gated by aiShotAt,
+	// which the caller sets from AI_SHOT_COOLDOWN once the shot is away.
+	client->pers.cmd.buttons |= BUTTON_ATTACK;
 }
 
 /*
