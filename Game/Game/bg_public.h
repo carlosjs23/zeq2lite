@@ -373,7 +373,11 @@ typedef enum {
 
 }measureTimers_t;
 typedef enum {
-	bfZanzokenCost
+	bfZanzokenCost,
+	// Fractional points of ceiling a limit break has earned but not yet banked.
+	// Per player and networked, because the conversion it accumulates for is one
+	// player's and prediction runs it on the client as well.
+	bfBreakLimit
 }buffers_t;
 
 // Player stat bits

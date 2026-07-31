@@ -471,6 +471,8 @@ void PM_BurnPowerLevel(){
 		defense = (pm->cmd.buttons & BUTTON_WALKING) && pm->ps->bitFlags & atopGround ? defense * 1.5 : defense;
 		initial = burn;
 		percent = 1.0 - ((float)pm->ps->powerLevel[plCurrent] / (float)pm->ps->powerLevel[plMaximum]);
+		if(percent > 1.0f){percent = 1.0f;}
+		else if(percent < 0.0f){percent = 0.0f;}
 		// A guard reduces a hit; it does not erase one. Mitigation is a share of
 		// what actually landed, scaled by how much guard is left, so a fresh
 		// guard softens a blow and a spent one barely slows it.
@@ -496,9 +498,16 @@ void PM_BurnPowerLevel(){
 		// Only damage that survived the guard pays into the pools. A blocked
 		// hit leaves burn negative, and crediting that took the pools down
 		// past zero - the fighter was paying to be defended.
+		//
+		// Zenkai is banked, never granted. What a beating is worth to the
+		// ceiling goes in here with the rest and only becomes ceiling through a
+		// charge, at POWERLEVEL_POOL_PER_POINT a point. Adding it straight to
+		// plMaximum made growth instant, free and untouchable by any amount of
+		// charging, so standing still and being hit was the fastest way to get
+		// stronger.
 		if(burn > 0 && burnType != 2){
 			pm->ps->powerLevel[plHealthPool] += burn * 0.5;
-			pm->ps->powerLevel[plMaximumPool] += burn * 0.7;
+			pm->ps->powerLevel[plMaximumPool] += (burn * 0.7) + (initial * 0.7f * percent);
 		}
 		if(pm->ps->powerLevel[plHealthPool] > limit){pm->ps->powerLevel[plHealthPool] = limit;}
 		if(pm->ps->powerLevel[plMaximumPool] > limit){pm->ps->powerLevel[plMaximumPool] = limit;}
@@ -507,15 +516,6 @@ void PM_BurnPowerLevel(){
 			if(newValue > limit){newValue = limit;}
 			else if(newValue < 0){newValue = 0;}
 			pm->ps->powerLevel[plHealth] = newValue;
-			if(burnType != 2){
-				newValue = pm->ps->powerLevel[plMaximum] + (initial * 0.7f * percent);
-				if(newValue > pm->ps->powerLevel[plMaximum] * 1.25f){
-					newValue = pm->ps->powerLevel[plMaximum] * 1.25f;
-				}
-				if(newValue > limit){newValue = limit;}
-				else if(newValue < 0){newValue = 0;}
-				pm->ps->powerLevel[plMaximum] = newValue;
-			}
 		}
 		if(burnType == 0){pm->ps->powerLevel[plDamageFromEnergy] = 0;}
 		else if(burnType == 1){pm->ps->powerLevel[plDamageFromMelee] = 0;}
@@ -797,6 +797,22 @@ qboolean PM_CheckTransform(void){
 // pool itself is the zenkai loop and stays as it is - damage banks it, a charge
 // spends it - this only decides how fast a charge can hand it back.
 #define	POWERLEVEL_HEAL_RATE		0.12f
+// Speed under which a fighter counts as resting. Flight is not on the lockout
+// list below and never will be - everyone flies constantly - so without this the
+// rest bonus paid out at three quarters of full speed and running away was the
+// most profitable thing in the game. Squared, to keep the test off the sqrt.
+#define	POWERLEVEL_REST_SPEED_SQR	(150.0f * 150.0f)
+// Pool spent per point of ceiling a limit break banks. The pool is the only way
+// a ceiling grows, so this price is the whole zenkai loop: at the raise * 0.3
+// this replaces it took about 54 pool a point, a saturated 32767 pool bought
+// 606 points, and the pool sat pinned at its transport cap meaning nothing.
+#define	POWERLEVEL_POOL_PER_POINT	4
+// Ceiling points banked per 25ms conversion step, scaling the tier's own
+// breakLimitRate. Throughput has to fit inside one fatigue bar: the sustain
+// below prices a full bar at about eleven seconds of charge, and at this rate
+// those seconds convert a respawn's whole pool - slower, and a conversion can
+// never finish between exchanges, so a fighter stands in an aura forever.
+#define	POWERLEVEL_CONVERT_RATE		4
 
 void PM_CheckPowerLevel(void){
 	int plSpeed,amount,limit;
@@ -805,9 +821,10 @@ void PM_CheckPowerLevel(void){
 	float statScale;
 	float fatigueScale;
 	float check;
-	static float fractionPool = 0;
 	int pushLimit;
 	int newValue;
+	int gained;
+	int heal;
 	// float, not int: this holds 2.8 and an int truncated it to 2, so the bonus
 	// was always a fifth smaller than every comment describing it.
 	float safeScale;
@@ -824,15 +841,17 @@ void PM_CheckPowerLevel(void){
 	if(powerLevel[plMaximumPool] > limit){powerLevel[plMaximumPool] = limit;}
 	while(timers[tmPowerAuto] >= 100){
 		timers[tmPowerAuto] -= 100;
-		// Recovery belongs to being out of the exchange, not to holding perfectly
-		// still. Breaking off is movement by definition, so paying the bonus for
-		// zero input meant a retreat earned the base rate and nothing more -
-		// and the zanzoken that bought the retreat costs more than the base rate
-		// returns. Measured: a fighter that opened a thousand units of gap lost
-		// guard the whole way out. With blocking locked out as well, a losing
-		// fighter had no state left in which it recovered at all, so a guard
-		// once lost was the fight lost.
-		safeScale = timers[tmSafe] >= POWERLEVEL_RECOVERY_CLEAR ? 2.8f : 1.0f;
+		// Recovery belongs to being out of the exchange, and the bonus rate on
+		// top of it belongs to actually resting there. Breaking off is movement,
+		// so the base rate has to survive it - a fighter that opened a thousand
+		// units of gap otherwise lost guard the whole way out and a guard once
+		// lost was the fight lost. But the bonus is what rest is worth, and
+		// paying it at flight speed made disengaging strictly better than
+		// stopping: flight itself costs nothing and is not on the lockout below,
+		// because everyone flies constantly and locking it out would end
+		// recovery altogether.
+		safeScale = timers[tmSafe] >= POWERLEVEL_RECOVERY_CLEAR
+			&& VectorLengthSquared(pm->ps->velocity) < POWERLEVEL_REST_SPEED_SQR ? 2.8f : 1.0f;
 		statScale = 1.0 - ((float)powerLevel[plCurrent] / (float)powerLevel[plMaximum]);
 		if(statScale > 0.75){statScale = 0.75;}
 		if(statScale < 0.25){statScale = 0.25;}
@@ -860,9 +879,16 @@ void PM_CheckPowerLevel(void){
 		}*/
 		newValue = powerLevel[plCurrent] + powerLevel[plDrainCurrent];
 		if(newValue < powerLevel[plMaximum] && newValue > 0){powerLevel[plCurrent] = newValue;}
+		// A tier drain empties a resource; it never runs it into the negative.
+		// Goku's fifth tier drains 1250 fatigue a second against a recovery
+		// ceiling of 630, so an unclamped guard went below zero and stayed
+		// there - and light melee damage is fatigue * 0.013, so every hit that
+		// fighter threw healed its target and paid itself negative pools.
 		newValue = powerLevel[plFatigue] + powerLevel[plDrainFatigue];
+		if(newValue < 0){newValue = 0;}
 		if(newValue < powerLevel[plMaximum]){powerLevel[plFatigue] = newValue;}
 		newValue = powerLevel[plHealth] + powerLevel[plDrainHealth];
+		if(newValue < 0){newValue = 0;}
 		if(newValue < powerLevel[plMaximum]){powerLevel[plHealth] = newValue;}
 		newValue = powerLevel[plMaximum] + powerLevel[plDrainMaximum];
 		if(newValue < limit &&  newValue > 0){powerLevel[plMaximum] = newValue;}
@@ -922,18 +948,37 @@ void PM_CheckPowerLevel(void){
 				if(newValue > limit){newValue = limit;}
 				powerLevel[plCurrent] = newValue;
 				if(powerLevel[plCurrent] == powerLevel[plMaximum]){
+					// Refused, not overdrafted: every cost below lands on
+					// plUseFatigue, and PM_UsePowerLevel takes an unpayable
+					// fatigue bill out of health at 0.75 - a fighter holding the
+					// button on an empty bar would be burning its own health to
+					// stand in an aura. The bar covers the step or the step does
+					// not happen, the same terms the zanzoken floor sets.
+					if(powerLevel[plFatigue] < powerLevel[plUseFatigue] + raise){break;}
 					if(!(pm->ps->bitFlags & isBreakingLimit)){PM_AddEvent(EV_POWERINGUP_START);}
 					pm->ps->bitFlags |= isBreakingLimit;
-					fractionPool += pm->ps->breakLimitRate;
-					pushLimit = powerLevel[plCurrent] + (int)fractionPool;
+					// Whole points of ceiling, bought at
+					// POWERLEVEL_POOL_PER_POINT each. The pool is the only
+					// source, so what it cannot cover is simply not gained -
+					// the ceiling never moves for free.
+					pm->ps->buffers[bfBreakLimit] += pm->ps->breakLimitRate * POWERLEVEL_CONVERT_RATE;
+					gained = (int)pm->ps->buffers[bfBreakLimit];
+					pm->ps->buffers[bfBreakLimit] -= gained;
+					if(gained * POWERLEVEL_POOL_PER_POINT > powerLevel[plMaximumPool]){
+						gained = powerLevel[plMaximumPool] / POWERLEVEL_POOL_PER_POINT;
+					}
+					if(powerLevel[plMaximum] + gained > limit){gained = limit - powerLevel[plMaximum];}
+					if(gained < 0){gained = 0;}
+					pushLimit = powerLevel[plCurrent] + gained;
 					if(pushLimit > limit){pushLimit = limit;}
 					if((pm->ps->options & canOverheal) && powerLevel[plHealth] < powerLevel[plMaximum] && powerLevel[plHealthPool] > 0){
-						// POWERLEVEL_HEAL_RATE, not the 0.3 the ceiling push
-						// uses below: at 0.3 a charge returns about 2200 health
-						// a second against damage arriving at 335, so a fighter
-						// undid a whole exchange in two seconds of aura and no
-						// beating ever stuck. Sixty seconds of continuous
-						// fighting left both fighters above ninety percent.
+						// A charge hands the health pool back at
+						// POWERLEVEL_HEAL_RATE and no faster. At 0.3 it
+						// returned about 2200 health a second against damage
+						// arriving at 335, so a fighter undid a whole exchange
+						// in two seconds of aura and no beating ever stuck:
+						// sixty seconds of continuous fighting left both
+						// fighters above ninety percent.
 						smaller = (powerLevel[plHealth] + raise * POWERLEVEL_HEAL_RATE) < powerLevel[plMaximum] ? (raise * POWERLEVEL_HEAL_RATE) : (powerLevel[plMaximum] - powerLevel[plHealth]);
 						if(powerLevel[plHealthPool] > smaller){
 							powerLevel[plHealth] += smaller;
@@ -947,16 +992,27 @@ void PM_CheckPowerLevel(void){
 						}
 						if(powerLevel[plHealthPool] < 0){powerLevel[plHealthPool] = 0;}
 					}
-					if(powerLevel[plMaximumPool] > 0){
-						powerLevel[plHealth] += pushLimit - powerLevel[plMaximum];
+					// Holding the charge costs fatigue whether or not the
+					// ceiling moved. The pool buys the ceiling; it has never
+					// bought the effort of holding the charge that spends it,
+					// and waiving the cost for anyone carrying a pool balance
+					// made a limit break free for exactly the fighter who had
+					// just been beaten into affording one. A quarter of the
+					// raise, so a full bar sustains about eleven seconds of
+					// charge - enough, at POWERLEVEL_CONVERT_RATE, to finish a
+					// conversion it starts.
+					powerLevel[plUseFatigue] += raise * 0.25;
+					if(gained > 0){
+						// Health follows the ceiling up, but no faster than a
+						// charge heals - this is the same pool-fed heal as
+						// above and answers to the same throttle.
+						heal = raise * POWERLEVEL_HEAL_RATE;
+						if(heal > gained){heal = gained;}
+						powerLevel[plHealth] += heal;
 						powerLevel[plCurrent] = powerLevel[plMaximum] = pushLimit;
+						powerLevel[plMaximumPool] -= gained * POWERLEVEL_POOL_PER_POINT;
+						if(powerLevel[plMaximumPool] < 0){powerLevel[plMaximumPool] = 0;}
 					}
-					else{
-						powerLevel[plUseFatigue] += raise * 0.75;
-					}
-					powerLevel[plMaximumPool] -= raise * 0.3 * (int)fractionPool;
-					if(powerLevel[plMaximumPool] < 0){powerLevel[plMaximumPool] = 0;}
-					fractionPool -= (int)fractionPool;
 				}
 				if(pm->ps->bitFlags & isBreakingLimit){
 					if(powerLevel[plCurrent] < ((float)powerLevel[plMaximum] * 0.95)){
