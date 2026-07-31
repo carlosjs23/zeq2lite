@@ -37,9 +37,16 @@ void syncTier(gclient_t *client){
 	ps->baseStats[stAirBrakeCost] = tier->airBrakeCost;
 	ps->baseStats[stMeleeAttack] = tier->meleeAttack;
 	ps->baseStats[stKnockbackPower] = tier->knockbackPower;
+	ps->baseStats[stKnockbackIntensity] = tier->knockbackIntensity ? tier->knockbackIntensity : 1.0;
 	ps->baseStats[stEnergyAttack] = tier->energyAttackDamage;
 	ps->baseStats[stDefenseMelee] = tier->defenseMelee;
 	ps->baseStats[stDefenseEnergy] = tier->defenseEnergy;
+	// The guard knobs: capacity and recovery are multipliers, neutral when a
+	// config states nothing. The delay is milliseconds, and 0 means "use the
+	// stock delay" - the default is pmove's, not ours, so it lives there.
+	ps->baseStats[stDefenseCapacity] = tier->defenseCapacity ? tier->defenseCapacity : 1.0;
+	ps->baseStats[stDefenseRecovery] = tier->defenseRecovery ? tier->defenseRecovery : 1.0;
+	ps->baseStats[stDefenseRecoveryDelay] = tier->defenseRecoveryDelay;
 	ps->baseStats[stEnergyAttackCost] = tier->energyAttackCost;
 	ps->powerLevel[plDrainCurrent] = tier->effectCurrent;
 	ps->powerLevel[plDrainFatigue] = tier->effectFatigue;

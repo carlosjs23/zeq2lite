@@ -441,6 +441,7 @@ void PM_BurnPowerLevel(){
 	// below no-ops
 	float defense;
 	float guard,mitigation;
+	float capacity;
 	int burn,initial,absorbed;
 	int newValue;
 	int burnType;
@@ -494,7 +495,13 @@ void PM_BurnPowerLevel(){
 		// through plUseFatigue rather than plFatigue directly carries the
 		// overdraft into health like every other cost, which is what a guard
 		// breaking under a hit too big for it looks like.
-		pm->ps->powerLevel[plUseFatigue] += (int)(absorbed * FATIGUE_ABSORB_COST);
+		//
+		// The tier's defenseCapacity is the guard's endurance, not its strength:
+		// it divides what a point of fatigue costs to spend, never what a hit is
+		// reduced by. Unset (0) means the stock cost.
+		capacity = pm->ps->baseStats[stDefenseCapacity];
+		if(capacity <= 0){capacity = 1.0f;}
+		pm->ps->powerLevel[plUseFatigue] += (int)(absorbed * FATIGUE_ABSORB_COST / capacity);
 		// Only damage that survived the guard pays into the pools. A blocked
 		// hit leaves burn negative, and crediting that took the pools down
 		// past zero - the fighter was paying to be defended.
@@ -828,6 +835,7 @@ void PM_CheckPowerLevel(void){
 	// float, not int: this holds 2.8 and an int truncated it to 2, so the bonus
 	// was always a fifth smaller than every comment describing it.
 	float safeScale;
+	float recoveryDelay;
 	int smaller;
 	timers = pm->ps->timers;
 	powerLevel = pm->ps->powerLevel;
@@ -850,7 +858,12 @@ void PM_CheckPowerLevel(void){
 		// stopping: flight itself costs nothing and is not on the lockout below,
 		// because everyone flies constantly and locking it out would end
 		// recovery altogether.
-		safeScale = timers[tmSafe] >= POWERLEVEL_RECOVERY_CLEAR
+		//
+		// The tier's defenseRecoveryDelay overrides the stock delay; 0 means
+		// unset. The clear threshold rides the same distance behind it as stock,
+		// so the full-rate bonus can never arrive before recovery itself does.
+		recoveryDelay = pm->ps->baseStats[stDefenseRecoveryDelay] > 0 ? pm->ps->baseStats[stDefenseRecoveryDelay] : POWERLEVEL_RECOVERY_DELAY;
+		safeScale = timers[tmSafe] >= recoveryDelay + (POWERLEVEL_RECOVERY_CLEAR - POWERLEVEL_RECOVERY_DELAY)
 			&& VectorLengthSquared(pm->ps->velocity) < POWERLEVEL_REST_SPEED_SQR ? 2.8f : 1.0f;
 		statScale = 1.0 - ((float)powerLevel[plCurrent] / (float)powerLevel[plMaximum]);
 		if(statScale > 0.75){statScale = 0.75;}
@@ -860,6 +873,10 @@ void PM_CheckPowerLevel(void){
 		recovery *=  statScale;
 		recovery *=  fatigueScale < 0.15 ? 0.15 : fatigueScale;
 		recovery *= pm->ps->baseStats[stFatigueRecovery];
+		// The guard is fatigue, so defenseRecovery is the tier's knob on how
+		// fast a spent guard comes back; it composes with fatigueRecovery.
+		// Unset (0) is neutral.
+		recovery *= pm->ps->baseStats[stDefenseRecovery] > 0 ? pm->ps->baseStats[stDefenseRecovery] : 1.0f;
 		if(recovery < 1){recovery = 1;}
 		// A raised guard is not rest. Blocking spends fatigue on every hit it
 		// soaks and refills none of it, so the guard only ever runs down while
@@ -869,10 +886,10 @@ void PM_CheckPowerLevel(void){
 		|| pm->ps->bitFlags & usingBlock
 		|| pm->ps->bitFlags & isBreakingLimit || pm->ps->weaponstate >= WEAPON_GUIDING){recovery = 0;}
 		// Nobody recovers mid-exchange. tmSafe is the time since this fighter
-		// last dealt or took damage, so a second of it is the price of breaking
+		// last dealt or took damage, so the delay is the price of breaking
 		// off: without that, fatigue refills faster than a fight can spend it
 		// and nothing that costs fatigue ever costs anything.
-		if(timers[tmSafe] < POWERLEVEL_RECOVERY_DELAY){recovery = 0;}
+		if(timers[tmSafe] < recoveryDelay){recovery = 0;}
 		/*if(powerLevel[plCurrent] > powerLevel[plFatigue]){
 			newValue = powerLevel[plCurrent] - (powerLevel[plMaximum] * 0.005);
 			powerLevel[plCurrent] = (powerLevel[plCurrent] - newValue >= 0) ? newValue : 0;
@@ -2787,8 +2804,11 @@ void PM_Melee(void){
 						damage = 0;
 					}
 					if(enemyState != stMeleeUsingBlock && enemyState != stMeleeUsingEvade){
-						// stKnockbackPower indexes baseStats, not stats
-					pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] = (pm->ps->powerLevel[plCurrent] / 21.84) + pm->ps->baseStats[stKnockbackPower];
+						// stKnockbackPower indexes baseStats, not stats.
+						// knockbackIntensity scales the whole launch where
+						// knockbackPower only adds to it; unset (0) is neutral.
+					pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] = ((pm->ps->powerLevel[plCurrent] / 21.84) + pm->ps->baseStats[stKnockbackPower])
+						* (pm->ps->baseStats[stKnockbackIntensity] > 0 ? pm->ps->baseStats[stKnockbackIntensity] : 1.0f);
 						if(pm->ps->lockedPlayer->timers[tmKnockback]){pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] *= 2;}
 						if(pm->ps->bitFlags & usingBoost){
 							damage *= 1.5;

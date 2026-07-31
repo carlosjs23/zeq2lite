@@ -229,6 +229,55 @@ Test(tiers, the_knockback_multiplier_reaches_the_player_state) {
 }
 
 /*
+The guard knobs - defenseCapacity, defenseRecovery, defenseRecoveryDelay - and
+knockbackIntensity were parsed into the tier config but syncTier never handed
+them to the playerState, so a tier could state them and change nothing.
+*/
+Test(tiers, the_guard_knobs_reach_the_player_state) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg",
+	            "defenseCapacity 2.0\n"
+	            "defenseRecovery 1.5\n"
+	            "defenseRecoveryDelay 2000\n"
+	            "knockbackIntensity 0.8\n");
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stDefenseCapacity], 2.0f, 0.001f,
+	                   "a tier's guard capacity must reach baseStats to be readable");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseRecovery], 1.5f, 0.001f,
+	                   "a tier's guard recovery must reach baseStats to be readable");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseRecoveryDelay], 2000.0f, 0.001f,
+	                   "a tier's recovery delay must reach baseStats to be readable");
+	cr_assert_float_eq(client.ps.baseStats[stKnockbackIntensity], 0.8f, 0.001f,
+	                   "a tier's knockback intensity must reach baseStats to be readable");
+}
+
+/*
+No shipped config states the guard knobs, so the multipliers must come through
+neutral rather than as the zero the memset left - a guard with a capacity of
+zero would divide by nothing and one with a recovery of zero would never refill.
+The delay is the exception: 0 means "unset", and pmove substitutes its stock
+delay for it.
+*/
+Test(tiers, unstated_guard_knobs_are_neutral_not_zero) {
+	given_tiers(NULL);   /* configs as shipped: no guard keys anywhere */
+
+	cr_assert_float_eq(client.ps.baseStats[stDefenseCapacity], 1.0f, 0.001f,
+	                   "an unstated guard capacity must be neutral");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseRecovery], 1.0f, 0.001f,
+	                   "an unstated guard recovery must be neutral");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseRecoveryDelay], 0.0f, 0.001f,
+	                   "an unstated recovery delay must stay 0 so pmove uses its stock delay");
+	cr_assert_float_eq(client.ps.baseStats[stKnockbackIntensity], 1.0f, 0.001f,
+	                   "an unstated knockback intensity must be neutral");
+}
+
+/*
 goku's tier5 abbreviates requirementMaximum to requirementMax. Unread it stays
 at zero, and zero is the permissive value for a lower bound, so the tier admits
 a fighter who has never come near the maximum power it asks for.
