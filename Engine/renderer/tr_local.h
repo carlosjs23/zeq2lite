@@ -952,14 +952,16 @@ typedef struct {
 
 // the renderer front end should never modify glstate_t
 typedef struct {
-	int			currenttextures[2];
+	// one per texture bundle: the GLSL path binds a unit per bundle, and these
+	// are indexed by the selected unit
+	int			currenttextures[NUM_TEXTURE_BUNDLES];
 	int			currenttmu;
 	float		currentModelViewMatrix[16];
 	float		currentModelViewProjectionMatrix[16];
 	float		currentProjectionMatrix[16];
 	qhandle_t	currentProgram;
 	qboolean	finishCalled;
-	int			texEnv[2];
+	int			texEnv[NUM_TEXTURE_BUNDLES];
 	int			faceCulling;
 	unsigned long	glStateBits;
 } glstate_t;

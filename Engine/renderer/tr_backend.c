@@ -69,22 +69,20 @@ void GL_SelectTexture( int unit )
 		return;
 	}
 
-	if ( unit == 0 )
+	// A GLSL stage binds one unit per texture bundle, so anything up to
+	// NUM_TEXTURE_BUNDLES can arrive here. Refusing past the second one dropped
+	// the server the moment a shader with a third sampler came on screen; the
+	// state arrays this indexes are sized for the bundles for the same reason.
+	if ( unit < 0 || unit >= NUM_TEXTURE_BUNDLES || unit >= glConfig.numTextureUnits )
 	{
-		qglActiveTextureARB( GL_TEXTURE0_ARB );
-		GLimp_LogComment( "glActiveTextureARB( GL_TEXTURE0_ARB )\n" );
-		qglClientActiveTextureARB( GL_TEXTURE0_ARB );
-		GLimp_LogComment( "glClientActiveTextureARB( GL_TEXTURE0_ARB )\n" );
-	}
-	else if ( unit == 1 )
-	{
-		qglActiveTextureARB( GL_TEXTURE1_ARB );
-		GLimp_LogComment( "glActiveTextureARB( GL_TEXTURE1_ARB )\n" );
-		qglClientActiveTextureARB( GL_TEXTURE1_ARB );
-		GLimp_LogComment( "glClientActiveTextureARB( GL_TEXTURE1_ARB )\n" );
-	} else {
 		ri.Error( ERR_DROP, "GL_SelectTexture: unit = %i", unit );
 	}
+
+	// the ARB unit enums are consecutive
+	qglActiveTextureARB( GL_TEXTURE0_ARB + unit );
+	GLimp_LogComment( "glActiveTextureARB\n" );
+	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
+	GLimp_LogComment( "glClientActiveTextureARB\n" );
 
 	glState.currenttmu = unit;
 }
