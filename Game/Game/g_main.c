@@ -1147,13 +1147,26 @@ void LogExit( const char *string ) {
 =================
 CheckIntermissionExit
 
-The level will stay at the intermission for a minimum of 5 seconds
-If all players wish to continue, the level will then exit.
-If one or more players have not acknowledged the continue, the game will
-wait 10 seconds before going on.
+The intermission holds long enough to read the final scoreboard, then the
+level exits on its own. Nothing waits on client readiness here.
 =================
 */
-void CheckIntermissionExit( void ) {ExitLevel();}
+void CheckIntermissionExit( void ) {
+	char nextmap[MAX_STRING_CHARS];
+
+	if ( level.time < level.intermissiontime + 10000 ) {
+		return;
+	}
+
+	// ExitLevel resolves the next map with "vstr nextmap"; with the cvar unset
+	// that is a no-op and the game stalls with every client left connecting.
+	trap_Cvar_VariableStringBuffer( "nextmap", nextmap, sizeof(nextmap) );
+	if ( !nextmap[0] ) {
+		trap_Cvar_Set( "nextmap", "map_restart 0" );
+	}
+
+	ExitLevel();
+}
 
 /*
 =============
@@ -1186,7 +1199,45 @@ and the time everyone is moved to the intermission spot, so you
 can see the last frag.
 =================
 */
-void CheckExitRules( void ) {}
+void CheckExitRules( void ) {
+	int			i;
+	gclient_t	*cl;
+
+	// if at the intermission, wait for all non-bots to
+	// signal ready, then go to next level
+	if ( level.intermissiontime ) {
+		CheckIntermissionExit ();
+		return;
+	}
+
+	if ( level.intermissionQueued ) {
+		if ( level.time - level.intermissionQueued >= INTERMISSION_DELAY_TIME ) {
+			level.intermissionQueued = 0;
+			BeginIntermission();
+		}
+		return;
+	}
+
+	// fraglimit is the only exit rule alive; team score limits went out with
+	// the rankings system
+	if ( g_fraglimit.integer ) {
+		for ( i=0 ; i< g_maxclients.integer ; i++ ) {
+			cl = level.clients + i;
+			if ( cl->pers.connected != CON_CONNECTED ) {
+				continue;
+			}
+			if ( cl->sess.sessionTeam != TEAM_FREE ) {
+				continue;
+			}
+			if ( cl->ps.persistant[PERS_SCORE] >= g_fraglimit.integer ) {
+				LogExit( "Fraglimit hit." );
+				trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
+					cl->pers.netname ) );
+				return;
+			}
+		}
+	}
+}
 
 
 
