@@ -475,6 +475,53 @@ void LockonCheck(gclient_t *client){
 }
 /*
 ==============
+G_DebugFight
+
+One line per fighter every g_debugFight milliseconds, or nothing when it is 0.
+
+A fight is made of resources that never appear on screen as numbers - the guard
+behind the bar, the two pools, what each fighter is holding down - and reading
+them out is how any question about combat gets answered. The timestamps are
+per client because a single one would only ever print whoever thought first.
+==============
+*/
+static void G_DebugFight( gentity_t *ent ) {
+	static int		reported[MAX_CLIENTS];
+	gclient_t		*client;
+	playerState_t	*ps;
+	int				clientNum;
+
+	if ( !g_debugFight.integer ) {
+		return;
+	}
+
+	clientNum = ent - g_entities;
+	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+		return;
+	}
+	if ( level.time - reported[clientNum] < g_debugFight.integer ) {
+		return;
+	}
+	reported[clientNum] = level.time;
+
+	client = ent->client;
+	ps = &client->ps;
+
+	G_Printf( "fight c%i t%i.%i: health %i/%i fatigue %i pools %i/%i lock %i buttons %i"
+		" block %i zanzoken %i boost %i struggle %i dead %i\n",
+		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
+		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
+		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool],
+		ps->lockedTarget, client->pers.cmd.buttons,
+		( ps->bitFlags & usingBlock ) ? 1 : 0,
+		( ps->bitFlags & usingZanzoken ) ? 1 : 0,
+		( ps->bitFlags & usingBoost ) ? 1 : 0,
+		( ps->bitFlags & isStruggling ) ? 1 : 0,
+		( ps->bitFlags & isDead ) ? 1 : 0 );
+}
+
+/*
+==============
 ClientThink
 
 This will be called once for each client frame, which will
@@ -521,6 +568,7 @@ void ClientThink_real( gentity_t *ent ) {
 	else{
 		client->ps.pm_type = PM_NORMAL;
 	}
+	G_DebugFight( ent );
 	ent->s.playerBitFlags = client->ps.bitFlags;
 	ent->s.attackPowerCurrent = client->ps.powerLevel[plHealth];
 	ent->s.attackPowerTotal = client->ps.powerLevel[plMaximum];
