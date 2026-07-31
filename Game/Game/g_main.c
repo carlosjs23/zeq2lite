@@ -1229,6 +1229,12 @@ void CheckExitRules( void ) {
 			if ( cl->sess.sessionTeam != TEAM_FREE ) {
 				continue;
 			}
+			// A dummy's kills stay on the board but cannot end the map. A
+			// sparring partner exists to keep the fight running; one that
+			// wins the match freezes the fight it was spawned to feed.
+			if ( cl->pers.isDummy ) {
+				continue;
+			}
 			if ( cl->ps.persistant[PERS_SCORE] >= g_fraglimit.integer ) {
 				LogExit( "Fraglimit hit." );
 				trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
