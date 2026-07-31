@@ -2580,7 +2580,7 @@ void PM_Melee(void){
 					PM_EndDrift();
 					PM_AddEvent(EV_MELEE_BREAKER);
 					enemyState = stMeleeIdle;
-					pm->ps->timers[tmFreeze] = 100;
+					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = damage;
@@ -2618,7 +2618,7 @@ void PM_Melee(void){
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = damage;
 					pm->ps->states |= causedDamage;
-					pm->ps->timers[tmFreeze] = 100;
+					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->lockedPlayer->timers[tmFreeze] = 500;
 				}
 			}
@@ -2755,6 +2755,17 @@ void PM_Melee(void){
 								state = stMeleeUsingSpeed;
 							}
 							else{
+								// A knockback costs the fighter throwing it too.
+								// Freezing only the victim hands the attacker two
+								// and a half seconds of sole initiative, and
+								// initiative is what decides who attacks next, so
+								// whoever lands one of these goes on landing them
+								// - measured as one fighter opening every
+								// exchange in a ninety second duel and the other
+								// opening none. The victim still comes off worse,
+								// which is what a knockback is; 1000 is what the
+								// other heavy paths here already commit.
+								pm->ps->timers[tmFreeze] = 1000;
 								pm->ps->lockedPlayer->timers[tmFreeze] = 2500;
 								enemyState = stMeleeStartHit;
 								PM_AddEvent(EV_MELEE_KNOCKBACK);
