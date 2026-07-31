@@ -405,6 +405,14 @@ void G_AIThink( gentity_t *ent ) {
 	// throws anything - and one that stops to charge is thrown clear by the
 	// first melee exchange and spends the rest of the round charging at a
 	// target it is drifting away from.
+	// Keep a selectable weapon in the command every frame. PM_Weapon returns on
+	// its second line when cmd.weapon is not selectable, and weapon 0 never is,
+	// so leaving it at zero freezes the weapon state wherever it stood - a
+	// fighter that closed while charging stayed WEAPON_CHARGING for the rest of
+	// the round, and PM_Melee refuses to start while charging. Ticking it lets
+	// the charge lapse on the released button, which is what frees the melee.
+	cmd->weapon = ps->weapon;
+
 	cmd->forwardmove = 127;
 	// In melee range the probe shrinks rather than switching off. Leaning at
 	// that distance walks the fighter out of the exchange, so it is only worth
