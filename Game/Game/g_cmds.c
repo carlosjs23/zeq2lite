@@ -1409,6 +1409,8 @@ void ClientCommand( int clientNum ) {
 		Cmd_Stats_f( ent );
 	else if (Q_stricmp (cmd, "dummy") == 0)
 		Cmd_Dummy_f( ent );
+	else if (Q_stricmp (cmd, "ai") == 0)
+		Cmd_AI_f( ent );
 	else if (Q_stricmp (cmd, "dummyclear") == 0)
 		Cmd_DummyClear_f( ent );
 	else

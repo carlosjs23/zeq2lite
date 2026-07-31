@@ -83,13 +83,14 @@ static qboolean G_DummyModelOk( const char *model ) {
 
 /*
 =================
-G_ClosestPlayer
+G_NearestClient
 
-Nearest live player that isn't a dummy, so dummies face whoever is hitting
-them rather than each other.
+With humansOnly, skips the clients this file drives - a dummy faces whoever is
+hitting it rather than the dummy beside it. Without, everything alive counts,
+so two AI opponents will pick each other.
 =================
 */
-static gentity_t *G_ClosestPlayer( gentity_t *from ) {
+gentity_t *G_NearestClient( gentity_t *from, qboolean humansOnly ) {
 	gentity_t	*ent;
 	gentity_t	*closest;
 	float		bestDistance;
@@ -109,7 +110,10 @@ static gentity_t *G_ClosestPlayer( gentity_t *from ) {
 		if ( ent->client->pers.connected != CON_CONNECTED ) {
 			continue;
 		}
-		if ( ent->client->pers.isDummy ) {
+		if ( humansOnly && ent->client->pers.isDummy ) {
+			continue;
+		}
+		if ( ent->client->ps.bitFlags & isDead ) {
 			continue;
 		}
 		if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
@@ -196,7 +200,7 @@ G_SpawnDummy
 Returns the dummy, or NULL with the reason already printed to the caller.
 =================
 */
-static gentity_t *G_SpawnDummy( gentity_t *owner, const char *model, float distance ) {
+static gentity_t *G_SpawnDummy( gentity_t *owner, const char *model, float distance, qboolean fights ) {
 	gentity_t	*dummy;
 	char		userinfo[MAX_INFO_STRING];
 	char		*denied;
@@ -204,26 +208,27 @@ static gentity_t *G_SpawnDummy( gentity_t *owner, const char *model, float dista
 
 	clientNum = G_DummySlot();
 	if ( clientNum == -1 ) {
-		trap_SendServerCommand( owner - g_entities, "print \"No free client slot for a dummy.\n\"" );
+		trap_SendServerCommand( owner - g_entities, "print \"No free client slot left.\n\"" );
 		return NULL;
 	}
 
 	Com_sprintf( userinfo, sizeof( userinfo ),
-		"\\name\\Dummy %i\\model\\%s\\headmodel\\%s\\legsmodel\\%s"
+		"\\name\\%s %i\\model\\%s\\headmodel\\%s\\legsmodel\\%s"
 		"\\ip\\localhost\\rate\\25000\\snaps\\20\\team\\free",
-		clientNum, model, model, model );
+		fights ? "Fighter" : "Dummy", clientNum, model, model, model );
 
 	trap_SetUserinfo( clientNum, userinfo );
 
 	denied = ClientConnect( clientNum, qtrue );
 	if ( denied ) {
-		trap_SendServerCommand( owner - g_entities, va( "print \"Dummy rejected: %s\n\"", denied ) );
+		trap_SendServerCommand( owner - g_entities, va( "print \"Rejected: %s\n\"", denied ) );
 		return NULL;
 	}
 
 	// ClientConnect clears the client, and ClientBegin runs a client frame that
 	// G_RunDummy has to recognise, so the mark goes between the two.
 	level.clients[clientNum].pers.isDummy = qtrue;
+	level.clients[clientNum].pers.aiActive = fights;
 
 	ClientBegin( clientNum );
 
@@ -248,16 +253,23 @@ void G_RunDummy( gentity_t *ent ) {
 
 	// keep the client from being flagged as having lost its connection
 	ent->client->lastCmdTime = level.time;
-	ent->client->pers.cmd.serverTime = level.time;
 
-	player = G_ClosestPlayer( ent );
-	if ( player ) {
-		VectorSubtract( player->client->ps.origin, ent->client->ps.origin, delta );
-		vectoangles( delta, angles );
-		angles[PITCH] = 0;
-		angles[ROLL] = 0;
-		SetClientViewAngle( ent, angles );
+	if ( ent->client->pers.aiActive ) {
+		G_AIThink( ent );
+	} else {
+		memset( &ent->client->pers.cmd, 0, sizeof( ent->client->pers.cmd ) );
+
+		player = G_NearestClient( ent, qtrue );
+		if ( player ) {
+			VectorSubtract( player->client->ps.origin, ent->client->ps.origin, delta );
+			vectoangles( delta, angles );
+			angles[PITCH] = 0;
+			angles[ROLL] = 0;
+			SetClientViewAngle( ent, angles );
+		}
 	}
+
+	ent->client->pers.cmd.serverTime = level.time;
 
 	ClientThink_real( ent );
 }
@@ -282,6 +294,7 @@ static int G_RemoveDummies( void ) {
 		// about a client_t that was never allocated
 		ClientDisconnect( i );
 		level.clients[i].pers.isDummy = qfalse;
+		level.clients[i].pers.aiActive = qfalse;
 		count++;
 	}
 
@@ -290,12 +303,12 @@ static int G_RemoveDummies( void ) {
 
 /*
 =================
-Cmd_Dummy_f
+G_DummyCommand
 
-dummy [model] [distance]
+Shared by dummy and ai: [model] [distance]
 =================
 */
-void Cmd_Dummy_f( gentity_t *ent ) {
+static void G_DummyCommand( gentity_t *ent, qboolean fights ) {
 	gentity_t	*dummy;
 	char		model[MAX_QPATH];
 	char		arg[MAX_TOKEN_CHARS];
@@ -306,7 +319,7 @@ void Cmd_Dummy_f( gentity_t *ent ) {
 	}
 
 	if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
-		trap_SendServerCommand( ent - g_entities, "print \"Spectators can't spawn dummies.\n\"" );
+		trap_SendServerCommand( ent - g_entities, "print \"Spectators can't spawn one.\n\"" );
 		return;
 	}
 
@@ -317,7 +330,7 @@ void Cmd_Dummy_f( gentity_t *ent ) {
 	}
 
 	if ( !G_DummyModelOk( model ) ) {
-		trap_SendServerCommand( ent - g_entities, "print \"Bad dummy model name.\n\"" );
+		trap_SendServerCommand( ent - g_entities, "print \"Bad model name.\n\"" );
 		return;
 	}
 
@@ -332,17 +345,40 @@ void Cmd_Dummy_f( gentity_t *ent ) {
 		}
 	}
 
-	dummy = G_SpawnDummy( ent, model, distance );
+	dummy = G_SpawnDummy( ent, model, distance, fights );
 	if ( !dummy ) {
 		return;
 	}
 
 	trap_SendServerCommand( ent - g_entities,
-		va( "print \"Dummy %i (%s) spawned at %i %i %i.\n\"",
+		va( "print \"%s %i (%s) spawned at %i %i %i.\n\"",
+			fights ? "Fighter" : "Dummy",
 			(int)(dummy - g_entities), model,
 			(int)dummy->client->ps.origin[0],
 			(int)dummy->client->ps.origin[1],
 			(int)dummy->client->ps.origin[2] ) );
+}
+
+/*
+=================
+Cmd_Dummy_f
+
+dummy [model] [distance] - stands there and takes it
+=================
+*/
+void Cmd_Dummy_f( gentity_t *ent ) {
+	G_DummyCommand( ent, qfalse );
+}
+
+/*
+=================
+Cmd_AI_f
+
+ai [model] [distance] - fights back
+=================
+*/
+void Cmd_AI_f( gentity_t *ent ) {
+	G_DummyCommand( ent, qtrue );
 }
 
 /*

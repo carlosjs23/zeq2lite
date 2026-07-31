@@ -280,6 +280,8 @@ typedef struct {
 	qboolean	teamInfo;			// send team overlay updates?
 	qboolean	isDummy;			// training dummy: no engine client behind this slot,
 									// the game module builds its usercmds itself
+	qboolean	aiActive;			// and builds them from g_ai.c rather than leaving
+									// them empty
 } clientPersistant_t;
 
 
@@ -328,6 +330,11 @@ extern struct gclient_s {
 
 	qboolean	fireHeld;			// used for hook
 	gentity_t	*hook;				// grapple hook if out
+
+	// g_ai.c: button timing for a game-driven fighter
+	int			aiAttackUntil;
+	int			aiNextAttack;
+	int			aiNextLock;
 
 	// ADDING FOR ZEQ2
 	gentity_t	*guidetarget;		// guided weapon when firing one
@@ -631,8 +638,15 @@ void G_RunClient( gentity_t *ent );
 // g_dummy.c
 //
 void G_RunDummy( gentity_t *ent );
+gentity_t *G_NearestClient( gentity_t *from, qboolean humansOnly );
 void Cmd_Dummy_f( gentity_t *ent );
+void Cmd_AI_f( gentity_t *ent );
 void Cmd_DummyClear_f( gentity_t *ent );
+
+//
+// g_ai.c
+//
+void G_AIThink( gentity_t *ent );
 
 //
 // g_team.c
