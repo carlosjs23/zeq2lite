@@ -507,12 +507,22 @@ static void G_DebugFight( gentity_t *ent ) {
 	client = ent->client;
 	ps = &client->ps;
 
+	// The four that decide whether a guard refills, none of which are visible
+	// on screen: safe is the delay since damage, alter covers powering up in
+	// either direction, and melee against meleeState separates being held in
+	// an exchange from doing anything inside one. A fighter that never
+	// recovers is one of these stuck on.
 	G_Printf( "fight c%i t%i.%i: health %i/%i fatigue %i pools %i/%i lock %i buttons %i"
+		" safe %i alter %i melee %i meleeState %i"
 		" block %i zanzoken %i boost %i struggle %i dead %i\n",
 		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
 		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
 		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool],
 		ps->lockedTarget, client->pers.cmd.buttons,
+		ps->timers[tmSafe],
+		( ps->bitFlags & usingAlter ) ? 1 : 0,
+		( ps->bitFlags & usingMelee ) ? 1 : 0,
+		ps->stats[stMeleeState],
 		( ps->bitFlags & usingBlock ) ? 1 : 0,
 		( ps->bitFlags & usingZanzoken ) ? 1 : 0,
 		( ps->bitFlags & usingBoost ) ? 1 : 0,
