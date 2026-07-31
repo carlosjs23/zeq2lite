@@ -647,6 +647,13 @@ int main( int argc, char **argv )
 
 	CON_Init( );
 
+	// ZEQ2_NO_SIGHANDLER leaves the fault signals to whatever is watching. This
+	// handler catches SIGSEGV, so a sanitizer or a debugger never sees the
+	// fault: the crash surfaces as "caught signal 11" and nothing else, no
+	// faulting address and no stack. A duel crash went a whole session
+	// unattributed for exactly that reason - both ASan and the smoke gate
+	// reported clean while runs died.
+	if( !getenv( "ZEQ2_NO_SIGHANDLER" ) )
 	{
 		struct sigaction sa;
 		memset(&sa, 0, sizeof(sa));
