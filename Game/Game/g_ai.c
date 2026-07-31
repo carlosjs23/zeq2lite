@@ -51,6 +51,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // long it commits to the conversion once it starts.
 #define	AI_POWERUP_POOL		0.15f
 #define	AI_POWERUP_TIME		2500
+// Health below this fraction of the ceiling is worth spending a health pool on
+#define	AI_POWERUP_HURT		0.85f
 
 /*
 =================
@@ -118,6 +120,27 @@ static void G_AICharge( gclient_t *client ) {
 
 /*
 =================
+G_AIShouldConvert
+
+A pool is worth two different things: the maximum pool raises the ceiling, the
+health pool heals. Reading only the first is how a fighter dies rich.
+=================
+*/
+static qboolean G_AIShouldConvert( playerState_t *ps ) {
+	int		worthConverting;
+
+	worthConverting = ps->powerLevel[plMaximum] * AI_POWERUP_POOL;
+
+	if ( ps->powerLevel[plHealth] < ps->powerLevel[plMaximum] * AI_POWERUP_HURT
+		&& ps->powerLevel[plHealthPool] > worthConverting ) {
+		return qtrue;
+	}
+
+	return ps->powerLevel[plMaximumPool] > worthConverting;
+}
+
+/*
+=================
 G_AIThink
 
 Builds the usercmd the slot will think with this server frame.
@@ -160,15 +183,13 @@ void G_AIThink( gentity_t *ent ) {
 		return;
 	}
 
-	// Break off to convert a pool worth converting. Both fighters earn pool in
-	// an exchange - dealing damage pays in as well as taking it - so this is
-	// the half of the loop that turns a beating into a higher ceiling, and
-	// without it a fight only ever spends.
+	// Break off to convert. Both fighters earn pool in an exchange - dealing
+	// damage pays in as well as taking it - and converting it is the half of
+	// the loop that turns a beating into a higher ceiling and a full bar.
 	//
 	// The direction key is what the power-up modifier reads: right is raise,
 	// and forward would ask to transform instead.
-	if ( level.time < client->aiPowerUpUntil ||
-		ps->powerLevel[plMaximumPool] > ps->powerLevel[plMaximum] * AI_POWERUP_POOL ) {
+	if ( level.time < client->aiPowerUpUntil || G_AIShouldConvert( ps ) ) {
 		if ( level.time >= client->aiPowerUpUntil ) {
 			client->aiPowerUpUntil = level.time + AI_POWERUP_TIME;
 		}
