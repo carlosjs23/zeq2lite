@@ -346,14 +346,22 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 		case EV_CHANGE_WEAPON:
 			break;
 		case EV_ZANZOKEN_START:
-			if(!ps->bitFlags & usingMelee){}
+			// Nothing to do server side: a teleport out of a melee is resolved by
+			// the pmove itself, which stops the exchange for both fighters.
 			break;
 		case EV_ALTFIRE_WEAPON:
 			FireWeapon(ent,qtrue);
 			break;
 		case EV_DETONATE_WEAPON:
+			// The guided weapon may have exploded frames ago and its slot been
+			// handed to something else, so the pointer only counts while it still
+			// names a live weapon of this client's.
 			missile = client->guidetarget;
-			G_DetachUserWeapon(missile);
+			if(missile && missile->inuse && missile->parent == ent
+				&& (missile->s.eType == ET_MISSILE || missile->s.eType == ET_BEAMHEAD)){
+				G_DetachUserWeapon(missile);
+			}
+			client->guidetarget = NULL;
 			break;
 		case EV_BALLFLIP:
 			break;
@@ -442,9 +450,15 @@ void SendPendingPredictableEvents( playerState_t *ps ) {
 void LockonCheck(gclient_t *client){
 	int entityNum = -1;
 	playerState_t *ps;
+	gentity_t *target;
 	ps = &client->ps;
 	if(ps->lockedTarget>0){
-		if(!&g_entities[ps->lockedTarget-1].client || &g_entities[ps->lockedTarget-1].client->pers.connected == CON_DISCONNECTED){
+		target = &g_entities[ps->lockedTarget-1];
+		// A blocked weapon parks its own entity number here so the blocker keeps
+		// facing it. That lock has no client behind it and is released by the
+		// weapon code, so only a lock on a player is followed from here.
+		if(!target->client){return;}
+		if(target->client->pers.connected == CON_DISCONNECTED){
 			ps->lockonData[lkLastLockedPlayer] = -1;
 			ps->lockedPosition = 0;
 			ps->lockedPlayer = 0;
@@ -469,8 +483,8 @@ void LockonCheck(gclient_t *client){
 					return;
 			}
 		}
-		ps->lockedPosition = &g_entities[ps->lockedTarget-1].r.currentOrigin;
-		ps->lockedPlayer = &g_entities[ps->lockedTarget-1].client->ps;
+		ps->lockedPosition = &target->r.currentOrigin;
+		ps->lockedPlayer = &target->client->ps;
 	}
 }
 /*

@@ -11,11 +11,60 @@ GetMissileOwnerEntity
 gentity_t *GetMissileOwnerEntity (gentity_t *missile) {
 	gentity_t *parent;
 
+	// A weapon spawned by another weapon chains up to the player who fired the
+	// first one. A chain that ends early has no owner to report.
 	parent = missile->parent;
-	while((parent->s.eType != ET_PLAYER)&&(parent->s.eType != ET_INVISIBLE)) {
-		parent = GetMissileOwnerEntity( parent );
+	while(parent && (parent->s.eType != ET_PLAYER) && (parent->s.eType != ET_INVISIBLE)) {
+		parent = parent->parent;
 	}
 	return parent;
+}
+/*=========================
+G_ClearUserWeaponGuide
+=========================
+The firer's guidetarget names a live weapon or nothing at all: EV_DETONATE_WEAPON
+resolves it by pointer, and entity slots are recycled.
+*/
+static void G_ClearUserWeaponGuide (gentity_t *self) {
+	gentity_t *missileOwner = GetMissileOwnerEntity( self );
+
+	if(missileOwner && missileOwner->client && missileOwner->client->guidetarget == self){
+		missileOwner->client->guidetarget = NULL;
+	}
+}
+/*=========================
+G_EndUserWeaponStruggle
+=========================
+Drops every piece of state a struggle pins on the players tied to this weapon.
+isStruggling stops both of them acting at all, and a blocker's lock points at
+the weapon entity, so neither may outlive the struggle.
+*/
+static void G_EndUserWeaponStruggle (gentity_t *self) {
+	gentity_t *other = self->enemy;
+	gentity_t *missileOwner = GetMissileOwnerEntity( self );
+
+	if(other && other->client){
+		other->client->ps.bitFlags &= ~isStruggling;
+		// Only a lock on this weapon is ours to drop; a player lock is numbered
+		// within the client range.
+		if(other->client->ps.lockedTarget > MAX_CLIENTS){
+			other->client->ps.lockedPosition = NULL;
+			other->client->ps.lockedPlayer = NULL;
+			other->client->ps.lockedTarget = 0;
+		}
+	}
+	else if(other){
+		// The other side of a beam-versus-beam lock is a weapon; its owner carries
+		// the flag for it.
+		gentity_t *enemyOwner = GetMissileOwnerEntity( other );
+		if(enemyOwner && enemyOwner->client){enemyOwner->client->ps.bitFlags &= ~isStruggling;}
+	}
+	if(missileOwner && missileOwner->client){
+		missileOwner->client->ps.bitFlags &= ~isStruggling;
+	}
+	self->strugglingPlayer = qfalse;
+	self->s.dashDir[2] = 0.0f;
+	self->enemy = NULL;
 }
 /*---------------------------------
   T H I N K   F U N C T I O N S
@@ -391,26 +440,51 @@ Think_NormalMissileStruggle
 =====================
 */
 void Think_NormalMissileStruggle (gentity_t *self) {
-	int			powerDifference;
-	int			speedDifference;
 	int			power1,power2;
-	int			speed1,speed2;
 	int			result;
-	vec3_t		forward,dir,dir2,start;
-	trace_t		*trace;
+	float		drain;
+	vec3_t		dir,dir2,start;
+	gentity_t	*enemy = self->enemy;
+	gentity_t	*enemyOwner;
 	gentity_t	*missileOwner = GetMissileOwnerEntity( self );
 	self->s.dashDir[1] = self->powerLevelCurrent;
-	if(self->powerLevelCurrent < 1){
-		G_RemoveUserWeapon(self);
+	// The struggle only holds while both beams are still beams. Once the other
+	// side breaks off, whatever power is left carries on toward it.
+	if(!enemy || !enemy->inuse || enemy->s.eType != ET_BEAMHEAD || enemy->enemy != self){
+		G_EndUserWeaponStruggle(self);
+		if(self->powerLevelCurrent < 1){
+			G_RemoveUserWeapon(self);
+			return;
+		}
+		// The struggle held the front in place, so the trajectory has to be given
+		// back its own speed along the direction it was pushing.
+		VectorCopy(self->r.currentAngles,dir);
+		if(VectorNormalize(dir) == 0){VectorCopy(self->movedir,dir);}
+		VectorCopy(self->r.currentOrigin,self->s.pos.trBase);
+		VectorScale(dir,self->speed,self->s.pos.trDelta);
+		self->s.pos.trType = TR_LINEAR;
+		self->s.pos.trTime = level.time;
+		self->think = Think_NormalMissile;
+		self->nextthink = level.time + FRAMETIME;
 		return;
 	}
-	self->enemy->client->ps.bitFlags |= isStruggling;
-	missileOwner->client->ps.bitFlags |= isStruggling;
-	if((missileOwner->client->ps.bitFlags & usingBoost) && self->s.eType == ET_BEAMHEAD && missileOwner->client->ps.powerLevel[plCurrent] > 1){
+	// A struggle cannot outlive the weapon holding it.
+	if((self->missileSpawnTime + self->maxMissileTime) <= level.time){
+		G_EndUserWeaponStruggle(self);
+		G_ExplodeUserWeapon(self);
+		return;
+	}
+	enemyOwner = GetMissileOwnerEntity( enemy );
+	// A beam entity has no client of its own - the two players who fired are the
+	// ones pinned by the struggle.
+	if(missileOwner && missileOwner->client){missileOwner->client->ps.bitFlags |= isStruggling;}
+	if(enemyOwner && enemyOwner->client){enemyOwner->client->ps.bitFlags |= isStruggling;}
+	if(missileOwner && missileOwner->client && (missileOwner->client->ps.bitFlags & usingBoost)
+		&& self->s.eType == ET_BEAMHEAD && missileOwner->client->ps.powerLevel[plCurrent] > 1){
 		self->powerLevelCurrent += 5 + ((float)self->powerLevelTotal * 0.005);
 		self->speed += 5 + ((float)missileOwner->client->ps.powerLevel[plMaximum] * 0.0003);
 	}
-	if(self->strugglingAllyAttack){
+	if(self->strugglingAllyAttack && self->ally){
 		if(self->s.eType == ET_BEAMHEAD){
 			self->ally->speed += 5 + ((float)self->speed * 0.0003);
 			self->speed -= 5 + ((float)self->speed * 0.0003);
@@ -419,13 +493,25 @@ void Think_NormalMissileStruggle (gentity_t *self) {
 			self->ally->speed += 5;
 		}
 	}
-	speed1 = self->speed;
-	speed2 = self->enemy->speed;
 	power1 = self->powerLevelCurrent;
-	power2 = self->enemy->powerLevelCurrent;
-	speedDifference = speed1-speed2;
-	powerDifference = power1-power2;
-	result = /*speedDifference +*/ powerDifference;
+	power2 = enemy->powerLevelCurrent;
+	// Both beams burn down while they are locked, and the weaker one burns faster,
+	// so an even struggle still ends instead of holding both players forever.
+	drain = (float)self->powerLevelTotal * 0.01f;
+	if(power1 + power2 > 0){drain *= 0.5f + (float)power2 / (float)(power1 + power2);}
+	// powerLevelCurrent is whole units, so the step has to be one at the least or
+	// a weak beam would never lose anything.
+	if(drain < 1.0f){drain = 1.0f;}
+	self->powerLevelCurrent -= drain;
+	if(self->powerLevelCurrent < 1 || power2 > power1 * 2){
+		// Beaten or burned out: detonate where the beams met. The winner sees the
+		// struggle broken on its next think and runs on with what it has left.
+		G_EndUserWeaponStruggle(self);
+		G_ExplodeUserWeapon(self);
+		return;
+	}
+	// The front is pushed toward whichever beam is weaker.
+	result = power1 - power2;
 	VectorCopy(self->r.currentOrigin,start);
 	VectorCopy(self->s.pos.trDelta,dir);
 	VectorCopy(self->r.currentAngles,dir2);
@@ -669,6 +755,26 @@ void Release_UserWeapon( gentity_t *self, qboolean altfire ) {
 			self->contAltfire_ent = NULL;
 		}
 	}
+}
+
+/*
+=========================
+G_UserWeaponFiredPower
+=========================
+Sizes a fired weapon from the charge that paid for it, for every skill type
+alike. A script that names a multiplier gets the documented rule: damage_damage
+lands at no charge at all, and the multiplier is what the charge buys. A script
+that names none puts the whole of damage_damage on the charge axis. Either way
+a shot loosed at its ready threshold costs the target a fraction of what a full
+windup does, and no shot is power-level-invariant.
+*/
+static float G_UserWeaponFiredPower( g_userWeapon_t *weaponInfo, int chargelvl, float powerScale ) {
+	float charge = (float)chargelvl / 100.0f;
+
+	if ( weaponInfo->damage_multiplier ) {
+		return ( (float)weaponInfo->damage_damage + (float)weaponInfo->damage_multiplier * charge ) * powerScale;
+	}
+	return (float)weaponInfo->damage_damage * charge * powerScale;
 }
 
 /*
@@ -1139,11 +1245,14 @@ void G_ExplodeUserWeapon( gentity_t *self ) {
 	vec3_t origin;
 	self->takedamage = qfalse;
 
-	// Terminate guidance
-	if ( self->guided ) {
+	// Terminate guidance. s.clientNum still names the firer, but that slot is
+	// empty once they leave, and the weapon they were steering is gone now.
+	G_ClearUserWeaponGuide( self );
+	if ( self->guided && self->s.clientNum >= 0 && self->s.clientNum < MAX_CLIENTS
+		&& g_entities[ self->s.clientNum ].client ) {
 		g_entities[ self->s.clientNum ].client->ps.weaponstate = WEAPON_READY;
 	}
-	
+
 	// Calculate current position
 	BG_EvaluateTrajectory(&self->s,&self->s.pos,level.time,origin);
 	SnapVector( origin ); // save net bandwith
@@ -1189,7 +1298,10 @@ static void G_HoldUserMissile( gentity_t *self, gentity_t *other ) {
 		if(self->s.eType == ET_MISSILE){
 			VectorCopy(self->s.angles,dir);
 		}else{
-			VectorCopy(self->client->ps.viewangles,dir);
+			// A beam has no client of its own; it is aimed by whoever fired it.
+			gentity_t *missileOwner = GetMissileOwnerEntity( self );
+			if(missileOwner && missileOwner->client){VectorCopy(missileOwner->client->ps.viewangles,dir);}
+			else{VectorCopy(self->s.angles,dir);}
 		}
 		hitTime = level.previousTime + ( level.time - level.previousTime ) * 0;
 		BG_EvaluateTrajectoryDelta( &self->s, &self->s.pos, hitTime, velocity );
@@ -1241,31 +1353,36 @@ static void G_PushUserMissile( gentity_t *self, gentity_t *other ) {
 
 static void Think_NormalMissileStrugglePlayer( gentity_t *self ) {
 	vec3_t fwd;
+	gentity_t	*blocker = self->enemy;
 	gentity_t	*missileOwner = GetMissileOwnerEntity( self );
-	AngleVectors(self->enemy->r.currentAngles, fwd, NULL, NULL);
+	// The blocker has to still be there to be pushed against.
+	if(!blocker || !blocker->inuse || !blocker->client){
+		G_EndUserWeaponStruggle(self);
+		G_ExplodeUserWeapon(self);
+		return;
+	}
+	AngleVectors(blocker->r.currentAngles, fwd, NULL, NULL);
 	VectorNormalize(fwd);
-	G_HoldUserMissile(self,self->enemy);
+	G_HoldUserMissile(self,blocker);
 	self->s.dashDir[1] = self->powerLevelCurrent;
 	self->bounceFrac = 0.0f;
-	self->enemy->client->ps.timers[tmStruggleBlock] += 100;
-	if(self->enemy->client->ps.timers[tmStruggleBlock] >= 3000){
-		self->enemy->client->ps.bitFlags &= ~isStruggling;
-		missileOwner->client->ps.bitFlags &= ~isStruggling;
+	blocker->client->ps.timers[tmStruggleBlock] += 100;
+	if(blocker->client->ps.timers[tmStruggleBlock] >= 3000){
+		G_EndUserWeaponStruggle(self);
 		G_ExplodeUserWeapon(self);
 		return;
 		//if(self->s.eType == ET_MISSILE){self->think = Think_NormalMissileBurnPlayer;}
 		//if(self->s.eType == ET_BEAMHEAD){self->think = Think_NormalMissileRidePlayer;}
 	}
-	self->enemy->client->ps.bitFlags |= isStruggling;
-	missileOwner->client->ps.bitFlags |= isStruggling;
-	self->powerLevelCurrent -= (self->enemy->client->ps.powerLevel[plFatigue] * 0.2) * 0.1;
-	if(self->enemy->client->ps.powerLevel[plFatigue] * 0.5 >= (self->powerLevelCurrent)){
-		self->enemy->client->ps.bitFlags &= ~isStruggling;
-		missileOwner->client->ps.bitFlags &= ~isStruggling;
+	blocker->client->ps.bitFlags |= isStruggling;
+	if(missileOwner && missileOwner->client){missileOwner->client->ps.bitFlags |= isStruggling;}
+	self->powerLevelCurrent -= (blocker->client->ps.powerLevel[plFatigue] * 0.2) * 0.1;
+	if(blocker->client->ps.powerLevel[plFatigue] * 0.5 >= (self->powerLevelCurrent)){
+		G_EndUserWeaponStruggle(self);
 		self->s.eType = ET_MISSILE;
 		self->think = Think_NormalMissile;
 		self->bounceFrac = 0.75;
-		G_PushUserMissile(self,self->enemy);
+		G_PushUserMissile(self,blocker);
 	}
 	self->nextthink = level.time + FRAMETIME;
 }
@@ -1364,8 +1481,11 @@ void G_ImpactUserWeapon(gentity_t *self,trace_t *trace){
 				self->enemy->client->ps.timers[tmStruggleBlock] = 0;
 				self->think = Think_NormalMissileStrugglePlayer;
 				self->nextthink = level.time;
+				// Face the blocker at the weapon for as long as the struggle runs.
+				// Locks are numbered from one so that a weapon, whose entity
+				// number is always past the client range, cannot read as a player.
 				if(!other->client->ps.lockedTarget){
-					other->client->ps.lockedTarget = self->s.number;
+					other->client->ps.lockedTarget = self->s.number + 1;
 					other->client->ps.lockedPosition = &self->r.currentOrigin;
 				}
 				return;
@@ -1484,33 +1604,22 @@ void G_ImpactUserWeapon(gentity_t *self,trace_t *trace){
 	}
 }
 void G_DetachUserWeapon (gentity_t *self) {
-	gentity_t *other;
-	other = self->enemy;
+	// Guidance is over either way: the firer no longer steers this weapon.
+	G_ClearUserWeaponGuide( self );
 	if(self->s.eType == ET_BEAMHEAD && self->powerLevelCurrent > 0){
-		g_entities[self->s.clientNum].client->ps.weaponstate = WEAPON_READY;
+		if(self->s.clientNum >= 0 && self->s.clientNum < MAX_CLIENTS
+			&& g_entities[ self->s.clientNum ].client){
+			g_entities[self->s.clientNum].client->ps.weaponstate = WEAPON_READY;
+		}
 		self->s.eType = ET_MISSILE;
 		self->think = Think_NormalMissile;
 	}
 }
 void G_RemoveUserWeapon (gentity_t *self) {
-	gentity_t *other;
-	gentity_t *missileOwner;
-	// isStruggling is raised on the blocker and the firer together, so it has to
-	// come off both. Neither is reachable the way this used to read: a weapon
-	// only acquires an enemy once somebody blocks it, and the missile entity
-	// itself never has a client - g_client.c assigns one to players only.
-	other = self->enemy;
-	missileOwner = self->parent ? GetMissileOwnerEntity( self ) : NULL;
-	if(other && other->client){
-		other->client->ps.bitFlags &= ~isStruggling;
-		if(other->client->ps.lockedTarget >= MAX_CLIENTS){
-			other->client->ps.lockedPosition = NULL;
-			other->client->ps.lockedTarget = 0;
-		}
-	}
-	if(missileOwner && missileOwner->client){
-		missileOwner->client->ps.bitFlags &= ~isStruggling;
-	}
+	// A struggle pins both players and locks the blocker onto this entity, and a
+	// guided weapon is named by its firer, so none of it may survive the free.
+	G_EndUserWeaponStruggle( self );
+	G_ClearUserWeaponGuide( self );
 	// s.clientNum still names the firer, but that slot is empty once they leave.
 	if (self->guided && self->s.clientNum >= 0 && self->s.clientNum < MAX_CLIENTS
 		&& g_entities[ self->s.clientNum ].client) {
