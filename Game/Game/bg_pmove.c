@@ -770,6 +770,12 @@ qboolean PM_CheckTransform(void){
 	return qfalse;
 }
 #define	POWERLEVEL_RECOVERY_DELAY	1000
+// Time out of the exchange that counts as being clear of it, and earns the full
+// recovery rate rather than the trickle. Longer than the delay above so a gap
+// between punches is not mistaken for having got away, but not by much: a
+// fighter being chased gets windows of one to two and a half seconds and almost
+// nothing longer, so a threshold above that is one no losing fighter ever meets.
+#define	POWERLEVEL_RECOVERY_CLEAR	1500
 
 void PM_CheckPowerLevel(void){
 	int plSpeed,amount,limit;
@@ -781,7 +787,9 @@ void PM_CheckPowerLevel(void){
 	static float fractionPool = 0;
 	int pushLimit;
 	int newValue;
-	int idleScale;
+	// float, not int: this holds 2.8 and an int truncated it to 2, so the bonus
+	// was always a fifth smaller than every comment describing it.
+	float safeScale;
 	int smaller;
 	timers = pm->ps->timers;
 	powerLevel = pm->ps->powerLevel;
@@ -795,12 +803,20 @@ void PM_CheckPowerLevel(void){
 	if(powerLevel[plMaximumPool] > limit){powerLevel[plMaximumPool] = limit;}
 	while(timers[tmPowerAuto] >= 100){
 		timers[tmPowerAuto] -= 100;
-		idleScale = (!pm->cmd.forwardmove && !pm->cmd.rightmove && !pm->cmd.upmove) ? 2.8 : 1;
+		// Recovery belongs to being out of the exchange, not to holding perfectly
+		// still. Breaking off is movement by definition, so paying the bonus for
+		// zero input meant a retreat earned the base rate and nothing more -
+		// and the zanzoken that bought the retreat costs more than the base rate
+		// returns. Measured: a fighter that opened a thousand units of gap lost
+		// guard the whole way out. With blocking locked out as well, a losing
+		// fighter had no state left in which it recovered at all, so a guard
+		// once lost was the fight lost.
+		safeScale = timers[tmSafe] >= POWERLEVEL_RECOVERY_CLEAR ? 2.8f : 1.0f;
 		statScale = 1.0 - ((float)powerLevel[plCurrent] / (float)powerLevel[plMaximum]);
 		if(statScale > 0.75){statScale = 0.75;}
 		if(statScale < 0.25){statScale = 0.25;}
 		fatigueScale = (float)powerLevel[plFatigue] / (float)powerLevel[plMaximum];
-		recovery = (float)powerLevel[plMaximum] * 0.01 * idleScale;
+		recovery = (float)powerLevel[plMaximum] * 0.01 * safeScale;
 		recovery *=  statScale;
 		recovery *=  fatigueScale < 0.15 ? 0.15 : fatigueScale;
 		recovery *= pm->ps->baseStats[stFatigueRecovery];
