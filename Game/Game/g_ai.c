@@ -80,16 +80,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // already out of reach for the moment and flying away is free, so teleporting
 // again only spends the guard it is retreating to rebuild.
 #define	AI_ESCAPE_BREAK		200
-// Least time between two escapes. The range test alone re-fires on every frame
-// it is true, and a fighter drifting across the boundary pays each time - three
-// zanzokens every two seconds, measured, which outspends recovery several times
-// over. One breaks contact; the wait is what lets the guard it bought grow.
-#define	AI_ESCAPE_COOLDOWN	3000
 // Speed the fighter wants before a zanzoken is worth spending. The teleport has
 // no push of its own - it raises the step rate and lets the velocity already in
 // hand carry the fighter - so one fired from a standstill costs the fatigue and
 // moves nobody. Lean away first, spend once actually travelling.
 #define	AI_ESCAPE_SPEED		200
+// How long after a shot before another is worth planting for. Without it a
+// planted fighter never closes, the gap it needs never shuts, and both ends of
+// the fight stand off trading beams - nineteen charges and one melee exchange.
+#define	AI_SHOT_COOLDOWN	4000
 // Fatigue worth spending on leaving. PM_CheckZanzoken refuses outright under
 // 15% of the ceiling, so a fighter that waits much past this cannot leave at
 // all - which is the point of leaving early.
@@ -394,11 +393,9 @@ void G_AIThink( gentity_t *ent ) {
 		// quarter of everything that guard lost, while the distance came back
 		// anyway. Spend it to break contact, and coast once contact is broken.
 		if ( distance < AI_ESCAPE_BREAK
-			&& level.time >= client->aiEscapeAt
 			&& ps->powerLevel[plFatigue] > ps->powerLevel[plMaximum] * AI_ESCAPE_FLOOR ) {
 			cmd->forwardmove = -127;
 			if ( VectorLength( ps->velocity ) > AI_ESCAPE_SPEED ) {
-				client->aiEscapeAt = level.time + AI_ESCAPE_COOLDOWN;
 				cmd->buttons |= BUTTON_TELEPORT;
 			}
 			return;
@@ -470,11 +467,22 @@ void G_AIThink( gentity_t *ent ) {
 		}
 	}
 
-	if ( distance > AI_SKILL_RANGE ) {
-		// Too far to touch: charge a skill on the way in. Against someone
-		// running this gets the shot off. Against someone standing their
-		// ground it arrives still charging, which is why the weapon goes away
-		// below rather than the charge being relied on to lapse.
+	// A gap is a firing window, not something to close through. Charging while
+	// closing walks the fighter into melee range, and a melee calls
+	// PM_WeaponRelease, which throws a charge away without firing it - measured
+	// as five charges begun and none fired, by both fighters, every duel. So
+	// plant and finish the shot, and stay committed once started even if the
+	// gap shuts, or the charge is abandoned exactly as before.
+	//
+	// Standing still to charge is punishable by closing on it. That is the
+	// trade the shot is worth: an opponent that has just teleported clear is
+	// far enough for a beam to travel and busy travelling to answer it.
+	if ( ps->weaponstate == WEAPON_COOLING ) {
+		client->aiShotAt = level.time + AI_SHOT_COOLDOWN;
+	}
+	if ( ( distance > AI_SKILL_RANGE && level.time >= client->aiShotAt )
+		|| ps->weaponstate == WEAPON_CHARGING ) {
+		cmd->forwardmove = 0;
 		cmd->weapon = G_AISkill( ps );
 		G_AICharge( client );
 		return;

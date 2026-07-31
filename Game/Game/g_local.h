@@ -340,7 +340,7 @@ extern struct gclient_s {
 	qboolean	aiRecovering;
 	int			aiRecoverAt;
 	int			aiFightUntil;
-	int			aiEscapeAt;
+	int			aiShotAt;
 
 	// ADDING FOR ZEQ2
 	gentity_t	*guidetarget;		// guided weapon when firing one
