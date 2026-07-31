@@ -308,9 +308,16 @@ void PM_CheckZanzoken(void){
 		PM_StopZanzoken();
 		return;
 	}
-	if(pm->ps->bitFlags & usingSoar || pm->ps->bitFlags & isPreparing || pm->ps->bitFlags & usingMelee){return;}
+	// A melee is not a refusal: teleporting out of an exchange is the escape the
+	// melee is built around, and PM_Melee ends the exchange for both fighters as
+	// soon as either of them shows usingZanzoken.
+	if(pm->ps->bitFlags & usingSoar || pm->ps->bitFlags & isPreparing){return;}
 	if(pm->ps->timers[tmZanzoken] > 0){
-		stepCost = ((pm->ps->powerLevel[plMaximum] * 0.09) * pm->ps->baseStats[stZanzokenCost]) / (pm->ps->timers[tmZanzoken] / 50.0);
+		// Both kinds of zanzoken are billed the same way, off their own cost stat.
+		// tmZanzoken holds the whole window, so the per-50ms share always sums to
+		// 9% of the ceiling however long the window is.
+		stepCost = pm->ps->bitFlags & usingQuickZanzoken ? pm->ps->baseStats[stZanzokenQuickCost] : pm->ps->baseStats[stZanzokenCost];
+		stepCost = ((pm->ps->powerLevel[plMaximum] * 0.09) * stepCost) / (pm->ps->timers[tmZanzoken] / 50.0);
 		speed = (pm->ps->powerLevel[plCurrent] / 13.1) + (pm->ps->baseStats[stZanzokenSpeed] * 4000);
 		pm->ps->measureTimers[mtZanzokenDistance] -= pml.msec;
 		if(pm->ps->measureTimers[mtZanzokenDistance] < 0 || (!(pm->cmd.buttons & BUTTON_TELEPORT) && !(pm->ps->bitFlags & usingQuickZanzoken))){
@@ -320,7 +327,11 @@ void PM_CheckZanzoken(void){
 		pm->ps->measureTimers[mtZanzoken] += pml.msec;
 		while(pm->ps->measureTimers[mtZanzoken] > 50){
 			pm->ps->buffers[bfZanzokenCost] += stepCost;
-			if(pm->ps->buffers[bfZanzokenCost] > 1 && !(pm->ps->bitFlags & usingQuickZanzoken)){
+			// A displacement costs what it costs. Waiving the per-step drain for
+			// the double-tap left the deliberate teleport paying eight times more
+			// fatigue per unit moved than the accidental one, so nobody ever had
+			// a reason to press the key.
+			if(pm->ps->buffers[bfZanzokenCost] > 1){
 				transfer = (int)pm->ps->buffers[bfZanzokenCost];
 				pm->ps->powerLevel[plUseFatigue] += transfer;
 				pm->ps->buffers[bfZanzokenCost] -= transfer;
@@ -346,7 +357,11 @@ void PM_CheckZanzoken(void){
 		pm->ps->powerLevel[plUseFatigue] += cost;
 		PM_AddEvent(EV_ZANZOKEN_START);
 	}
-	else if(!(pm->cmd.buttons & BUTTON_BOOST) && !(pm->cmd.buttons & BUTTON_POWERLEVEL) && (pm->ps->sequenceTimers[15]%10 == 2 || pm->ps->sequenceTimers[16]%10 == 2 || pm->ps->sequenceTimers[17]%10 == 2  ||
+	// Leaving a melee is the button's job alone. A zanzoken ends the exchange
+	// for both fighters, and the double-tap falls out of the strafing every
+	// melee is full of - so inside one, the quick variant would dissolve
+	// exchanges nobody chose to leave.
+	else if(!(pm->ps->bitFlags & usingMelee) && !(pm->cmd.buttons & BUTTON_BOOST) && !(pm->cmd.buttons & BUTTON_POWERLEVEL) && (pm->ps->sequenceTimers[15]%10 == 2 || pm->ps->sequenceTimers[16]%10 == 2 || pm->ps->sequenceTimers[17]%10 == 2  ||
 			pm->ps->sequenceTimers[18]%10 == 2	|| pm->ps->sequenceTimers[19]%10 == 2 || pm->ps->sequenceTimers[20]%10 == 2)){
 		PM_StopDash();
 		pm->ps->bitFlags |= usingZanzoken;
@@ -1179,7 +1194,9 @@ float PM_CmdScale(usercmd_t *cmd){
 	if(pm->cmd.buttons & BUTTON_WALKING){totalSpeed = 1000;}
 	if(pm->ps->powerups[PW_DRIFTING] > 0){
 		totalSpeed = 1000;
-		if(pm->ps->lockedPlayer->timers[tmMeleeIdle] > 1500 && pm->ps->timers[tmMeleeIdle] > 1500){totalSpeed = 1500;}
+		// lockedPlayer is a server-side pointer that is never networked, so it is
+		// always NULL while the client predicts this move.
+		if(pm->ps->lockedPlayer && pm->ps->lockedPlayer->timers[tmMeleeIdle] > 1500 && pm->ps->timers[tmMeleeIdle] > 1500){totalSpeed = 1500;}
 	}
 	if(pm->ps->timers[tmMeleeIdle] < 0){totalSpeed = 4000;}
 	scale = (float)totalSpeed * max / (127.0 * total);
@@ -2436,12 +2453,30 @@ void PM_TorsoAnimation(void){
 /*=============================================*\
     Amazin' Melee (now with 99% more strategy!)
 \*=============================================*/
+// How close two locked fighters have to be for melee to resolve at all, and how
+// far apart they can drift before an exchange in progress ends.
+#define	MELEE_ENGAGE_RANGE		64
+// The range inside which jumping and footsteps stand down so ground movement
+// cannot interrupt an exchange. Deliberately tighter than MELEE_ENGAGE_RANGE:
+// the pair can drift out of this and still be fighting.
+#define	MELEE_SUPPRESS_RANGE	48
+// How long a power melee holds its target in knockback. Short enough that the
+// airbrake window PM_CheckKnockback offers is reachable for the whole of it -
+// a knockback nobody can answer is a lockout, not a hit.
+#define	POWER_MELEE_KNOCKBACK	2000
+
 void PM_StopMelee(void){
 	if(pm->ps->bitFlags & usingMelee || pm->ps->stats[stMeleeState]){
+		// Nothing an exchange imposed outlives the exchange. tmFreeze and
+		// tmMeleeBreakerWait are both costs of being in one, and a fighter left
+		// paying either after the melee is over stands still owing a debt to a
+		// fight that no longer exists.
 		pm->ps->stats[stMeleeState] = 0;
 		pm->ps->timers[tmMeleeCharge] = 0;
 		pm->ps->timers[tmMeleeIdle] = 0;
 		pm->ps->timers[tmMeleeBreaker] = 0;
+		pm->ps->timers[tmMeleeBreakerWait] = 0;
+		pm->ps->timers[tmFreeze] = 0;
 		pm->ps->bitFlags &= ~usingMelee;
 		PM_AddEvent(EV_STOPLOOPINGSOUND);
 		PM_EndDrift();
@@ -2450,14 +2485,22 @@ void PM_StopMelee(void){
 			pm->ps->lockedPlayer->timers[tmMeleeCharge] = 0;
 			pm->ps->lockedPlayer->timers[tmMeleeIdle] = 0;
 			pm->ps->lockedPlayer->timers[tmMeleeBreaker] = 0;
+			pm->ps->lockedPlayer->timers[tmMeleeBreakerWait] = 0;
+			pm->ps->lockedPlayer->timers[tmFreeze] = 0;
 			pm->ps->lockedPlayer->powerups[PW_DRIFTING] = 0;
 			pm->ps->lockedPlayer->bitFlags &= ~usingMelee;
 		}
 	}
 }
 void PM_CheckDrift(void){
+	int	state;
 	if(pm->ps->lockedPlayer){
-		if(!pm->ps->lockedPlayer->powerups[PW_DRIFTING] && pm->ps->stats[stMeleeState] & stMeleeUsingSpeed){
+		// Only a fighter actually pursuing takes the pursuer role, and these are
+		// the states PM_StopDrift keeps the drift alive for. melee_t is an
+		// ordinal enum, so this must be an equality test: a bitmask against
+		// stMeleeUsingSpeed matches every state numbered above it as well.
+		state = pm->ps->stats[stMeleeState];
+		if(!pm->ps->lockedPlayer->powerups[PW_DRIFTING] && (state == stMeleeStartAttack || state == stMeleeUsingSpeed)){
 			pm->ps->powerups[PW_DRIFTING] = 1;
 			pm->ps->lockedPlayer->powerups[PW_DRIFTING] = 2;
 		}
@@ -2474,7 +2517,7 @@ void PM_StopDrift(void){
 }
 void PM_SyncMelee(void){
 	if(pm->ps->lockedPlayer){
-		if(pm->ps->lockedPlayer->bitFlags & usingZanzoken || pm->ps->lockedPlayer->bitFlags & usingZanzoken){return;}
+		if(pm->ps->lockedPlayer->bitFlags & usingZanzoken || pm->ps->bitFlags & usingZanzoken){return;}
 		pm->ps->pm_flags |= PMF_ATTACK1_HELD;
 		pm->ps->pm_flags |= PMF_ATTACK2_HELD;
 		pm->ps->bitFlags |= usingMelee;
@@ -2485,10 +2528,13 @@ void PM_SyncMelee(void){
 		pm->ps->lockedPlayer->bitFlags |= usingMelee;
 		pm->ps->lockedPlayer->bitFlags |= usingFlight;
 		pm->ps->lockedPlayer->bitFlags &= ~isBlinking;
-		pm->ps->lockedPlayer->weaponstate = WEAPON_READY;
-		if(pm->ps->lockedPlayer->stats[stMeleeState] == 0){
-			pm->ps->lockedPlayer->pm_flags |= PMF_ATTACK1_HELD;
-			pm->ps->lockedPlayer->pm_flags |= PMF_ATTACK2_HELD;
+		// The opponent's weapon and buttons stay theirs. Their own pmove reaches
+		// the melee interrupt on its next frame and looses a ready charge there,
+		// and PMF_ATTACK*_HELD only means anything against the buttons its owner
+		// is actually holding.
+		// Facing the attacker is ours to impose only while the opponent is not
+		// already aiming at someone: their own lock outranks ours.
+		if(pm->ps->lockedPlayer->stats[stMeleeState] == 0 && pm->ps->lockedPlayer->lockedTarget == 0){
 			pm->ps->lockedPlayer->lockedTarget = pm->ps->clientNum + 1;
 			pm->ps->lockedPlayer->lockedPlayer = 0;
 		}
@@ -2555,7 +2601,7 @@ void PM_Melee(void){
 			// only clock the exchange has and left a one-sided block holding
 			// both fighters in a melee neither was acting in.
 			if(state != stMeleeIdle && state != stMeleeUsingBlock){pm->ps->timers[tmMeleeIdle] = 0;}
-			if(distance > 64 && pm->ps->bitFlags & usingMelee){PM_StopMelee();}
+			if(distance > MELEE_ENGAGE_RANGE && pm->ps->bitFlags & usingMelee){PM_StopMelee();}
 			// The exchange ends when it stops being one. Distance, a zanzoken
 			// and a death were the only exits, and all three need someone to
 			// act - a blocked attacker that simply stops has none of them.
@@ -2576,7 +2622,7 @@ void PM_Melee(void){
 	// ===================
 	// Melee Logic
 	// ===================
-	if(distance <= 64 && !pm->ps->timers[tmFreeze]){
+	if(distance <= MELEE_ENGAGE_RANGE && !pm->ps->timers[tmFreeze]){
 		// Preparation
 		PM_CheckDrift();
 		if(state != stMeleeStartAttack && state != stMeleeUsingSpeed){PM_StopDrift();}
@@ -2593,7 +2639,7 @@ void PM_Melee(void){
 				if(enemyState == stMeleeUsingSpeed){
 					//PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);
 					pm->ps->timers[tmFreeze] = 950;
-					pm->ps->powerLevel[plUseFatigue] = damage;
+					pm->ps->powerLevel[plUseFatigue] += damage;
 					state = stMeleeIdle;
 				}
 				else if(pm->ps->lockedPlayer->timers[tmMeleeBreaker]){
@@ -2611,7 +2657,7 @@ void PM_Melee(void){
 					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
-					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = damage;
+					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
 					// Landing a hit is being in the exchange. Only g_usermissile
 					// set this, so tmSafe measured "since last took damage" for a
 					// fighter throwing punches and the mid-exchange recovery
@@ -2644,7 +2690,7 @@ void PM_Melee(void){
 					enemyState = stMeleeIdle;
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
-					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = damage;
+					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
 					pm->ps->states |= causedDamage;
 					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->lockedPlayer->timers[tmFreeze] = 500;
@@ -2657,7 +2703,6 @@ void PM_Melee(void){
 			if((state == stMeleeChargingPower || state == stMeleeStartPower) && (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) || meleeCharge >= 550)){
 				if(meleeCharge >= 550){
 					damage = 0;
-					pm->ps->timers[tmFreeze] = 1000;
 					PM_EndDrift();
 					pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
 					if(pm->ps->lockedPlayer->timers[tmMeleeCharge] > 50){
@@ -2673,8 +2718,15 @@ void PM_Melee(void){
 						if(state != stMeleeStartPower){PM_AddEvent(EV_MELEE_KNOCKBACK);}
 					}
 					else{
-						pm->ps->powerLevel[plUseFatigue] = damage * 0.8;
-						pm->ps->lockedPlayer->powerLevel[plUseFatigue] = damage * 0.4;
+						// An evaded heavy is still a heavy that was thrown. Both
+						// fighters pay for it - the swing and the dodge - out of the
+						// damage the swing would have done, which is what the split
+						// is a fraction of. The hit itself lands on nothing, so the
+						// damage banked below stays zero.
+						damage = (pm->ps->powerLevel[plCurrent] * 0.15) * pm->ps->baseStats[stMeleeAttack];
+						pm->ps->powerLevel[plUseFatigue] += damage * 0.8;
+						pm->ps->lockedPlayer->powerLevel[plUseFatigue] += damage * 0.4;
+						damage = 0;
 					}
 					if(enemyState != stMeleeUsingBlock && enemyState != stMeleeUsingEvade){
 						// stKnockbackPower indexes baseStats, not stats
@@ -2684,9 +2736,13 @@ void PM_Melee(void){
 							damage *= 1.5;
 							pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] *= 1.8;
 						}
-						pm->ps->lockedPlayer->timers[tmKnockback] = 5000;
+						pm->ps->lockedPlayer->timers[tmKnockback] = POWER_MELEE_KNOCKBACK;
 						PM_StopMelee();
 					}
+					// Applied after the exchange, not before it: PM_StopMelee above
+					// clears tmFreeze along with the rest of an exchange's state, so
+					// a commitment set ahead of it would be thrown away.
+					pm->ps->timers[tmFreeze] = 1000;
 					pm->ps->powerLevel[plHealthPool] += damage;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.8;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
@@ -2753,7 +2809,7 @@ void PM_Melee(void){
 						pm->ps->lockedPlayer->powerups[PW_DRIFTING] = 2;
 						enemyState = stMeleeStartDodge;
 						PM_AddEvent(EV_MELEE_BREAKER);
-						pm->ps->powerLevel[plUseFatigue] = pm->ps->powerLevel[plMaximum] * 0.10;
+						pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.10;
 					}
 					else{
 						if(pm->ps->lockedPlayer->timers[tmKnockback]){
@@ -2949,7 +3005,7 @@ void PM_Melee(void){
 	}
 	pm->ps->stats[stMeleeState] = state;
 	pm->ps->timers[tmMeleeCharge] = meleeCharge;
-	if(distance <= 64){pm->cmd.rightmove = 0;}
+	if(distance <= MELEE_ENGAGE_RANGE){pm->cmd.rightmove = 0;}
 }
 
 /*
@@ -3330,7 +3386,9 @@ PM_CheckLockon
 ================*/
 void PM_StopLockon(void){
 	if(pm->ps->lockedTarget>0){
-		pm->ps->lockedPlayer->bitFlags &= ~isTargeted;
+		// A lock can name a weapon instead of a player, and the pointer is never
+		// networked, so it is NULL for the whole of the client's prediction.
+		if(pm->ps->lockedPlayer){pm->ps->lockedPlayer->bitFlags &= ~isTargeted;}
 		PM_AddEvent(EV_LOCKON_END);
 	}
 	pm->ps->lockedPosition = NULL;
@@ -3654,7 +3712,7 @@ void PmoveSingle(pmove_t *pmove){
 		//Com_Printf("%i\n",pm->cmd.buttons);
 	}
 	if(pm->ps->lockedTarget > 0 && pm->ps->lockedPosition){
-		meleeRange = Distance(pm->ps->origin,*(pm->ps->lockedPosition)) <= 48 ? qtrue : qfalse;
+		meleeRange = Distance(pm->ps->origin,*(pm->ps->lockedPosition)) <= MELEE_SUPPRESS_RANGE ? qtrue : qfalse;
 	}
 	if(!(pm->ps->bitFlags & isTransforming)){
 		PM_UsePowerLevel();
@@ -3701,11 +3759,18 @@ void PmoveSingle(pmove_t *pmove){
 		int state;
 		PM_Melee();
 		state = pm->ps->stats[stMeleeState];
-		if(state != stMeleeUsingPower || state != stMeleeUsingStun){
+		// Aim and weapon handling stand down while a heavy is landing. Both terms
+		// have to hold for them to run, or the test is true of every state and
+		// suppresses nothing.
+		if(state != stMeleeUsingPower && state != stMeleeUsingStun){
 			PM_UpdateViewAngles(pm->ps,&pm->cmd);
 			PM_Weapon();
 		}
 	}
+	// Knockback takes away the ability to act, never the ability to look. The
+	// trajectory is PM_CheckKnockback's, driven from knockBackDirection, so the
+	// camera is free while the fighter is not.
+	else{PM_UpdateViewAngles(pm->ps,&pm->cmd);}
 	if(pm->ps->pm_type == PM_SPECTATOR){
 		PM_FlyMove();
 	}
