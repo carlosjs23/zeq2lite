@@ -771,10 +771,6 @@ and team change.
 */
 void CalculateRanks( void ) {
 	int		i;
-	int		rank;
-	int		score;
-	int		newScore;
-	gclient_t	*cl;
 
 	level.follow1 = -1;
 	level.follow2 = -1;
@@ -786,7 +782,37 @@ void CalculateRanks( void ) {
 	for (i = 0; i < ARRAY_LEN(level.numteamVotingClients); i++)
 		level.numteamVotingClients[i] = 0;
 
-	qsort( level.sortedClients, level.numConnectedClients, 
+	for ( i = 0 ; i < level.maxclients ; i++ ) {
+		if ( level.clients[i].pers.connected == CON_DISCONNECTED ) {
+			continue;
+		}
+		level.sortedClients[level.numConnectedClients] = i;
+		level.numConnectedClients++;
+
+		if ( level.clients[i].sess.sessionTeam != TEAM_SPECTATOR ) {
+			level.numNonSpectatorClients++;
+
+			if ( level.clients[i].pers.connected == CON_CONNECTED ) {
+				level.numPlayingClients++;
+				// dummies are game-side clients with no one behind them
+				if ( !level.clients[i].pers.isDummy ) {
+					level.numVotingClients++;
+					if ( level.clients[i].sess.sessionTeam == TEAM_RED ) {
+						level.numteamVotingClients[0]++;
+					} else if ( level.clients[i].sess.sessionTeam == TEAM_BLUE ) {
+						level.numteamVotingClients[1]++;
+					}
+				}
+				if ( level.follow1 == -1 ) {
+					level.follow1 = i;
+				} else if ( level.follow2 == -1 ) {
+					level.follow2 = i;
+				}
+			}
+		}
+	}
+
+	qsort( level.sortedClients, level.numConnectedClients,
 		sizeof(level.sortedClients[0]), SortRanks );
 
 	// set the CS_SCORES1/2 configstrings, which will be visible to everyone
