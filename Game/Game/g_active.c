@@ -675,7 +675,7 @@ static void G_DebugFight( gentity_t *ent ) {
 	// many times it has been reached for since the map loaded.
 	G_Printf( "fight c%i t%i.%i: health %i/%i fatigue %i pools %i/%i lock %i buttons %s"
 		" dist %i freeze %i mIdle %i wst %s wpn %s"
-		" safe %i alter %s melee %s meleeState %s"
+		" safe %i alter %s soar %s jump %s melee %s meleeState %s"
 		" block %i/%i zanzoken %i/%i quickzan %i/%i boost %i/%i struggle %i/%i"
 		" initiate %i/%i struck %i/%i dead %s\n",
 		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
@@ -686,6 +686,8 @@ static void G_DebugFight( gentity_t *ent ) {
 		G_WeaponStateName( ps->weaponstate ), ps->weapon ? va( "%i", ps->weapon ) : "none",
 		ps->timers[tmSafe],
 		( ps->bitFlags & usingAlter ) ? "yes" : "no",
+		( ps->bitFlags & usingSoar ) ? "yes" : "no",
+		( ps->bitFlags & usingJump ) ? "yes" : "no",
 		( ps->bitFlags & usingMelee ) ? "yes" : "no",
 		G_MeleeStateName( ps->stats[stMeleeState] ),
 		using[fightUseBlock], uses[clientNum][fightUseBlock],
