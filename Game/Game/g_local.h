@@ -336,6 +336,7 @@ extern struct gclient_s {
 	int			aiNextAttack;
 	int			aiNextLock;
 	int			aiPowerUpUntil;
+	int			aiLeashedAt;
 
 	// ADDING FOR ZEQ2
 	gentity_t	*guidetarget;		// guided weapon when firing one
@@ -640,6 +641,7 @@ void G_RunClient( gentity_t *ent );
 //
 void G_RunDummy( gentity_t *ent );
 gentity_t *G_NearestClient( gentity_t *from, qboolean humansOnly );
+void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance );
 void Cmd_Dummy_f( gentity_t *ent );
 void Cmd_AI_f( gentity_t *ent );
 void Cmd_DummyClear_f( gentity_t *ent );

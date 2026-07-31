@@ -136,10 +136,10 @@ gentity_t *G_NearestClient( gentity_t *from, qboolean humansOnly ) {
 =================
 G_PlaceDummy
 
-Drop the dummy in front of the player who asked for it, facing back at them.
+Drop the dummy in front of the given fighter, facing back at them.
 =================
 */
-static void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance ) {
+void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance ) {
 	vec3_t		forward, start, origin, angles;
 	trace_t		trace;
 

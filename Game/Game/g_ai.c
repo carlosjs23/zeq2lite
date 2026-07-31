@@ -43,10 +43,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	AI_ATTACK_HOLD		250
 #define	AI_ATTACK_PAUSE		300
 #define	AI_LOCK_RETRY		600
-// Beyond this it holds position. With no navigation, chasing a target across a
-// map is a minute of flying into scenery, which is what a respawn on the far
-// side of one would otherwise start.
+// Beyond this it stops chasing and re-places itself in front of its target
+// after AI_LEASH_PATIENCE. A respawn puts a fighter most of a map away, and at
+// flight speed that is minutes of travel to reach a fight that has already
+// been decided.
 #define	AI_LEASH_RANGE		4000
+#define	AI_LEASH_PATIENCE	3000
+#define	AI_LEASH_RETURN		400
+// How far ahead it looks for something to fly around, and how hard it leans
+// out of the way when it finds it.
+#define	AI_AVOID_LOOKAHEAD	320
+#define	AI_AVOID_LEAN		127
 // Pool worth breaking off to convert, as a fraction of the ceiling, and how
 // long it commits to the conversion once it starts.
 #define	AI_POWERUP_POOL		0.15f
@@ -120,6 +127,73 @@ static void G_AICharge( gclient_t *client ) {
 
 /*
 =================
+G_AIPathClear
+
+Whether the fighter can travel `distance` along `dir` without hitting anything.
+=================
+*/
+static qboolean G_AIPathClear( gentity_t *ent, vec3_t dir, float distance ) {
+	trace_t		trace;
+	vec3_t		end;
+
+	VectorMA( ent->client->ps.origin, distance, dir, end );
+	// Geometry only. MASK_PLAYERSOLID includes CONTENTS_BODY, and the body
+	// straight ahead of a fighter closing on someone is the someone: with it in
+	// the mask the avoidance steers around its own target and the fight stops.
+	trap_Trace( &trace, ent->client->ps.origin, ent->r.mins, ent->r.maxs, end,
+		ent->s.number, CONTENTS_SOLID );
+
+	return trace.fraction == 1.0f;
+}
+
+/*
+=================
+G_AIAvoid
+
+Steers around whatever is in the way without taking its eyes off the target.
+Movement is expressed in the view's own axes, so leaning on the strafe and lift
+components slides the fighter past an obstacle while it keeps facing - and
+therefore keeps aiming at - whoever it is fighting.
+
+This is what a flying duellist needs instead of a navigation mesh: the target
+is in sight by definition, there is nothing to search for, and the only
+question is which way around the rock in front of it.
+=================
+*/
+static void G_AIAvoid( gentity_t *ent, usercmd_t *cmd ) {
+	vec3_t		forward, right, up, probe;
+
+	AngleVectors( ent->client->ps.viewangles, forward, right, up );
+
+	if ( G_AIPathClear( ent, forward, AI_AVOID_LOOKAHEAD ) ) {
+		return;
+	}
+
+	// Up first: these are fighters in open sky, and the way past a canyon wall
+	// or a rock is almost always over it.
+	if ( G_AIPathClear( ent, up, AI_AVOID_LOOKAHEAD ) ) {
+		cmd->upmove = AI_AVOID_LEAN;
+		return;
+	}
+
+	VectorCopy( right, probe );
+	if ( G_AIPathClear( ent, probe, AI_AVOID_LOOKAHEAD ) ) {
+		cmd->rightmove = AI_AVOID_LEAN;
+		return;
+	}
+
+	VectorNegate( right, probe );
+	if ( G_AIPathClear( ent, probe, AI_AVOID_LOOKAHEAD ) ) {
+		cmd->rightmove = -AI_AVOID_LEAN;
+		return;
+	}
+
+	// Boxed in on every axis tried: back out rather than grind forwards.
+	cmd->forwardmove = -AI_AVOID_LEAN;
+}
+
+/*
+=================
 G_AIShouldConvert
 
 A pool is worth two different things: the maximum pool raises the ceiling, the
@@ -179,9 +253,19 @@ void G_AIThink( gentity_t *ent ) {
 	angles[ROLL] = 0;
 	SetClientViewAngle( ent, angles );
 
+	// A fight only ends when someone dies, and the winner is left staring at a
+	// respawn on the far side of the map. Rather than fly there or stand
+	// forever, the sparring partner comes back to the fight.
 	if ( distance > AI_LEASH_RANGE ) {
+		if ( !client->aiLeashedAt ) {
+			client->aiLeashedAt = level.time;
+		} else if ( level.time - client->aiLeashedAt > AI_LEASH_PATIENCE ) {
+			client->aiLeashedAt = 0;
+			G_PlaceDummy( ent, target, AI_LEASH_RETURN );
+		}
 		return;
 	}
+	client->aiLeashedAt = 0;
 
 	// Break off to convert. Both fighters earn pool in an exchange - dealing
 	// damage pays in as well as taking it - and converting it is the half of
@@ -212,6 +296,11 @@ void G_AIThink( gentity_t *ent ) {
 	// first melee exchange and spends the rest of the round charging at a
 	// target it is drifting away from.
 	cmd->forwardmove = 127;
+	// Nothing to fly around once it is on top of its target, and leaning at
+	// that range only walks it back out of melee.
+	if ( distance > AI_MELEE_RANGE ) {
+		G_AIAvoid( ent, cmd );
+	}
 
 	if ( distance > AI_SKILL_RANGE ) {
 		// Too far to touch: charge a skill on the way in. Against someone
