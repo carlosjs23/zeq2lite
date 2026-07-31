@@ -62,9 +62,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	AI_POWERUP_HURT		0.85f
 // Guard thin enough to break off on, and recovered enough to go back in. The
 // gap between them is what stops a fighter flickering in and out of contact.
-#define	AI_GUARD_LOW		0.35f
+#define	AI_GUARD_LOW		0.55f
 #define	AI_GUARD_READY		0.70f
-#define	AI_GUARD_PATIENCE	6000
+#define	AI_GUARD_PATIENCE	12000
+// Far enough out to be worth calling an escape: a skill is charged at anything
+// past AI_SKILL_RANGE, so a retreat that stops short of this one only moves
+// from being punched to being shot.
+#define	AI_ESCAPE_RANGE		900
+// Fatigue worth spending on leaving. PM_CheckZanzoken refuses outright under
+// 15% of the ceiling, so a fighter that waits much past this cannot leave at
+// all - which is the point of leaving early.
+#define	AI_ESCAPE_FLOOR		0.20f
 
 /*
 =================
@@ -316,12 +324,42 @@ void G_AIThink( gentity_t *ent ) {
 		client->aiRecoverAt = level.time;
 	}
 
-	// Guard up rather than away. Two fighters fly at the same speed, so
-	// retreating from one is being chased while not fighting back; a raised
-	// guard doubles what it absorbs and takes a fifth of the melee, and it
-	// works at the range the fight is already at.
+	// Leaving, in the order the fight allows it.
+	//
+	// Base speed is (fatigue / 72.81) + speed * 450, so a spent fighter is
+	// slower than the one chasing it and cannot simply back away. The two
+	// verbs that change that both cost the fatigue being conserved, which is
+	// the trade: boost lights for 5% of the ceiling and burns a quarter of
+	// that a second, buying x4.2 for the first second and x2.8 after;
+	// zanzoken is a flat 3% and breaks the lock and the melee outright, but
+	// scales the velocity already in hand, so it is worth nothing standing
+	// still.
+	//
+	// Zanzoken is refused while usingMelee, so boost is what breaks contact
+	// and zanzoken is what opens the gap once out. A guard goes up when it can
+	// afford neither.
 	if ( client->aiRecovering ) {
-		cmd->buttons |= BUTTON_BLOCK;
+		// The guard is the first half of leaving, not the consolation for
+		// failing to. A fighter in a melee cannot get out of one on its own:
+		// the attacker writes its own number into the victim's lockedTarget
+		// every exchange, the lock pins movement at a flat 1000 through
+		// PW_DRIFTING whatever the boost, and zanzoken is refused outright
+		// while usingMelee. Raising the guard is what breaks the attacker off
+		// - PM_Melee stops against a defending enemy - and only then is there
+		// anything to run from.
+		if ( ( ps->bitFlags & usingMelee ) || ps->lockedTarget ) {
+			cmd->buttons |= BUTTON_BLOCK;
+			return;
+		}
+
+		// Free of it: open the gap before the guard has to do it again. Past
+		// AI_ESCAPE_RANGE there is nothing left to spend fatigue on.
+		if ( distance < AI_ESCAPE_RANGE
+			&& ps->powerLevel[plFatigue] > ps->powerLevel[plMaximum] * AI_ESCAPE_FLOOR ) {
+			cmd->forwardmove = -127;
+			cmd->buttons |= BUTTON_TELEPORT;
+		}
+
 		return;
 	}
 
