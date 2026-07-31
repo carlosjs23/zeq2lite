@@ -13,6 +13,7 @@
 #   zeq2duel.sh --fighters goku,piccolo
 #   zeq2duel.sh --solo                           # one opponent, and you fight it
 #   zeq2duel.sh --sample 500                     # finer resource sampling
+#   zeq2duel.sh --distance 600                   # both spawn the same way out
 #   zeq2duel.sh -- +set g_powerlevel 5000        # extra engine args after --
 #
 # Reads the fight out of the log at the end: first and last state per fighter,
@@ -26,6 +27,12 @@ SECONDS_TOTAL=90
 FIGHTERS="goku,vegetaCell"
 SAMPLE=2000
 SOLO=0
+# Spawn distances. They differ by default so the two do not arrive together,
+# but who reaches whom first decides which fighter owns the exchange, so an
+# equal pair is how you tell a role assigned by the melee system apart from one
+# assigned by the approach.
+DIST_A=500
+DIST_B=700
 EXTRA=()
 
 while [[ $# -gt 0 ]]; do
@@ -35,6 +42,7 @@ while [[ $# -gt 0 ]]; do
 		--fighters) FIGHTERS="$2"; shift 2 ;;
 		--sample) SAMPLE="$2"; shift 2 ;;
 		--solo) SOLO=1; shift ;;
+		--distance) DIST_A="$2"; DIST_B="$2"; shift 2 ;;
 		--) shift; EXTRA=("$@"); break ;;
 		-h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}"; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
@@ -62,10 +70,10 @@ IFS=',' read -ra names <<<"$FIGHTERS"
 {
 	echo "g_debugFight $SAMPLE"
 	echo "centerview"
-	echo "ai ${names[0]} 500"
+	echo "ai ${names[0]} $DIST_A"
 	if (( ! SOLO )); then
 		echo "wait 20"
-		echo "ai ${names[1]:-${names[0]}} 700"
+		echo "ai ${names[1]:-${names[0]}} $DIST_B"
 		# Spectating takes the human out of the fight, and following puts the
 		# camera on one of them - free spectate parks you at a spawn point
 		# looking at nothing.
@@ -151,7 +159,13 @@ for who in $(grep -o "^fight c[0-9]*" "$LOG" | sort -u | sed 's/fight c//' | sor
 		"$(sed -E 's/.* quickzan [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
 		"$(sed -E 's/.* boost [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
 		"$(sed -E 's/.* struggle [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
-		"$(grep -c "^fight c$who .*dead 1" "$LOG")"
+		"$(grep -c "^fight c$who .*dead yes" "$LOG")"
+	# Which end of the exchanges this fighter was on. Both read melee 1 the whole
+	# time, so only these two separate the fighter opening exchanges from the one
+	# they are opened against.
+	printf '  role: initiated %s   struck %s\n' \
+		"$(sed -E 's/.* initiate [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
+		"$(sed -E 's/.* struck [0-9]+\/([0-9]+) .*/\1/' <<<"$last")"
 done
 
 echo
