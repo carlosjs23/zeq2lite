@@ -697,12 +697,14 @@ int main( int argc, char **argv )
 	while( 1 )
 	{
 		// Between frames, on the main stack, where the allocator and the stdio
-		// locks are ours to take. Com_Quit_f is the same path a typed "quit"
-		// takes and does not return.
+		// locks are ours to take. Through the command buffer rather than
+		// calling Com_Quit_f directly: it names the shutdown reason with
+		// Cmd_Args(), which without a command to parse holds the arguments of
+		// whatever ran last, and prints those as the reason. Does not return.
 		if( sys_quitRequested )
 		{
 			Com_Printf( "Received signal %d, shutting down\n", (int)sys_quitRequested );
-			Com_Quit_f( );
+			Cbuf_ExecuteText( EXEC_NOW, "quit\n" );
 		}
 
 		IN_Frame( );
