@@ -2714,6 +2714,7 @@ void PM_Melee(void){
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+					if(pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] > POWERLEVEL_MAX){pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = POWERLEVEL_MAX;}
 					// Landing a hit is being in the exchange. Only g_usermissile
 					// set this, so tmSafe measured "since last took damage" for a
 					// fighter throwing punches and the mid-exchange recovery
@@ -2747,6 +2748,7 @@ void PM_Melee(void){
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+					if(pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] > POWERLEVEL_MAX){pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = POWERLEVEL_MAX;}
 					pm->ps->states |= causedDamage;
 					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->lockedPlayer->timers[tmFreeze] = 500;
@@ -2802,6 +2804,7 @@ void PM_Melee(void){
 					pm->ps->powerLevel[plHealthPool] += damage;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.8;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+					if(pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] > POWERLEVEL_MAX){pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = POWERLEVEL_MAX;}
 					pm->ps->states |= causedDamage;
 					state = stMeleeUsingPower;
 					meleeCharge = 0;
@@ -2929,6 +2932,7 @@ void PM_Melee(void){
 							pm->ps->powerLevel[plHealthPool] += damage * 0.7;
 							pm->ps->powerLevel[plMaximumPool] += damage * 0.5;
 							pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+							if(pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] > POWERLEVEL_MAX){pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = POWERLEVEL_MAX;}
 							pm->ps->states |= causedDamage;
 							// A landed hit costs the target guard whether or not
 							// it gets through it. Fatigue is what

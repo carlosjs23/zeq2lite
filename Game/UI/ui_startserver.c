@@ -187,8 +187,8 @@ static void StartServer_Start( void ) {
 #endif
 	trap_Cvar_SetValue( "sv_maxclients", 64);
 	trap_Cvar_SetValue( "dedicated", Com_Clamp( 0, 2, dedicated ) );
-	trap_Cvar_SetValue ("g_powerlevel", Com_Clamp( 1, 32767, powerlevel ) );
-	trap_Cvar_SetValue ("g_powerlevelMaximum", Com_Clamp( 1, 32767, powerlevelMaximum ) );
+	trap_Cvar_SetValue ("g_powerlevel", Com_Clamp( 1, POWERLEVEL_MAX, powerlevel ) );
+	trap_Cvar_SetValue ("g_powerlevelMaximum", Com_Clamp( 1, POWERLEVEL_MAX, powerlevelMaximum ) );
 	trap_Cvar_SetValue ("g_breakLimitRate", Com_Clamp( 1, 100, breakLimitRate ) );
 	trap_Cvar_Set("sv_hostname", s_startserver.hostname.field.buffer );
 
@@ -433,8 +433,8 @@ StartServer_SetMenuItems
 static void StartServer_SetMenuItems( void ) {
 	const char	*info;
 
-	Com_sprintf( s_startserver.powerlevel.field.buffer, 6, "%i", (int)Com_Clamp( 1, 32767, trap_Cvar_VariableValue( "ui_ffa_powerlevel" ) ) );
-	Com_sprintf( s_startserver.powerlevelMaximum.field.buffer, 6, "%i", (int)Com_Clamp( 1, 32767, trap_Cvar_VariableValue( "ui_ffa_powerlevelMaximum" ) ) );
+	Com_sprintf( s_startserver.powerlevel.field.buffer, 10, "%i", (int)Com_Clamp( 1, POWERLEVEL_MAX, trap_Cvar_VariableValue( "ui_ffa_powerlevel" ) ) );
+	Com_sprintf( s_startserver.powerlevelMaximum.field.buffer, 10, "%i", (int)Com_Clamp( 1, POWERLEVEL_MAX, trap_Cvar_VariableValue( "ui_ffa_powerlevelMaximum" ) ) );
 	Com_sprintf( s_startserver.breakLimitRate.field.buffer, 4, "%i", (int)Com_Clamp( 1, 100, trap_Cvar_VariableValue( "ui_ffa_breakLimitRate" ) ) );
 
 	Q_strncpyz( s_startserver.hostname.field.buffer, UI_Cvar_VariableString( "sv_hostname" ), sizeof( s_startserver.hostname.field.buffer ) );
@@ -570,8 +570,8 @@ static void StartServer_MenuInit( void ) {
 	s_startserver.powerlevel.generic.flags      = QMF_LEFT_JUSTIFY |QMF_NUMBERSONLY|QMF_PULSEIFFOCUS|QMF_SMALLFONT;
 	s_startserver.powerlevel.generic.x	         = OPTIONS_X;
 	s_startserver.powerlevel.generic.y	         = 286;
-	s_startserver.powerlevel.field.widthInChars = 5;
-	s_startserver.powerlevel.field.maxchars     = 5;
+	s_startserver.powerlevel.field.widthInChars = 9;
+	s_startserver.powerlevel.field.maxchars     = 9;
 
 	y += BIGCHAR_HEIGHT+2;
 	s_startserver.powerlevelMaximum.generic.type       = MTYPE_FIELD;
@@ -579,8 +579,8 @@ static void StartServer_MenuInit( void ) {
 	s_startserver.powerlevelMaximum.generic.flags      = QMF_LEFT_JUSTIFY | QMF_NUMBERSONLY|QMF_PULSEIFFOCUS|QMF_SMALLFONT;
 	s_startserver.powerlevelMaximum.generic.x	         = OPTIONS_X;
 	s_startserver.powerlevelMaximum.generic.y	         = 302;
-	s_startserver.powerlevelMaximum.field.widthInChars = 5;
-	s_startserver.powerlevelMaximum.field.maxchars     = 5;
+	s_startserver.powerlevelMaximum.field.widthInChars = 9;
+	s_startserver.powerlevelMaximum.field.maxchars     = 9;
 
 	y += BIGCHAR_HEIGHT+2;
 	s_startserver.breakLimitRate.generic.type       = MTYPE_FIELD;

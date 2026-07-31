@@ -577,6 +577,7 @@ void G_UserWeaponDamage(gentity_t *target,gentity_t *inflictor,gentity_t *attack
 				attacker->client->ps.powerLevel[plMaximumPool] += damage * 0.3;
 			}
 			tgClient->ps.powerLevel[plDamageFromEnergy] += damage;
+			if(tgClient->ps.powerLevel[plDamageFromEnergy] > POWERLEVEL_MAX){tgClient->ps.powerLevel[plDamageFromEnergy] = POWERLEVEL_MAX;}
 			if(inflictor->impede){tgClient->ps.timers[tmImpede] = inflictor->impede;}
 			if(knockback){
 				tgClient->ps.timers[tmKnockback] = knockback;
@@ -662,6 +663,7 @@ qboolean G_UserRadiusDamage ( vec3_t origin, gentity_t *attacker, gentity_t *ign
 			G_LocationImpact(origin,ent,attacker);
 			if(ent->client){
 				ent->client->ps.powerLevel[plDamageGeneric] += realDamage;
+			if(ent->client->ps.powerLevel[plDamageGeneric] > POWERLEVEL_MAX){ent->client->ps.powerLevel[plDamageGeneric] = POWERLEVEL_MAX;}
 				if(ent->pain){ent->pain(ent,attacker,realDamage);}
 				/*if(ent->client->lasthurt_location == LOCATION_FRONT){
 					ent->client->ps.timers[tmBlind] = 10000;

@@ -293,6 +293,11 @@ typedef enum{
 	plTierChanged,
 	plTierSelectionMode //0 means tier select, 1 means previous tier, 2 means next tier
 }powerLevel_t;
+// Hard ceiling on every powerLevel[] stat, cap cvar and damage accumulator.
+// The wire carries these fields at full 32-bit width; the ceiling stays low
+// enough that the biggest single credit expression (a pool plus 1.4x damage)
+// cannot overflow a signed int.
+#define	POWERLEVEL_MAX	100000000
 typedef enum{
 	lkPowerCurrent,
 	lkPowerHealth,

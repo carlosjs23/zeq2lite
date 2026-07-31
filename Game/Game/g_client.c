@@ -711,7 +711,7 @@ void ClientUserinfoChanged( int clientNum ) {
 
 	trap_SetConfigstring( CS_PLAYERS+clientNum, s );
 	if(shouldRespawn==1){ClientRespawn(ent);}
-	if(shouldRespawn==2){client->ps.powerLevel[plUseHealth] = 32767;}
+	if(shouldRespawn==2){client->ps.powerLevel[plUseHealth] = POWERLEVEL_MAX;}
 	G_LogPrintf( "ClientUserinfoChanged: %i %s\n", clientNum, s );
 }
 
@@ -995,11 +995,11 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.powerLevel[plTierChanged] = 2;
 	client->ps.lockonData[lkLastLockedPlayer] = -1;
 
-	if(g_powerlevel.value > 32767){
-		g_powerlevel.value = 32767;
+	if(g_powerlevel.value > POWERLEVEL_MAX){
+		g_powerlevel.value = POWERLEVEL_MAX;
 	}
-	if(g_powerlevelMaximum.value > 32767){
-		g_powerlevelMaximum.value = 32767;
+	if(g_powerlevelMaximum.value > POWERLEVEL_MAX){
+		g_powerlevelMaximum.value = POWERLEVEL_MAX;
 	}
 	// make sure all bitFlags are OFF, and explicitly turn off the aura
 	client->ps.bitFlags = 0;
