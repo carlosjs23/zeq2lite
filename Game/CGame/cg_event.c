@@ -541,9 +541,18 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		break;
 	case EV_MELEE_STUN:
 		DEBUGNAME("EV_MELEE_STUN");
+		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,cgs.media.stunSound);
+		CG_PowerMeleeEffect(cent->lerpOrigin,cent->currentState.tier);
+		break;
+	case EV_MELEE_CHECK:
+		DEBUGNAME("EV_MELEE_CHECK");
+		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,cgs.media.powerStunSound2);
 		break;
 	case EV_MELEE_KNOCKOUT:
 		DEBUGNAME("EV_MELEE_KNOCKOUT");
+		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,cgs.media.powerMeleeSound);
+		CG_AddEarthquake(cent->lerpOrigin, 1500, 1, 0, 1, 750);
+		CG_PowerMeleeEffect(cent->lerpOrigin,cent->currentState.tier);
 		break;
 	case EV_MELEE_BREAKER:
 		DEBUGNAME("EV_MELEE_BREAKER");

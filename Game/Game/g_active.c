@@ -609,6 +609,10 @@ typedef enum {
 	// since both fighters read melee 1 either way.
 	fightUseInitiate,
 	fightUseStruck,
+	// A landed stun, counted on the fighter it landed on. The state is the
+	// lasting half of the exchange - the swing resolves in a frame - so the
+	// victim's rising edge is the one count that cannot be missed by sampling.
+	fightUseStunned,
 	// Whether a charged skill ever leaves the hand. A charge that is abandoned
 	// half-made and one that fires look identical in every level on the line,
 	// and cooling is only entered by having fired.
@@ -656,6 +660,7 @@ static void G_DebugFight( gentity_t *ent ) {
 	using[fightUseStruggle] = ( ps->bitFlags & isStruggling ) ? 1 : 0;
 	using[fightUseInitiate] = ( ps->stats[stMeleeState] == stMeleeStartAttack ) ? 1 : 0;
 	using[fightUseStruck] = ( ps->stats[stMeleeState] == stMeleeStartHit ) ? 1 : 0;
+	using[fightUseStunned] = ( ps->stats[stMeleeState] == stMeleeUsingStun ) ? 1 : 0;
 	using[fightUseCharge] = ( ps->weaponstate == WEAPON_CHARGING || ps->weaponstate == WEAPON_ALTCHARGING ) ? 1 : 0;
 	using[fightUseFired] = ( ps->weaponstate == WEAPON_COOLING ) ? 1 : 0;
 
@@ -699,7 +704,7 @@ static void G_DebugFight( gentity_t *ent ) {
 		" dist %i freeze %i mIdle %i wst %s wpn %s"
 		" safe %i alter %s soar %s jump %s melee %s meleeState %s"
 		" block %i/%i zanzoken %i/%i quickzan %i/%i boost %i/%i struggle %i/%i"
-		" initiate %i/%i struck %i/%i charge %i/%i fired %i/%i dead %s\n",
+		" initiate %i/%i struck %i/%i stunned %i/%i charge %i/%i fired %i/%i dead %s\n",
 		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
 		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
 		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool],
@@ -719,6 +724,7 @@ static void G_DebugFight( gentity_t *ent ) {
 		using[fightUseStruggle], uses[clientNum][fightUseStruggle],
 		using[fightUseInitiate], uses[clientNum][fightUseInitiate],
 		using[fightUseStruck], uses[clientNum][fightUseStruck],
+		using[fightUseStunned], uses[clientNum][fightUseStunned],
 		using[fightUseCharge], uses[clientNum][fightUseCharge],
 		using[fightUseFired], uses[clientNum][fightUseFired],
 		( ps->bitFlags & isDead ) ? "yes" : "no" );

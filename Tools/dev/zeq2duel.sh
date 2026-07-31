@@ -163,9 +163,10 @@ for who in $(grep -o "^fight c[0-9]*" "$LOG" | sort -u | sed 's/fight c//' | sor
 	# Which end of the exchanges this fighter was on. Both read melee 1 the whole
 	# time, so only these two separate the fighter opening exchanges from the one
 	# they are opened against.
-	printf '  role: initiated %s   struck %s   charged %s   fired %s\n' \
+	printf '  role: initiated %s   struck %s   stunned %s   charged %s   fired %s\n' \
 		"$(sed -E 's/.* initiate [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
 		"$(sed -E 's/.* struck [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
+		"$(sed -E 's/.* stunned [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
 		"$(sed -E 's/.* charge [0-9]+\/([0-9]+) .*/\1/' <<<"$last")" \
 		"$(sed -E 's/.* fired [0-9]+\/([0-9]+) .*/\1/' <<<"$last")"
 done

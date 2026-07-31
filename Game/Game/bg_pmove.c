@@ -2621,6 +2621,13 @@ void PM_SyncMelee(void){
 // This is the backstop for when drift cannot do it - pinned against geometry,
 // mostly - not the first thing to fire.
 #define	MELEE_IDLE_BREAK	3000
+// How long a landed stun holds the victim, and how much of the front of it is
+// the check window. The window has to close before the stun is worth having -
+// a stun that can be shaken at any point is a damage tick with extra steps -
+// and the attacker's own recovery equals the window, so the knockout can only
+// land on a victim that had its whole chance to check and spent it elsewhere.
+#define	MELEE_STUN_TIME		1500
+#define	MELEE_STUN_CHECK	600
 
 void PM_MeleeIdle(void){
 	pm->ps->timers[tmMeleeIdle] += pml.msec;
@@ -2691,6 +2698,18 @@ void PM_Melee(void){
 	if(pm->ps->lockedPlayer){
 		enemyState = pm->ps->lockedPlayer->stats[stMeleeState];
 		enemyDefense = enemyState == stMeleeUsingEvade || enemyState == stMeleeUsingBlock ? qtrue : qfalse;
+	}
+	// Stunned. Every verb is gone but the check: attack inside the front of the
+	// daze spends guard to shrug it off, and the freeze it clears is what the
+	// rest of the melee logic is gated on, so a checked fighter is acting again
+	// this same frame - while whoever landed the stun is still recovering.
+	if(state == stMeleeUsingStun && pm->ps->timers[tmFreeze] > 0){
+		if(pm->ps->timers[tmFreeze] > MELEE_STUN_TIME - MELEE_STUN_CHECK && pm->cmd.buttons & BUTTON_ATTACK){
+			PM_AddEvent(EV_MELEE_CHECK);
+			pm->ps->timers[tmFreeze] = 0;
+			pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
+			state = stMeleeIdle;
+		}
 	}
 	// ===================
 	// Melee Logic
@@ -2773,6 +2792,33 @@ void PM_Melee(void){
 			}
 			pm->ps->timers[tmMeleeBreaker] = 0;
 		}
+		// Knockout - cashing in a stun the check window did not clear. Any
+		// offensive input consumes it, speed swings included, so a stunned
+		// fighter is one payoff and not a target to be wailed on for free.
+		else if(enemyState == stMeleeUsingStun && pm->ps->lockedPlayer->timers[tmFreeze] > 0 &&
+			(pm->cmd.buttons & BUTTON_ATTACK || pm->cmd.buttons & BUTTON_ALT_ATTACK || pm->cmd.forwardmove > 0)){
+			damage = (pm->ps->powerLevel[plCurrent] * 0.15) * pm->ps->baseStats[stMeleeAttack];
+			// stKnockbackPower indexes baseStats, not stats
+			pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] = (pm->ps->powerLevel[plCurrent] / 21.84) + pm->ps->baseStats[stKnockbackPower];
+			if(pm->ps->bitFlags & usingBoost){
+				damage *= 1.5;
+				pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] *= 1.8;
+			}
+			pm->ps->lockedPlayer->knockBackDirection = 5;
+			pm->ps->lockedPlayer->timers[tmKnockback] = POWER_MELEE_KNOCKBACK;
+			pm->ps->powerLevel[plHealthPool] += damage;
+			pm->ps->powerLevel[plMaximumPool] += damage * 0.8;
+			pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+			pm->ps->states |= causedDamage;
+			PM_AddEvent(EV_MELEE_KNOCKOUT);
+			state = stMeleeUsingPower;
+			enemyState = -1;
+			// The knockback replaces the daze: PM_StopMelee clears the victim's
+			// freeze with the rest of the exchange, and the commitment below has
+			// to follow it for the same reason the power melee's does.
+			PM_StopMelee();
+			pm->ps->timers[tmFreeze] = 1000;
+		}
 		// Power Melee / Charge Breaker
 		else if(state == stMeleeChargingPower || state == stMeleeStartPower || pm->cmd.buttons & BUTTON_ALT_ATTACK){
 			if((state == stMeleeChargingPower || state == stMeleeStartPower) && (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) || meleeCharge >= 550)){
@@ -2852,7 +2898,52 @@ void PM_Melee(void){
 		// Stun Melee / Speed Breaker
 		else if(state == stMeleeChargingStun || pm->cmd.buttons & BUTTON_ATTACK){
 			if(state == stMeleeChargingStun && (!(pm->cmd.buttons & BUTTON_ATTACK) ||  meleeCharge >= 1000)){
-				if(!pm->ps->timers[tmMeleeBreakerWait]){
+				// A full charge is the stun; anything released short of it stays
+				// the speed breaker. The two prices are the same shape as the
+				// power melee's: the swing costs 5% of the ceiling whatever
+				// happens, and a read - the enemy winding up, or sidestepping -
+				// turns the whole second of charging into the loss.
+				if(meleeCharge >= 1000){
+					meleeCharge = 0;
+					PM_EndDrift();
+					pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
+					if(pm->ps->lockedPlayer->timers[tmMeleeCharge] > 50){
+						pm->ps->timers[tmMeleeIdle] = -480;
+						pm->ps->lockedPlayer->timers[tmMeleeIdle] = -480;
+						PM_AddEvent(EV_MELEE_KNOCKBACK);
+						// After PM_StopMelee, which clears tmFreeze for both.
+						PM_StopMelee();
+						pm->ps->timers[tmFreeze] = 1000;
+					}
+					else if(enemyState == stMeleeUsingEvade){
+						pm->ps->timers[tmFreeze] = 1000;
+						pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
+						PM_AddEvent(EV_MELEE_MISS);
+					}
+					else{
+						// Lands through a raised guard - cracking one is what
+						// the long charge buys, and every other melee is already
+						// answered by blocking - though the guard still soaks
+						// half the blow on its way in.
+						damage = (pm->ps->powerLevel[plCurrent] * 0.10) * pm->ps->baseStats[stMeleeAttack];
+						if(enemyState == stMeleeUsingBlock){damage *= 0.5;}
+						pm->ps->timers[tmFreeze] = MELEE_STUN_CHECK;
+						pm->ps->powerLevel[plHealthPool] += damage;
+						pm->ps->powerLevel[plMaximumPool] += damage * 0.8;
+						pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+						// The blow chips the guard the same way a landed speed
+						// hit does - a stun that costs no guard leaves blocking
+						// strictly worse than being hit.
+						pm->ps->lockedPlayer->powerLevel[plUseFatigue] += damage;
+						pm->ps->states |= causedDamage;
+						PM_AddEvent(EV_MELEE_STUN);
+						enemyState = stMeleeUsingStun;
+						pm->ps->lockedPlayer->timers[tmFreeze] = MELEE_STUN_TIME;
+						pm->ps->lockedPlayer->timers[tmMeleeCharge] = 0;
+						state = stMeleeIdle;
+					}
+				}
+				else if(!pm->ps->timers[tmMeleeBreakerWait]){
 					pm->ps->timers[tmMeleeBreaker] = -1;
 					pm->ps->timers[tmMeleeBreakerWait] = 500;
 					pm->ps->stats[stAnimState] = (Q_random(&realRandom.tm_sec) * 5)+1;
@@ -3033,13 +3124,17 @@ void PM_Melee(void){
 				if(state == stMeleeStartPower){animation = ANIM_BREAKER_MELEE_HIT1;}
 			}
 		}
+		// stMeleeUsingStun marks the fighter that is stunned, not the one that
+		// swung: the swing resolves in a frame while the daze lasts, so the
+		// lasting state has to live on the victim for the AI, the fight report
+		// and the knockout gate to read. The stunner only holds the
+		// follow-through pose while it has nothing else going.
 		if(state == stMeleeUsingStun  || enemyState == stMeleeUsingStun){
 			if(state == stMeleeUsingStun){
-				animation = ANIM_POWER_MELEE_3_HIT;
+				animation = ANIM_STUNNED_MELEE;
 			}
-			else{
-				if(state == stMeleeUsingBlock){animation = ANIM_BLOCK;}
-				else{animation = ANIM_STUNNED_MELEE;}
+			else if(state == stMeleeIdle || state == stMeleeInactive){
+				animation = ANIM_POWER_MELEE_3_HIT;
 			}
 		}
 		if(state == stMeleeChargingPower){

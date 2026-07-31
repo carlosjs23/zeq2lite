@@ -113,6 +113,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // 15% of the ceiling, so a fighter that waits much past this cannot leave at
 // all - which is the point of leaving early.
 #define	AI_ESCAPE_FLOOR		0.20f
+// Guard worth spending on checking a stun. The check costs 5% of the ceiling;
+// under this floor the guard left is worth more than what the knockout takes,
+// so the fighter keeps it and eats the hit.
+#define	AI_CHECK_FLOOR		0.35f
 // How long an opponent has to hold a state before the fighter acts on it. A
 // server frame is 50ms, so answering a guard on the frame it goes up is a
 // reaction no hand can make; four frames is about one that can. This is the
@@ -125,6 +129,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	AI_SAW_ALTERING		2
 #define	AI_SAW_BLOCKING		4
 #define	AI_SAW_MELEE		8
+#define	AI_SAW_STUNNED		16
 // Fastest it turns, in degrees a second. Flight sweeps the bearing to a close
 // opponent quickly, so this sits well above a hand on a mouse to hold a lock at
 // all - but it is a rate, so coming about still costs time an opponent can use.
@@ -326,6 +331,34 @@ static qboolean G_AIRollGuard( gclient_t *client, qboolean threatened, float noi
 	}
 
 	return client->aiWillGuard;
+}
+
+/*
+=================
+G_AIRollStun
+
+Whether a guard met inside a melee is answered with the stun charge. Cleared
+when no guard is up, so every raised guard is decided fresh, and re-rolled
+while one lasts, the way the guard roll treats a rush.
+
+Declining matters more here than anywhere: the charge is a full second of
+standing still inside the exchange, so a stun that always answers a guard is a
+certainty an opponent baits by flashing one - the wind-up is longer than the
+flash.
+=================
+*/
+static qboolean G_AIRollStun( gclient_t *client, qboolean guarded, float noise ) {
+	if ( !guarded ) {
+		client->aiStunRollAt = 0;
+		return qfalse;
+	}
+
+	if ( level.time >= client->aiStunRollAt ) {
+		client->aiStunRollAt = level.time + AI_ROLL_HOLD;
+		client->aiWillStun = ( random() >= noise ) ? qtrue : qfalse;
+	}
+
+	return client->aiWillStun;
 }
 
 /*
@@ -657,6 +690,9 @@ static int G_AIPerceive( gclient_t *client, gentity_t *target, int reactionTime 
 		if ( G_AIMeleeThreat( ps ) ) {
 			facts |= AI_SAW_MELEE;
 		}
+		if ( ps->stats[stMeleeState] == stMeleeUsingStun && ps->timers[tmFreeze] > 0 ) {
+			facts |= AI_SAW_STUNNED;
+		}
 	}
 
 	if ( facts != client->aiSeenFacts ) {
@@ -897,6 +933,25 @@ void G_AIThink( gentity_t *ent ) {
 		return;
 	}
 
+	// Stunned. One decision is left and it is a trade: pay 5% of the ceiling in
+	// guard to check the stun off inside its window, or keep the guard and eat
+	// the knockout. Below the floor the guard is worth more than the hit. This
+	// sits above the recovery branch because a recovering fighter is exactly the
+	// one that gets stunned - the stun lands through the guard it is holding.
+	// Noticing the daze takes the same reaction every other read takes, which is
+	// what makes the check window a window instead of a formality.
+	if ( ps->stats[stMeleeState] == stMeleeUsingStun && ps->timers[tmFreeze] > 0 ) {
+		if ( !client->aiStunnedAt ) {
+			client->aiStunnedAt = level.time;
+		}
+		if ( level.time - client->aiStunnedAt >= skill.reactionTime
+			&& ps->powerLevel[plFatigue] > ps->powerLevel[plMaximum] * AI_CHECK_FLOOR ) {
+			cmd->buttons |= BUTTON_ATTACK;
+		}
+		return;
+	}
+	client->aiStunnedAt = 0;
+
 	target = G_NearestClient( ent, qfalse );
 	perceived = G_AIPerceive( client, target, skill.reactionTime );
 	// Counted with no target as well, so the reads die with the opponent they
@@ -927,6 +982,20 @@ void G_AIThink( gentity_t *ent ) {
 		return;
 	}
 	client->aiLeashedAt = 0;
+
+	// A stunned opponent is one payoff standing still, and the window is
+	// short. Everything the branches below would spend it on instead -
+	// converting the stun's own pool income, a reactive guard against a rush
+	// that is no longer coming - is worth less than the knockout; measured, a
+	// fighter that landed a stun stood converting beside the daze until it
+	// wore off. The forward press is the offensive input PM_Melee cashes the
+	// stun in on; the held attack costs nothing while the landing recovery
+	// runs out.
+	if ( ( perceived & AI_SAW_STUNNED ) && ( ps->bitFlags & usingMelee ) ) {
+		cmd->forwardmove = 127;
+		cmd->buttons |= BUTTON_ATTACK;
+		return;
+	}
 
 	// The guard decides fights, so it is what the fighter watches. It comes back
 	// up at AI_GUARD_READY rather than at the threshold it dropped on, or it
@@ -1166,6 +1235,23 @@ void G_AIThink( gentity_t *ent ) {
 	// in the loop able to notice, which is a stuck fight rather than a close
 	// one.
 	G_AIAvoid( ent, cmd, distance > AI_MELEE_RANGE ? AI_AVOID_LOOKAHEAD : AI_AVOID_CONTACT );
+
+	// A raised guard inside a melee is what the stun charge is for. Skills
+	// cannot charge in contact - PM_Weapon releases them while usingMelee - so
+	// the held attack is the only guard-cracking verb in reach. The guard is
+	// read through perception like every other fact, and the answer is rolled:
+	// a stun that always follows a guard is a wind-up an opponent baits by
+	// flashing one. But a wind-up past a tap's length finishes whatever the
+	// guard has done since - the second it costs is already spent, and the
+	// commitment is what carries it to the full charge that fires the stun.
+	// The knockout after it needs nothing taught, because the closing
+	// forwardmove every fighter already holds is an offensive input.
+	if ( ( ps->bitFlags & usingMelee )
+		&& ( G_AIRollStun( client, ( perceived & AI_SAW_BLOCKING ) ? qtrue : qfalse, skill.noise )
+			|| ( ps->stats[stMeleeState] == stMeleeChargingStun && ps->timers[tmMeleeCharge] > AI_ATTACK_HOLD ) ) ) {
+		cmd->buttons |= BUTTON_ATTACK;
+		return;
+	}
 
 	// A raised guard stops melee outright - the engine breaks the attacker's
 	// melee off against it - so answer it with something it cannot swat away.
