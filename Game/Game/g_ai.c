@@ -347,19 +347,30 @@ void G_AIThink( gentity_t *ent ) {
 		// while usingMelee. Raising the guard is what breaks the attacker off
 		// - PM_Melee stops against a defending enemy - and only then is there
 		// anything to run from.
-		if ( ( ps->bitFlags & usingMelee ) || ps->lockedTarget ) {
+		// usingMelee and not the lock, because the lock outlives the exchange
+		// that set it. A guard no longer refills the fatigue it spends, so
+		// blocking on a condition that never clears is a fighter holding a
+		// guard it cannot pay for until the fight stops moving.
+		if ( ps->bitFlags & usingMelee ) {
 			cmd->buttons |= BUTTON_BLOCK;
 			return;
 		}
 
 		// Free of it: open the gap before the guard has to do it again. Past
-		// AI_ESCAPE_RANGE there is nothing left to spend fatigue on.
+		// AI_ESCAPE_RANGE there is nothing left to spend fatigue on. Zanzoken
+		// is also what drops the lock, so this is the step that turns being
+		// disengaged into being genuinely out of the fight.
 		if ( distance < AI_ESCAPE_RANGE
 			&& ps->powerLevel[plFatigue] > ps->powerLevel[plMaximum] * AI_ESCAPE_FLOOR ) {
 			cmd->forwardmove = -127;
 			cmd->buttons |= BUTTON_TELEPORT;
+			return;
 		}
 
+		// Out of reach: rest. The recovery bonus is for a fighter giving no
+		// input at all, so an empty cmd is the whole move - and powering up is
+		// not it, whatever it looks like, because that branch spends fatigue
+		// on the ceiling rather than returning any.
 		return;
 	}
 
