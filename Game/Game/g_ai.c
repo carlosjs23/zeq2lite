@@ -51,8 +51,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	AI_LEASH_PATIENCE	3000
 #define	AI_LEASH_RETURN		400
 // How far ahead it looks for something to fly around, and how hard it leans
-// out of the way when it finds it.
+// out of the way when it finds it. The short probe is what it uses in melee
+// range, where leaning walks it out of the exchange and is only worth doing
+// for something it is already up against.
 #define	AI_AVOID_LOOKAHEAD	320
+#define	AI_AVOID_CONTACT	48
 #define	AI_AVOID_LEAN		127
 // Pool worth breaking off to convert, as a fraction of the ceiling, and how
 // long it commits to the conversion once it starts.
@@ -202,30 +205,30 @@ is in sight by definition, there is nothing to search for, and the only
 question is which way around the rock in front of it.
 =================
 */
-static void G_AIAvoid( gentity_t *ent, usercmd_t *cmd ) {
+static void G_AIAvoid( gentity_t *ent, usercmd_t *cmd, float lookahead ) {
 	vec3_t		forward, right, up, probe;
 
 	AngleVectors( ent->client->ps.viewangles, forward, right, up );
 
-	if ( G_AIPathClear( ent, forward, AI_AVOID_LOOKAHEAD ) ) {
+	if ( G_AIPathClear( ent, forward, lookahead ) ) {
 		return;
 	}
 
 	// Up first: these are fighters in open sky, and the way past a canyon wall
 	// or a rock is almost always over it.
-	if ( G_AIPathClear( ent, up, AI_AVOID_LOOKAHEAD ) ) {
+	if ( G_AIPathClear( ent, up, lookahead ) ) {
 		cmd->upmove = AI_AVOID_LEAN;
 		return;
 	}
 
 	VectorCopy( right, probe );
-	if ( G_AIPathClear( ent, probe, AI_AVOID_LOOKAHEAD ) ) {
+	if ( G_AIPathClear( ent, probe, lookahead ) ) {
 		cmd->rightmove = AI_AVOID_LEAN;
 		return;
 	}
 
 	VectorNegate( right, probe );
-	if ( G_AIPathClear( ent, probe, AI_AVOID_LOOKAHEAD ) ) {
+	if ( G_AIPathClear( ent, probe, lookahead ) ) {
 		cmd->rightmove = -AI_AVOID_LEAN;
 		return;
 	}
@@ -403,11 +406,13 @@ void G_AIThink( gentity_t *ent ) {
 	// first melee exchange and spends the rest of the round charging at a
 	// target it is drifting away from.
 	cmd->forwardmove = 127;
-	// Nothing to fly around once it is on top of its target, and leaning at
-	// that range only walks it back out of melee.
-	if ( distance > AI_MELEE_RANGE ) {
-		G_AIAvoid( ent, cmd );
-	}
+	// In melee range the probe shrinks rather than switching off. Leaning at
+	// that distance walks the fighter out of the exchange, so it is only worth
+	// doing for something it is already against - but switching off entirely
+	// left two fighters holding full forward into a canyon wall with nothing
+	// in the loop able to notice, which is a stuck fight rather than a close
+	// one.
+	G_AIAvoid( ent, cmd, distance > AI_MELEE_RANGE ? AI_AVOID_LOOKAHEAD : AI_AVOID_CONTACT );
 
 	// A raised guard stops melee outright - the engine breaks the attacker's
 	// melee off against it - so answer it with something it cannot swat away.
@@ -425,8 +430,9 @@ void G_AIThink( gentity_t *ent ) {
 
 	if ( distance > AI_SKILL_RANGE ) {
 		// Too far to touch: charge a skill on the way in. Against someone
-		// standing their ground it arrives before the shot is ready and throws
-		// hands instead; against someone running it gets the shot off.
+		// running this gets the shot off. Against someone standing their
+		// ground it arrives still charging, which is why the weapon goes away
+		// below rather than the charge being relied on to lapse.
 		cmd->weapon = G_AISkill( ps );
 		G_AICharge( client );
 		return;

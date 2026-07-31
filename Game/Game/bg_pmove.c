@@ -412,12 +412,19 @@ void PM_UsePowerLevel(){
 // Fatigue spent per point of damage the guard soaks. The one number that
 // decides whether holding a guard is a decision or a default.
 #define	FATIGUE_ABSORB_COST	1.0f
+// The share a full guard takes off an unblocked hit, and the ceiling on that
+// share once the defense multipliers are in. Blocking doubles defense, ground
+// and walking add more, so the cap is what stops any combination reaching a
+// clean nullification - part of every hit gets through whatever is raised.
+#define	GUARD_MITIGATION	0.5f
+#define	GUARD_MITIGATION_CAP	0.85f
 
 void PM_BurnPowerLevel(){
 	float percent;
 	// float: it holds a multiplier, and rounding it makes the guard bonuses
 	// below no-ops
 	float defense;
+	float guard,mitigation;
 	int burn,initial,absorbed;
 	int newValue;
 	int burnType;
@@ -448,8 +455,21 @@ void PM_BurnPowerLevel(){
 		defense = (pm->cmd.buttons & BUTTON_WALKING) && pm->ps->bitFlags & atopGround ? defense * 1.5 : defense;
 		initial = burn;
 		percent = 1.0 - ((float)pm->ps->powerLevel[plCurrent] / (float)pm->ps->powerLevel[plMaximum]);
-		absorbed = (int)(((float)pm->ps->powerLevel[plFatigue] * 0.1) * defense);
-		if(absorbed > burn){absorbed = burn;}
+		// A guard reduces a hit; it does not erase one. Mitigation is a share of
+		// what actually landed, scaled by how much guard is left, so a fresh
+		// guard softens a blow and a spent one barely slows it.
+		//
+		// The flat fatigue * 0.1 * defense this replaces was worth about 2000
+		// against a full guard, more than a melee hit carries, so every hit
+		// resolved to nothing: a standing fighter took no health damage for the
+		// first eighteen seconds of a fight and read as unhittable while its
+		// guard quietly paid for all of it.
+		guard = (float)pm->ps->powerLevel[plFatigue] / (float)pm->ps->powerLevel[plMaximum];
+		if(guard > 1.0f){guard = 1.0f;}
+		else if(guard < 0.0f){guard = 0.0f;}
+		mitigation = guard * defense * GUARD_MITIGATION;
+		if(mitigation > GUARD_MITIGATION_CAP){mitigation = GUARD_MITIGATION_CAP;}
+		absorbed = (int)((float)burn * mitigation);
 		burn -= absorbed;
 		// The guard is fatigue, so what it soaks comes out of it - mitigation is
 		// spent, never free, and a guard therefore weakens as it works. Paying
@@ -2446,10 +2466,14 @@ void PM_SyncMelee(void){
 		}
 	}
 }
-// How long a melee in which nothing happens survives before it dissolves. The
-// state machine has no other way out that does not depend on one of the two
-// fighters doing something.
-#define	MELEE_IDLE_BREAK	1500
+// How long a melee in which nothing happens survives before it dissolves.
+// Comfortably past the 1500 at which PM_MeleeIdle starts drifting two idle
+// fighters apart: drift separates them past the 64 units that ends a melee
+// cleanly, and PM_StopMelee ends the drift with it, so breaking on the same
+// threshold pre-empts the separation and leaves the pair where they stood.
+// This is the backstop for when drift cannot do it - pinned against geometry,
+// mostly - not the first thing to fire.
+#define	MELEE_IDLE_BREAK	3000
 
 void PM_MeleeIdle(void){
 	pm->ps->timers[tmMeleeIdle] += pml.msec;
@@ -2560,6 +2584,12 @@ void PM_Melee(void){
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = damage;
+					// Landing a hit is being in the exchange. Only g_usermissile
+					// set this, so tmSafe measured "since last took damage" for a
+					// fighter throwing punches and the mid-exchange recovery
+					// lockout bound the target alone - the aggressor recovered
+					// its guard while spending the other's.
+					pm->ps->states |= causedDamage;
 					pm->ps->lockedPlayer->timers[tmFreeze] = 500;
 					pm->ps->lockedPlayer->timers[tmMeleeCharge] = 0;
 				}
@@ -2587,6 +2617,7 @@ void PM_Melee(void){
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = damage;
+					pm->ps->states |= causedDamage;
 					pm->ps->timers[tmFreeze] = 100;
 					pm->ps->lockedPlayer->timers[tmFreeze] = 500;
 				}
@@ -2631,6 +2662,7 @@ void PM_Melee(void){
 					pm->ps->powerLevel[plHealthPool] += damage;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.8;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+					pm->ps->states |= causedDamage;
 					state = stMeleeUsingPower;
 					meleeCharge = 0;
 				}
@@ -2746,6 +2778,7 @@ void PM_Melee(void){
 							pm->ps->powerLevel[plHealthPool] += damage * 0.7;
 							pm->ps->powerLevel[plMaximumPool] += damage * 0.5;
 							pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+							pm->ps->states |= causedDamage;
 							// A landed hit costs the target guard whether or not
 							// it gets through it. Fatigue is what
 							// PM_BurnPowerLevel measures incoming damage
