@@ -275,27 +275,35 @@ void parseTier(char *path,tierConfig_g *tier){
 				if(!token[0]){break;}
 				tier->speed = atof(token);
 			}
-			else if(!Q_stricmp(token,"meleeAttack")){
+			// The five combat multipliers are spelled percent* in every config
+			// the data set ships - the names below are from an older revision of
+			// it. A key nobody writes leaves its multiplier at the zero from the
+			// memset, and a zero multiplier is not a weak attack but no attack at
+			// all: powerScale in PM_Weapon and Fire_UserWeapon is
+			// powerLevel * energyAttackDamage, so every ki attack computes a
+			// power of zero, charges to a displayed 0 and lands for nothing.
+			// Melee goes the same way through stMeleeAttack.
+			else if(!Q_stricmp(token,"meleeAttack") || !Q_stricmp(token,"percentMeleeAttack")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->meleeAttack = atof(token);
 			}
-			else if(!Q_stricmp(token,"energyAttackDamage")){
+			else if(!Q_stricmp(token,"energyAttackDamage") || !Q_stricmp(token,"percentEnergyAttackDamage")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->energyAttackDamage = atof(token);
 			}
-			else if(!Q_stricmp(token,"energyAttackCost")){
+			else if(!Q_stricmp(token,"energyAttackCost") || !Q_stricmp(token,"percentEnergyAttackCost")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->energyAttackCost = atof(token);
 			}
-			else if(!Q_stricmp(token,"defenseMelee")){
+			else if(!Q_stricmp(token,"defenseMelee") || !Q_stricmp(token,"percentMeleeDefense")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->defenseMelee = atof(token);
 			}
-			else if(!Q_stricmp(token,"defenseEnergy")){
+			else if(!Q_stricmp(token,"defenseEnergy") || !Q_stricmp(token,"percentEnergyDefense")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->defenseEnergy = atof(token);
@@ -521,6 +529,15 @@ void parseTier(char *path,tierConfig_g *tier){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->requirementButtonUp = strlen(token) == 4 ? qtrue : qfalse;
+			}
+			// The shipped configs carry one requirementButton for both
+			// directions. Left unset it reads as "no button needed", which
+			// transforms the player the moment the thresholds are met.
+			else if(!Q_stricmp(token,"requirementButton")){
+				token = COM_Parse(&parse);
+				if(!token[0]){break;}
+				tier->requirementButtonUp = strlen(token) == 4 ? qtrue : qfalse;
+				tier->requirementButtonDown = tier->requirementButtonUp;
 			}
 			else if(!Q_stricmp(token,"requirementButtonDown")){
 				token = COM_Parse(&parse);
