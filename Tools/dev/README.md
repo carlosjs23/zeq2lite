@@ -45,17 +45,18 @@ The `--asan` check reads the log from `zeq2sanitize.sh` instead of re-running it
 reached gameplay, since a clean log from a run that died during startup proves
 nothing.
 
-### Currently failing (by design — the defect is real and unfixed)
+### What the strncpyz gate exists to catch
 
-`Game/CGame/cg_weapGfxParser.c:2004,2006` size a copy into
-`weaponName[MAX_WEAPONNAME]` (40 bytes) using
-`sizeof(...missileTrailSpiralShader)` (`MAX_QPATH`, 64), and `weaponName` is the
-last member of its struct. Because `Q_strncpyz` wraps `strncpy`, which pads the
-destination out to `n` bytes, this writes 63 bytes plus a terminator on **every**
-call regardless of input length — 24 bytes past the end of the object. It is
-reached from `CG_RegisterClients` during cgame init, so it fires whenever a
-client loads. Three sibling call sites name the wrong field too but are equal in
-size today, so they are latent rather than live.
+`Game/CGame/cg_weapGfxParser.c` used to size a copy into
+`weaponName[MAX_WEAPONNAME]` (40 bytes) with `sizeof()` of a `MAX_QPATH` (64)
+sibling field, and `weaponName` is the last member of its struct. `Q_strncpyz`
+wraps `strncpy`, which pads the destination out to `n`, so that wrote 24 bytes
+past the end of the object on **every** call regardless of input length, from
+`CG_RegisterClients` during cgame init — i.e. whenever a client loaded.
+
+Fixed, and the gate is green. It stays because the mistake is easy to
+reintroduce: the sibling field is one identifier away and the code still
+compiles.
 
 ## Typical loop
 

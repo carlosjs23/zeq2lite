@@ -28,7 +28,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$ZEQ2_ROOT"
-TESTS="$ZEQ2_DEV/tests"
+# tests/ at the root, not Tools/dev/tests: the checks moved there when the
+# Criterion suites landed, and this kept pointing at a directory that no longer
+# exists - so the gate reported FAIL for "cannot open file" rather than running.
+TESTS="$ZEQ2_ROOT/tests"
 failures=0
 declare -a SUMMARY
 
@@ -42,39 +45,33 @@ echo " static gates"
 echo "=============================================================="
 echo
 echo "--- Q_strncpyz sibling-field bounds ---"
-if python3 "$TESTS/check_strncpyz_field_sizes.py"; then
+if python3 "$TESTS/lint/check_strncpyz_field_sizes.py"; then
 	record "strncpyz-field-bounds" PASS
 else
 	record "strncpyz-field-bounds" FAIL
 fi
 
+echo
+echo "--- self-aliasing copies ---"
+if python3 "$TESTS/lint/check_self_aliasing_copies.py"; then
+	record "self-aliasing-copies" PASS
+else
+	record "self-aliasing-copies" FAIL
+fi
+
 if (( DO_DEMO )); then
 	echo
 	echo "=============================================================="
-	echo " ASan unit tests"
+	echo " unit suites (Criterion, ASan + UBSan)"
 	echo "=============================================================="
-	shopt -s nullglob
-	for t in "$TESTS"/test_*.c; do
-		name=$(basename "$t" .c)
-		echo
-		echo "--- $name ---"
-		bin="/tmp/zeq2-$name"
-		if ! clang -g -O0 -fsanitize=address -fno-omit-frame-pointer \
-				-I Shared -I Game/CGame -I Game/Game \
-				-o "$bin" "$t" Shared/q_shared.c 2>&1 | head -15; then
-			record "$name (build)" FAIL
-			continue
-		fi
-		if ASAN_OPTIONS=detect_leaks=0 "$bin" > "/tmp/$name.out" 2>&1; then
-			sed -n '1,20p' "/tmp/$name.out" | sed 's/^/    /'
-			record "$name" PASS
-		else
-			grep -E "FAILED|ERROR: AddressSanitizer|WRITE of size|SUMMARY:|in Q_strncpyz" \
-				"/tmp/$name.out" | head -8 | sed 's/^/    /'
-			record "$name" FAIL
-		fi
-	done
-	shopt -u nullglob
+	# The hand-rolled demo_*.c/test_*.c reproducers this used to compile were
+	# absorbed into tests/suites when Criterion landed. Delegate rather than
+	# keep a second, drifting copy of how to build them.
+	if make -C "$ZEQ2_ROOT" test; then
+		record "unit-suites" PASS
+	else
+		record "unit-suites" FAIL
+	fi
 fi
 
 if (( DO_ASAN )); then
