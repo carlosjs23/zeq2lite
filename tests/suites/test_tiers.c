@@ -172,3 +172,119 @@ Test(tiers, a_model_with_no_tiers_of_its_own_inherits_the_default_model) {
 	cr_assert_eq(client.tiers[1].requirementCurrent, 2500,
 	             "and inherit its thresholds, not just its existence");
 }
+
+/*
+The parser and the shipped configs have to agree on spelling, and twice they did
+not.
+
+The five combat multipliers are written percent* in every config in the data
+set, while the parser only knew meleeAttack, energyAttackDamage,
+energyAttackCost, defenseMelee and defenseEnergy. Nothing wrote them, so they
+kept the zero setupTiers memsets in - and a zero multiplier is not a weak
+fighter, it is one whose attacks compute to no damage and whose defense scales
+nothing. These are the numbers everything else in combat is measured against, so
+they get asserted by value rather than by "non-zero".
+*/
+Test(tiers, the_combat_multipliers_are_read_under_the_names_the_configs_use) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg",
+	            "percentMeleeAttack 1.5\n"
+	            "percentEnergyAttackDamage 2.0\n"
+	            "percentEnergyAttackCost 0.5\n"
+	            "percentMeleeDefense 1.25\n"
+	            "percentEnergyDefense 0.75\n");
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stMeleeAttack], 1.5f, 0.001f,
+	                   "percentMeleeAttack must reach baseStats or melee lands for nothing");
+	cr_assert_float_eq(client.ps.baseStats[stEnergyAttack], 2.0f, 0.001f,
+	                   "percentEnergyAttackDamage must reach baseStats or ki attacks charge to 0");
+	cr_assert_float_eq(client.ps.baseStats[stEnergyAttackCost], 0.5f, 0.001f, "energy cost multiplier");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseMelee], 1.25f, 0.001f, "melee defense multiplier");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseEnergy], 0.75f, 0.001f, "energy defense multiplier");
+}
+
+/*
+knockBackPower is stated by every config and was parsed all along, but syncTier
+never handed it to the playerState, so the melee knockback that reads it saw
+whatever else lived at that index.
+*/
+Test(tiers, the_knockback_multiplier_reaches_the_player_state) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg", "knockBackPower 2.0\n");
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stKnockbackPower], 2.0f, 0.001f,
+	                   "a tier's knockback power must reach baseStats to be readable");
+}
+
+/*
+goku's tier5 abbreviates requirementMaximum to requirementMax. Unread it stays
+at zero, and zero is the permissive value for a lower bound, so the tier admits
+a fighter who has never come near the maximum power it asks for.
+*/
+Test(tiers, a_tier_that_abbreviates_its_maximum_requirement_is_still_gated) {
+	given_tiers("requirementMax 30000\n");
+	given_a_healthy_fighter();   /* maximum 20000, short of the 30000 asked for */
+
+	cr_assert(!checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP),
+	          "requirementMax must gate the tier the same as requirementMaximum");
+
+	client.ps.powerLevel[plMaximum] = 30000;
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP),
+	          "and must admit a fighter who meets it");
+}
+
+/*
+The quick zanzoken - the double tap - reads its distance and cost from
+zanzokenQuickDistance and zanzokenQuickCost, which no shipped config writes. The
+two cvars that would override them default to -1, meaning "use the tier's
+value", so the distance resolved to zero and a double tap spent its event and
+its animation to move the player nowhere.
+*/
+Test(tiers, a_double_tap_zanzoken_falls_back_to_the_ordinary_one) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg",
+	            "zanzokenDistance 1.0\nzanzokenCost 2.0\n");   /* no quick pair, as shipped */
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickDistance], 1.0f, 0.001f,
+	                   "a quick zanzoken with no distance of its own teleports nowhere");
+	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickCost], 2.0f, 0.001f,
+	                   "and must not be free either");
+}
+
+/*
+A config that does state the quick pair keeps it - the fallback above must not
+overwrite a character who was tuned for a shorter, cheaper double tap.
+*/
+Test(tiers, a_stated_quick_zanzoken_is_left_alone) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg",
+	            "zanzokenDistance 1.0\nzanzokenCost 2.0\n"
+	            "zanzokenQuickDistance 0.4\nzanzokenQuickCost 0.5\n");
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickDistance], 0.4f, 0.001f, "stated distance wins");
+	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickCost], 0.5f, 0.001f, "stated cost wins");
+}

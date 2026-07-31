@@ -20,10 +20,14 @@ void syncTier(gclient_t *client){
 	ps->stats[stTransformEffectMaximum] = tier->transformEffectMaximum;
 	ps->baseStats[stSpeed] = tier->speed;
 	ps->baseStats[stZanzokenDistance] = tier->zanzokenDistance;
-	ps->baseStats[stZanzokenQuickDistance] = g_quickZanzokenDistance.value != -1.0 ? g_quickZanzokenDistance.value : tier->zanzokenQuickDistance;
+	// -1 on the cvar means "use the tier's value"; a tier that states no quick
+	// pair uses its ordinary zanzoken rather than a distance of zero
+	ps->baseStats[stZanzokenQuickDistance] = g_quickZanzokenDistance.value != -1.0 ? g_quickZanzokenDistance.value :
+		(tier->zanzokenQuickDistance ? tier->zanzokenQuickDistance : tier->zanzokenDistance);
 	ps->baseStats[stZanzokenSpeed] = tier->zanzokenSpeed;
 	ps->baseStats[stZanzokenCost] = tier->zanzokenCost;
-	ps->baseStats[stZanzokenQuickCost] = g_quickZanzokenCost.value != -1.0 ? g_quickZanzokenCost.value : tier->zanzokenQuickCost;
+	ps->baseStats[stZanzokenQuickCost] = g_quickZanzokenCost.value != -1.0 ? g_quickZanzokenCost.value :
+		(tier->zanzokenQuickCost ? tier->zanzokenQuickCost : tier->zanzokenCost);
 	ps->baseStats[stBoostCost] = tier->boostCost;
 	ps->baseStats[stFatigueRecovery] = tier->fatigueRecovery;
 	ps->baseStats[stTransformSubsequentDuration] = tier->transformSubsequentDuration;
@@ -32,6 +36,7 @@ void syncTier(gclient_t *client){
 	ps->baseStats[stTransformSubsequentMaximumScale] = tier->transformSubsequentMaximumScale;
 	ps->baseStats[stAirBrakeCost] = tier->airBrakeCost;
 	ps->baseStats[stMeleeAttack] = tier->meleeAttack;
+	ps->baseStats[stKnockbackPower] = tier->knockbackPower;
 	ps->baseStats[stEnergyAttack] = tier->energyAttackDamage;
 	ps->baseStats[stDefenseMelee] = tier->defenseMelee;
 	ps->baseStats[stDefenseEnergy] = tier->defenseEnergy;
@@ -275,14 +280,8 @@ void parseTier(char *path,tierConfig_g *tier){
 				if(!token[0]){break;}
 				tier->speed = atof(token);
 			}
-			// The five combat multipliers are spelled percent* in every config
-			// the data set ships - the names below are from an older revision of
-			// it. A key nobody writes leaves its multiplier at the zero from the
-			// memset, and a zero multiplier is not a weak attack but no attack at
-			// all: powerScale in PM_Weapon and Fire_UserWeapon is
-			// powerLevel * energyAttackDamage, so every ki attack computes a
-			// power of zero, charges to a displayed 0 and lands for nothing.
-			// Melee goes the same way through stMeleeAttack.
+			// percent* is the spelling the configs use for the five combat
+			// multipliers; the bare names are the older ones
 			else if(!Q_stricmp(token,"meleeAttack") || !Q_stricmp(token,"percentMeleeAttack")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
@@ -408,7 +407,8 @@ void parseTier(char *path,tierConfig_g *tier){
 				if(!token[0]){break;}
 				tier->requirementCurrentPercent = atoi(token);
 			}
-			else if(!Q_stricmp(token,"requirementMaximum")){
+			// requirementMax is the abbreviation some configs use
+			else if(!Q_stricmp(token,"requirementMaximum") || !Q_stricmp(token,"requirementMax")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->requirementMaximum = atoi(token);
@@ -530,9 +530,7 @@ void parseTier(char *path,tierConfig_g *tier){
 				if(!token[0]){break;}
 				tier->requirementButtonUp = strlen(token) == 4 ? qtrue : qfalse;
 			}
-			// The shipped configs carry one requirementButton for both
-			// directions. Left unset it reads as "no button needed", which
-			// transforms the player the moment the thresholds are met.
+			// the configs carry one key for both directions
 			else if(!Q_stricmp(token,"requirementButton")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}

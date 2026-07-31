@@ -434,6 +434,11 @@ void PM_BurnPowerLevel(){
 			burnType += 1;
 			continue;
 		}
+		// FIXME: stDefenseMelee and stDefenseEnergy index baseStats, not stats,
+		// so this reads two slots nothing writes and defense is always 0.
+		// Reading the right array is a balance change, not just a fix: the
+		// multiplier is 1.0, and the subtraction below is a tenth of fatigue,
+		// which absorbs every melee hit whole at full fatigue.
 		defense = burnType == 1 ? pm->ps->stats[stDefenseMelee] : pm->ps->stats[stDefenseEnergy];
 		defense = pm->ps->bitFlags & usingBlock ? defense * 2.0 : defense;
 		defense = pm->ps->bitFlags & usingBallFlip ? defense * 1.5 : defense;
@@ -2486,11 +2491,7 @@ void PM_Melee(void){
 			if(pm->ps->timers[tmMeleeBreakerWait] < 0){pm->ps->timers[tmMeleeBreakerWait] = 0;}
 		}
 		if(pm->ps->timers[tmMeleeBreaker]){
-			// stMeleeAttack indexes baseStats, not stats - the two arrays have
-			// enums of their own and stats[stMeleeAttack] is stTransformState,
-			// which is zero except on the single frame a tier change starts.
-			// Every melee hit therefore landed for nothing at all, or for a
-			// negative amount while powering down.
+			// stMeleeAttack indexes baseStats, not stats
 			damage = (pm->ps->powerLevel[plCurrent] * 0.05) * pm->ps->baseStats[stMeleeAttack];
 			if(pm->ps->timers[tmMeleeBreaker] > 0){
 				state = stMeleeUsingChargeBreaker;
@@ -2574,7 +2575,8 @@ void PM_Melee(void){
 						pm->ps->lockedPlayer->powerLevel[plUseFatigue] = damage * 0.4;
 					}
 					if(enemyState != stMeleeUsingBlock && enemyState != stMeleeUsingEvade){
-						pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] = (pm->ps->powerLevel[plCurrent] / 21.84) + pm->ps->stats[stKnockbackPower];
+						// stKnockbackPower indexes baseStats, not stats
+					pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] = (pm->ps->powerLevel[plCurrent] / 21.84) + pm->ps->baseStats[stKnockbackPower];
 						if(pm->ps->lockedPlayer->timers[tmKnockback]){pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] *= 2;}
 						if(pm->ps->bitFlags & usingBoost){
 							damage *= 1.5;
@@ -3307,13 +3309,9 @@ void PM_UpdateViewAngles(playerState_t *ps, const usercmd_t *cmd){
 		pml.gravityNormal[2] = 1;
 	}
 	VectorScale(pml.gravityNormal,pm->ps->gravity[2],pml.gravityDirection);
-	// lockedPosition has to be tested, not dereferenced: lockedTarget gets set
-	// on its own - PM_Melee points a victim at its attacker, and lockedTarget
-	// is the only one of the three lock fields that crosses the network -
-	// while the two pointers are filled in by LockonCheck, which the server
-	// runs after Pmove. Between the two there is a frame with a target and no
-	// position, and reading *lockedPosition there is a null dereference rather
-	// than the value test it looks like.
+	// Test lockedPosition, don't dereference it: lockedTarget is set on its own
+	// by PM_Melee and by the network, while the pointer is filled in later by
+	// LockonCheck, so a frame with a target and no position is legal.
 	if((pm->ps->lockedTarget > 0) && !(pm->ps->bitFlags & usingAlter) && ps->lockedPosition){
 		vec3_t dir;
 		vec3_t angles;
