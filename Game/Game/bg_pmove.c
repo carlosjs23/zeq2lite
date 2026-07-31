@@ -2446,6 +2446,11 @@ void PM_SyncMelee(void){
 		}
 	}
 }
+// How long a melee in which nothing happens survives before it dissolves. The
+// state machine has no other way out that does not depend on one of the two
+// fighters doing something.
+#define	MELEE_IDLE_BREAK	1500
+
 void PM_MeleeIdle(void){
 	pm->ps->timers[tmMeleeIdle] += pml.msec;
 	if(pm->ps->lockedPlayer){
@@ -2493,8 +2498,16 @@ void PM_Melee(void){
 				PM_StopLockon();
 				return;
 			}
-			if(state != stMeleeIdle){pm->ps->timers[tmMeleeIdle] = 0;}
+			// A raised guard is idle too. Holding one is a state the melee never
+			// leaves on its own, so resetting the timer under it starved the
+			// only clock the exchange has and left a one-sided block holding
+			// both fighters in a melee neither was acting in.
+			if(state != stMeleeIdle && state != stMeleeUsingBlock){pm->ps->timers[tmMeleeIdle] = 0;}
 			if(distance > 64 && pm->ps->bitFlags & usingMelee){PM_StopMelee();}
+			// The exchange ends when it stops being one. Distance, a zanzoken
+			// and a death were the only exits, and all three need someone to
+			// act - a blocked attacker that simply stops has none of them.
+			if(pm->ps->timers[tmMeleeIdle] > MELEE_IDLE_BREAK && pm->ps->bitFlags & usingMelee){PM_StopMelee();}
 		}
 	}
 	else{
