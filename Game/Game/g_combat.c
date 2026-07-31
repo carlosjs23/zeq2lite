@@ -93,7 +93,7 @@ void G_AwardKill( gentity_t *victim ) {
 	killer->ps.persistant[PERS_SCORE] += 1;
 	killer->lastkilled_client = victim->client->ps.clientNum;
 	killer->lastKillTime = level.time;
-	// plLimit is the network short the pools travel in; nothing may exceed it.
+	// plLimit is the fighter's own ceiling; neither pool may exceed it.
 	limit = killer->ps.powerLevel[plLimit];
 	award = victim->client->ps.powerLevel[plMaximum] / KILL_POOL_SHARE;
 	killer->ps.powerLevel[plHealthPool] += award;

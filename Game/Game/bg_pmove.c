@@ -810,9 +810,7 @@ qboolean PM_CheckTransform(void){
 // most profitable thing in the game. Squared, to keep the test off the sqrt.
 #define	POWERLEVEL_REST_SPEED_SQR	(150.0f * 150.0f)
 // Pool spent per point of ceiling a limit break banks. The pool is the only way
-// a ceiling grows, so this price is the whole zenkai loop: at the raise * 0.3
-// this replaces it took about 54 pool a point, a saturated 32767 pool bought
-// 606 points, and the pool sat pinned at its transport cap meaning nothing.
+// a ceiling grows, so this price is the whole zenkai loop.
 #define	POWERLEVEL_POOL_PER_POINT	4
 // Ceiling points banked per 25ms conversion step, scaling the tier's own
 // breakLimitRate. Throughput has to fit inside one fatigue bar: the sustain
