@@ -47,6 +47,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // map is a minute of flying into scenery, which is what a respawn on the far
 // side of one would otherwise start.
 #define	AI_LEASH_RANGE		4000
+// Pool worth breaking off to convert, as a fraction of the ceiling, and how
+// long it commits to the conversion once it starts.
+#define	AI_POWERUP_POOL		0.15f
+#define	AI_POWERUP_TIME		2500
 
 /*
 =================
@@ -153,6 +157,23 @@ void G_AIThink( gentity_t *ent ) {
 	SetClientViewAngle( ent, angles );
 
 	if ( distance > AI_LEASH_RANGE ) {
+		return;
+	}
+
+	// Break off to convert a pool worth converting. Both fighters earn pool in
+	// an exchange - dealing damage pays in as well as taking it - so this is
+	// the half of the loop that turns a beating into a higher ceiling, and
+	// without it a fight only ever spends.
+	//
+	// The direction key is what the power-up modifier reads: right is raise,
+	// and forward would ask to transform instead.
+	if ( level.time < client->aiPowerUpUntil ||
+		ps->powerLevel[plMaximumPool] > ps->powerLevel[plMaximum] * AI_POWERUP_POOL ) {
+		if ( level.time >= client->aiPowerUpUntil ) {
+			client->aiPowerUpUntil = level.time + AI_POWERUP_TIME;
+		}
+		cmd->buttons |= BUTTON_POWERLEVEL;
+		cmd->rightmove = 127;
 		return;
 	}
 

@@ -335,6 +335,7 @@ extern struct gclient_s {
 	int			aiAttackUntil;
 	int			aiNextAttack;
 	int			aiNextLock;
+	int			aiPowerUpUntil;
 
 	// ADDING FOR ZEQ2
 	gentity_t	*guidetarget;		// guided weapon when firing one
