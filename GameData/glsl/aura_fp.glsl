@@ -43,31 +43,25 @@ varying float v_wraps;
 #define TIP_SHIFT 0.85
 #define CORE_END  0.20
 #define CORE_SHIFT 0.25
-#define CORE_GLOW 1.35
+#define CORE_GLOW 1.0
 #define GLOW_END  0.45
-#define BASE_GLOW 1.5
+#define BASE_GLOW 0.0
 
 
 
 /* Coverage of the flame at ring position u (already in strip S units) and
    band position t (0 at the inner ring, 1 at the reference outline). */
 float flame( float u, float t ){
-	/* Mirror-repeat by hand: folding u into a triangle wave makes the strip
-	   seamless whatever the wrap count, and retires the two-copy crossfade
-	   whose 50/50 zone ghosted a second tongue pattern over the crown. The
-	   grain's flow direction reverses at the folds - the flanks - where
-	   near-radial streaks make the reversal invisible. */
-	float uf = 1.0 - abs( mod( u, 2.0) - 1.0);
-	float strand = texture2D( u_Texture0, vec2( uf, t)).a;
+	/* The strip is the reference's own band, unwrapped over exactly one
+	   turn, so it tiles by construction and is sampled straight. */
+	float strand = texture2D( u_Texture0, vec2( u, t)).a;
 
-	/* Interior mist, so the space between the body and the feather reads
-	   as thin ki rather than as a hole. */
-	float mist = 0.35 * (1.0 - smoothstep( 0.0, 0.55, t));
-
-	/* The inner rows fade in rather than starting solid: the inner ring is
-	   a closed loop of geometry, and any coverage on it draws that loop as
-	   a hard oval over the character. */
-	return max( strand, mist) * smoothstep( 0.0, 0.05, t);
+	/* No mist and no boost on top: the strip already carries the
+	   reference's interior glow and its hot rim - anything added here is a
+	   departure from the art. The inner rows still fade in, because the
+	   inner ring is a closed loop of geometry and any coverage on it draws
+	   that loop as a hard oval over the character. */
+	return strand * smoothstep( 0.0, 0.04, t);
 }
 
 

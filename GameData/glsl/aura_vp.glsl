@@ -46,22 +46,16 @@ uniform float u_Time;
    tongues a steady width in pixels. */
 #define SPIKE_REF 0.34
 
-/* How far the streaks are sheared along U as they run outward, in pattern
-   repeats. The licks in the reference lean; a lick that leans has to
-   overhang its own base, and shearing the coordinate is what buys that. */
-#define SHEAR 0.11
-
-/* Where the inner ring sits, as a fraction of the outline. Far enough in
-   that the character's own body covers it; the band between it and the
-   outline is everything the fragment stage has to work with. */
-#define INNER_HUG 0.40
+/* Where the inner ring sits, as a fraction of the outline. Nearly the
+   whole disc - the reference's interior veil is part of its field - but
+   not exactly zero: at the centre every strip column converges on one
+   point, and the wedge interpolation streaks spokes through it. The
+   character stands on the hole this leaves. */
+#define INNER_HUG 0.05
 
 /* Hard ceiling on the outline's crown reach in NDC; see the span comment. */
 #define SPAN_CAP  0.85
 
-/* Peak radial deviation of the boundary as it burns. Large enough to move,
-   small enough that the reference's outline stays recognisably itself. */
-#define WOBBLE 0.075
 
 varying float v_seamBlend;
 /* 0 on the inner ring, 1 at the spike tips. Carried separately from the
@@ -172,16 +166,9 @@ void main(void) {
 	float base = max(-along, 0.0);
 	base *= base;
 
-	/* Push the boundary in and out as it burns. Driven by scrollSpeed so the
-	   outline crawls at the same rate the flame on it does - a static
-	   perturbation reads as a dented ring rather than as something burning.
-	   Integer harmonics only: the ring closes where theta wraps, and a
-	   non-integer one leaves a step there that tears the aura open. */
-	float theta  = atan(dir.y, dir.x);
-	float wobble = sin(theta * 3.0 + u_Time * scrollSpeed * 1.7)
-	             + 0.6 * sin(theta * 5.0 - u_Time * scrollSpeed * 2.3)
-	             + 0.4 * sin(theta * 8.0 + u_Time * scrollSpeed * 1.1);
-	rRef *= 1.0 + WOBBLE * wobble;
+	/* No wobble: it existed to break up a perfect ellipse, and the outline
+	   is the reference's own art now. The life comes from the scroll
+	   sliding the field along the boundary. */
 
 	/* The inner ring hugs a scaled copy of the same outline, so the band's
 	   thickness follows the tongues instead of cutting across them. */
@@ -190,11 +177,10 @@ void main(void) {
 
 	/* Rotate the authored shape rigidly so its tip rides the flow. With the
 	   flow straight up this is the identity. */
-	/* The in-situ mockup carries the drop wider than the cut-out reference
-	   does - the flame spreads once it has a figure inside it - so the
-	   across-flow axis gets that spread before the rotation. */
+	/* Isotropic on purpose: the outline is the reference's own curve, and
+	   any per-axis spread on top of it is a departure from the art. */
 	vec2 rightDir = vec2(flowDir.y, -flowDir.x);
-	vec2 shape    = rightDir * pRef.x * 1.3 + flowDir * pRef.y;
+	vec2 shape    = rightDir * pRef.x + flowDir * pRef.y;
 
 	/* NDC spans -1..1 on both axes regardless of window shape, so an equal
 	   offset in x and y is not equal on screen. The projection matrix carries
@@ -263,20 +249,22 @@ void main(void) {
 	v_wraps = wraps;
 
 	/* The authored coordinate advances with the outline's own arc length -
-	   make_aura_mesh.py bakes the cumulative arc into it - so the pattern is
-	   even along the boundary however tall the outline is at that angle. */
-	float u = gl_MultiTexCoord0.x * wraps + u_Time * scrollSpeed;
+	   make_aura_mesh.py bakes the cumulative arc into it - and the band
+	   strip is that same arc unwrapped, so one turn of the ring is one width
+	   of the strip: no wrap count. Scroll slides the reference's own field
+	   around the boundary. */
+	float u = gl_MultiTexCoord0.x + u_Time * scrollSpeed;
 
 	/* Sheared with distance out, so every lick leans. The same sign on both
 	   copies: the mirrored one already reverses U, so an equal shear comes out
 	   leaning the opposite way on the far side of the aura - which is what is
 	   wanted, since both sides should sweep toward the tip rather than all
 	   leaning the one way around the ring like a vortex. */
-	float shear = SHEAR * gl_MultiTexCoord0.y;
-
-	gl_TexCoord[0] = vec4( u + shear, gl_MultiTexCoord0.y * amplitude, 0.0, 1.0);
-	/* The mirrored copy; the fragment stage crossfades between the two. */
-	gl_TexCoord[1] = vec4(-u + shear, gl_MultiTexCoord0.y * amplitude, 0.0, 1.0);
+	/* No shear and no mirrored copy: the strip is the reference's own
+	   field, its licks already lean in the art, and anything added on top
+	   moves the material off the geometry that carries its outline. */
+	gl_TexCoord[0] = vec4( u, gl_MultiTexCoord0.y * amplitude, 0.0, 1.0);
+	gl_TexCoord[1] = gl_TexCoord[0];
 
 	v_edge = gl_MultiTexCoord0.y;
 	v_base = base;
