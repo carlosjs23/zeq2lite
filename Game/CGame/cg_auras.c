@@ -941,7 +941,11 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	ent.programParams[12] = config->auraAmplitude;
 	ent.programParams[13] = config->auraWavelength;
 	ent.programParams[14] = config->auraScrollSpeed;
-	ent.programParams[15] = 0.0f;
+	// How much of the flame's motion response to apply, 0 standing to 1 at
+	// full boost. The force direction alone cannot carry this: its screen
+	// projection shrinks toward zero for motion into the screen, which is
+	// exactly when the shape must NOT rotate toward a degenerate direction.
+	ent.programParams[15] = speed / 1000.0f > 1.0f ? 1.0f : speed / 1000.0f;
 
 	trap_R_AddRefEntityToScene( &ent );
 
