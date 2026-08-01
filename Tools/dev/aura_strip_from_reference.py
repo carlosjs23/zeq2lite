@@ -130,6 +130,12 @@ def main():
     ap.add_argument("--centre", default="auto",
                     help="'x,y' ring centre in pixels, or auto for the "
                          "coverage-weighted centroid")
+    ap.add_argument("--inner", default="auto",
+                    help="where V=0 sits, as a fraction of the outer boundary, "
+                         "or auto to use the first coverage along each ray. "
+                         "Reference art usually carries a soft glow inside the "
+                         "flame; the engine has no use for it, because that is "
+                         "where the character stands (default: auto)")
     ap.add_argument("--keep-shape", action="store_true",
                     help="do not normalise; bake the reference's own outline "
                          "into the strip")
@@ -190,8 +196,12 @@ def main():
         lo_s = [0.0] * args.width
         hi_s = [float(reach)] * args.width
     else:
-        lo_s = smooth_ring(inner, args.smooth)
         hi_s = smooth_ring(outer, args.smooth)
+        if args.inner == "auto":
+            lo_s = smooth_ring(inner, args.smooth)
+        else:
+            frac = float(args.inner)
+            lo_s = [r * frac for r in hi_s]
 
     out_rows = []
     for y in range(args.height):
