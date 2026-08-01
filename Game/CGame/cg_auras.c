@@ -843,6 +843,17 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	vec3_t				force;
 	float				speed, strength;
 
+	// The same two gates the convex-hull path applies, in the same order. Both
+	// belong to the aura rather than to either technique, and skipping them
+	// here meant a faded aura still cost an entity every frame and a character
+	// configured without one got it anyway.
+	if(!( state->isActive ||(state->modulate > 0.0f))){
+		return;
+	}
+	if(!config->showAura){
+		return;
+	}
+
 	if(!registered){
 		auraMesh = trap_R_RegisterModel("models/effects/aura.iqm");
 		auraShader = trap_R_RegisterShader("Aura_ScreenSpace");
