@@ -4,7 +4,7 @@
  *
  *   cc -O2 -o aurarender aurarender.c -lz \
  *      -framework OpenGL -DGL_SILENCE_DEPRECATION
- *   ./aurarender aura.iqm aura_vp.glsl aura_fp.glsl out.png [size]
+ *   ./aurarender aura.iqm aura_vp.glsl aura_fp.glsl out.png [size] [strip.raw]
  *
  * Loads the ring mesh the build generated, compiles the very GLSL the game
  * ships, binds the same uniform contract cg_auras.c fills in, draws one
@@ -19,9 +19,12 @@
  * with time - scroll, wobble - is evaluated exactly as the game would at
  * that instant, because it is the same code running.
  *
- * The alpha plane, not the colour: the fragment stage's alpha is its
- * coverage, which is the silhouette. Blending stays off so the value
- * arrives unmixed.
+ * The output is the red plane after compositing over black with the
+ * stage's real blend (GL_ONE, GL_ONE_MINUS_SRC_ALPHA): the fragment stage
+ * emits premultiplied colour, so over black that plane is the aura's
+ * luminance - the thing the reference art actually shows. With a strip
+ * argument, the raw RGBA blob (two u32le then pixels) lands on texture
+ * unit zero with the clampmapT wrap the game stage uses.
  */
 
 #include <math.h>
@@ -275,7 +278,7 @@ static void MatMul(float *out, const float *a, const float *b) {
 /* ------------------------------------------------------------------ main */
 
 int main(int argc, char **argv) {
-	const char *meshPath, *vpPath, *fpPath, *outPath;
+	const char *meshPath, *vpPath, *fpPath, *outPath, *stripPath;
 	int size = 1024;
 	mesh_t mesh;
 	CGLPixelFormatAttribute attrs[] = {
@@ -295,7 +298,7 @@ int main(int argc, char **argv) {
 	int i;
 
 	if (argc < 5) {
-		fprintf(stderr, "usage: aurarender <aura.iqm> <vp.glsl> <fp.glsl> <out.png> [size]\n");
+		fprintf(stderr, "usage: aurarender <aura.iqm> <vp.glsl> <fp.glsl> <out.png> [size] [strip.raw]\n");
 		return 2;
 	}
 	meshPath = argv[1];
@@ -304,6 +307,7 @@ int main(int argc, char **argv) {
 	outPath = argv[4];
 	if (argc > 5)
 		size = atoi(argv[5]);
+	stripPath = argc > 6 ? argv[6] : NULL;
 
 	if (!LoadIQM(meshPath, &mesh))
 		return 1;
@@ -379,10 +383,52 @@ int main(int argc, char **argv) {
 	if (loc >= 0)
 		glUniform4f(loc, 1.0f, 1.0f, 1.0f, 1.0f);
 
+	if (stripPath) {
+		FILE *sf = fopen(stripPath, "rb");
+		unsigned int dims[2];
+		unsigned char *texels;
+		GLuint tex;
+
+		if (!sf) {
+			fprintf(stderr, "aurarender: cannot open %s\n", stripPath);
+			return 1;
+		}
+		if (fread(dims, 4, 2, sf) != 2) {
+			fclose(sf);
+			return 1;
+		}
+		texels = malloc((unsigned long)dims[0] * dims[1] * 4);
+		if (fread(texels, 4, (size_t)dims[0] * dims[1], sf)
+		    != (size_t)dims[0] * dims[1]) {
+			fclose(sf);
+			return 1;
+		}
+		fclose(sf);
+
+		glGenTextures(1, &tex);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		/* clampmapT: S repeats around the ring, T clamps at the tips. */
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, dims[0], dims[1], 0,
+		             GL_RGBA, GL_UNSIGNED_BYTE, texels);
+		free(texels);
+
+		loc = glGetUniformLocation(prog, "u_Texture0");
+		if (loc >= 0)
+			glUniform1i(loc, 0);
+	}
+
 	glViewport(0, 0, size, size);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_CULL_FACE);
-	glDisable(GL_BLEND);	/* alpha is coverage; read it unmixed */
+	/* The stage's own blend: premultiplied over. Over a black clear the
+	   red plane that comes back is the aura's luminance. */
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 
@@ -407,12 +453,12 @@ int main(int argc, char **argv) {
 
 		for (x = 0; x < size; x++)
 			grey[(unsigned long)(size - 1 - i) * size + x] =
-				rgba[((unsigned long)i * size + x) * 4 + 3];
+				rgba[((unsigned long)i * size + x) * 4 + 0];
 	}
 	if (!WriteGreyPNG(outPath, grey, size, size)) {
 		fprintf(stderr, "aurarender: failed writing %s\n", outPath);
 		return 1;
 	}
-	printf("wrote %s (%dx%d alpha)\n", outPath, size, size);
+	printf("wrote %s (%dx%d luminance)\n", outPath, size, size);
 	return 0;
 }

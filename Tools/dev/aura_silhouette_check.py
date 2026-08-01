@@ -43,12 +43,15 @@ def render_mask(root, out_png, size=1024):
         subprocess.run(["cc", "-O2", "-o", binary, source, "-lz",
                         "-framework", "OpenGL", "-DGL_SILENCE_DEPRECATION"],
                        check=True)
-    subprocess.run([binary,
-                    os.path.join(build, "ZEQ2/models/effects/aura.iqm"),
-                    os.path.join(root, "GameData/glsl/aura_vp.glsl"),
-                    os.path.join(root, "GameData/glsl/aura_fp.glsl"),
-                    out_png, str(size)],
-                   check=True, stdout=subprocess.DEVNULL)
+    cmd = [binary,
+           os.path.join(build, "ZEQ2/models/effects/aura.iqm"),
+           os.path.join(root, "GameData/glsl/aura_vp.glsl"),
+           os.path.join(root, "GameData/glsl/aura_fp.glsl"),
+           out_png, str(size)]
+    strip = os.path.join(build, "ZEQ2/effects/aura/auraStrip.raw")
+    if os.path.exists(strip):
+        cmd.append(strip)
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
 
 
 def boundary(path):
@@ -71,18 +74,23 @@ def boundary(path):
             ahi = a if a > ahi else ahi
     chan = 3 if ahi - alo > 32 else 0
 
-    tot = cx = cy = 0.0
+    # Anchor at the thresholded mask's bounding-box centre, not the coverage
+    # centroid: a centroid moves with the mass distribution, so shortening
+    # the base shifts it upward and the measured base radius grows - the
+    # numbers move against the geometry and every pole-level comparison
+    # scrambles. The box centre only moves when the silhouette itself does.
+    x0, x1, y0, y1 = w, -1, h, -1
     for y in range(0, h, 2):
         for x in range(0, w, 2):
-            a = px[y][x][chan]
-            if a > 8:
-                tot += a
-                cx += x * a
-                cy += y * a
-    if tot <= 0.0:
+            if px[y][x][chan] >= THRESHOLD:
+                x0 = x if x < x0 else x0
+                x1 = x if x > x1 else x1
+                y0 = y if y < y0 else y0
+                y1 = y if y > y1 else y1
+    if x1 < 0:
         sys.exit("no coverage in %s" % path)
-    cx /= tot
-    cy /= tot
+    cx = (x0 + x1) * 0.5
+    cy = (y0 + y1) * 0.5
 
     reach = int(math.hypot(max(cx, w - cx), max(cy, h - cy))) + 1
     rs = []
@@ -98,6 +106,112 @@ def boundary(path):
         rs.append(float(hi))
     peak = max(rs)
     return [r / peak for r in rs]
+
+
+def width_profile(path, bands=256):
+    """Left and right half-widths per height band, in units of the shape's
+    own bounding-box height. h = 0 at the silhouette's bottom, 1 at its top;
+    widths are measured from the box's vertical centreline."""
+    w, h, px = decode_png(path)
+    alo = ahi = px[0][0][3]
+    for y in range(0, h, 8):
+        for x in range(0, w, 8):
+            a = px[y][x][3]
+            alo = a if a < alo else alo
+            ahi = a if a > ahi else ahi
+    chan = 3 if ahi - alo > 32 else 0
+
+    x0, x1, y0, y1 = w, -1, h, -1
+    for y in range(h):
+        for x in range(w):
+            if px[y][x][chan] >= THRESHOLD:
+                x0 = x if x < x0 else x0
+                x1 = x if x > x1 else x1
+                y0 = y if y < y0 else y0
+                y1 = y if y > y1 else y1
+    if x1 < 0:
+        sys.exit("no coverage in %s" % path)
+    cx = (x0 + x1) * 0.5
+    span = float(y1 - y0)
+
+    out = []
+    for b in range(bands):
+        yy = y1 - (b + 0.5) / bands * span
+        y = int(yy)
+        left = right = 0.0
+        if 0 <= y < h:
+            for x in range(x0, x1 + 1):
+                if px[y][x][chan] >= THRESHOLD:
+                    if x < cx:
+                        left = max(left, (cx - x) / span)
+                    else:
+                        right = max(right, (x - cx) / span)
+        out.append((left, right))
+    return out
+
+
+def field_stats(ref_path, gen_path, grid=(192, 240), diff_png=None):
+    """Full-field comparison: both images resampled onto a common grid by
+    their silhouette bounding boxes, values as fractions of full scale.
+    This is the 1:1 test - not just where the boundary sits, but every
+    value inside it: interior veil, hot rim, tongue interiors, feather."""
+    fields = []
+    for path in (ref_path, gen_path):
+        w, h, px = decode_png(path)
+        alo = ahi = px[0][0][3]
+        for y in range(0, h, 8):
+            for x in range(0, w, 8):
+                a = px[y][x][3]
+                alo = a if a < alo else alo
+                ahi = a if a > ahi else ahi
+        chan = 3 if ahi - alo > 32 else 0
+        x0, x1, y0, y1 = w, -1, h, -1
+        for y in range(h):
+            for x in range(w):
+                if px[y][x][chan] >= THRESHOLD:
+                    x0 = x if x < x0 else x0
+                    x1 = x if x > x1 else x1
+                    y0 = y if y < y0 else y0
+                    y1 = y if y > y1 else y1
+        if x1 < 0:
+            sys.exit("no coverage in %s" % path)
+        gw, gh = grid
+        f = []
+        for j in range(gh):
+            yy = y0 + (j + 0.5) / gh * (y1 - y0)
+            row = []
+            for i in range(gw):
+                xx = x0 + (i + 0.5) / gw * (x1 - x0)
+                row.append(px[int(yy)][int(xx)][chan] / 255.0)
+            f.append(row)
+        fields.append(f)
+
+    ref, gen = fields
+    gw, gh = grid
+    n = gw * gh
+    diffs = [gen[j][i] - ref[j][i] for j in range(gh) for i in range(gw)]
+    mean = sum(abs(d) for d in diffs) / n
+    rms = math.sqrt(sum(d * d for d in diffs) / n)
+    p95 = sorted(abs(d) for d in diffs)[int(n * 0.95)]
+
+    if diff_png:
+        img = [[min(255, int(abs(gen[j][i] - ref[j][i]) * 512))
+                for i in range(gw)] for j in range(gh)]
+        raw = b""
+        for row in img:
+            raw += b"\x00" + bytes(row)
+
+        def chunk(t, d):
+            c = t + d
+            return struct.pack(">I", len(d)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+
+        png = (b"\x89PNG\r\n\x1a\n"
+               + chunk(b"IHDR", struct.pack(">IIBBBBB", gw, gh, 8, 0, 0, 0, 0))
+               + chunk(b"IDAT", zlib.compress(raw, 9))
+               + chunk(b"IEND", b""))
+        with open(diff_png, "wb") as fh:
+            fh.write(png)
+    return mean, rms, p95
 
 
 def tongue_stats(curve):
@@ -170,7 +284,7 @@ def main():
     root = os.path.dirname(os.path.dirname(here))
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--reference", default=os.path.join(here, "aura_outline.png"))
+    ap.add_argument("--reference", default=os.path.join(here, "aura_reference.png"))
     ap.add_argument("--mask", default=None,
                     help="measure this mask instead of rendering one")
     ap.add_argument("--keep-mask", default=None,
@@ -196,6 +310,31 @@ def main():
 
     rc, rd = tongue_stats(ref)
     gc, gd = tongue_stats(gen)
+
+    fm, fr, fp95 = field_stats(args.reference, mask,
+                               diff_png=(args.plot + ".diff.png") if args.plot else None)
+    print("field     : mean|d| %.4f  rms %.4f  p95 %.4f  (full scale = 1)"
+          % (fm, fr, fp95))
+
+    # Width-per-height profiles need no anchor at all: for every height band
+    # of the thresholded silhouette, the left and right extents, normalised
+    # to the shape's own bounding box. Radial-from-anchor comparisons let
+    # the anchor drift with the mass they measure - shrink the base and the
+    # anchor follows it, so the numbers move against the geometry. Widths
+    # against the box cannot do that.
+    rw = width_profile(args.reference)
+    gw = width_profile(mask)
+    wd = [gw[i][0] - rw[i][0] for i in range(len(rw))]        + [gw[i][1] - rw[i][1] for i in range(len(rw))]
+    wrms = math.sqrt(sum(d * d for d in wd) / len(wd))
+    print("width rms : %.4f  (left+right half-widths, box units)" % wrms)
+    for name, band in (("base", (0.02, 0.18)), ("waist", (0.30, 0.50)),
+                       ("crown", (0.80, 0.98))):
+        lo, hi = band
+        idx = range(int(lo * len(rw)), int(hi * len(rw)))
+        rr = sum(rw[i][0] + rw[i][1] for i in idx) / len(idx)
+        gg = sum(gw[i][0] + gw[i][1] for i in idx) / len(idx)
+        print("  %-5s width: ref %.3f  gen %.3f  (%+.3f)"
+              % (name, rr, gg, gg - rr))
 
     print("reference : %2d tongues, mean depth %.3f" % (rc, rd))
     print("pipeline  : %2d tongues, mean depth %.3f" % (gc, gd))
