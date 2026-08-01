@@ -842,6 +842,7 @@ static void CG_Aura_AddPartBounds( const refEntity_t *part, int frame, const vec
 static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, auraConfig_t *config ){
 	static qhandle_t	auraMesh;
 	static qhandle_t	auraShader;
+	static qhandle_t	glowShader;
 	static qboolean		registered;
 	refEntity_t			ent;
 	vec3_t				mins, maxs;
@@ -862,6 +863,7 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	if(!registered){
 		auraMesh = trap_R_RegisterModel("models/effects/aura.iqm");
 		auraShader = trap_R_RegisterShader("Aura_ScreenSpace");
+		glowShader = trap_R_RegisterShader("Aura_InnerGlow");
 		registered = qtrue;
 	}
 	if(!auraMesh || !auraShader){return;}
@@ -944,6 +946,36 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	ent.programParams[15] = 0.0f;
 
 	trap_R_AddRefEntityToScene( &ent );
+
+	// The interior veil: the ring never covers the space it encloses, and
+	// the reference fills that space with a soft glow rising toward the
+	// flame. A sprite is the only geometry that is always that space's
+	// shape from the one viewpoint that matters.
+	if(glowShader){
+		refEntity_t glow;
+
+		memset( &glow, 0, sizeof(glow) );
+		glow.reType = RT_SPRITE;
+		glow.customShader = glowShader;
+		glow.renderfx = RF_NOSHADOW;
+
+		VectorCopy( state->origin, glow.origin );
+		glow.origin[0] += (mins[0] + maxs[0]) * 0.5f;
+		glow.origin[1] += (mins[1] + maxs[1]) * 0.5f;
+		glow.origin[2] += (mins[2] + maxs[2]) * 0.5f;
+
+		// Sized off the box's tall axis: the veil has to reach the flame's
+		// roots at the crown and base, and the width is covered long before
+		// the height is.
+		glow.radius = (maxs[2] - mins[2]) * 0.52f;
+
+		glow.shaderRGBA[0] = ent.shaderRGBA[0];
+		glow.shaderRGBA[1] = ent.shaderRGBA[1];
+		glow.shaderRGBA[2] = ent.shaderRGBA[2];
+		glow.shaderRGBA[3] = (byte)(state->modulate * 255.0f);
+
+		trap_R_AddRefEntityToScene( &glow );
+	}
 }
 
 void CG_AddAuraToScene( centity_t *player){
