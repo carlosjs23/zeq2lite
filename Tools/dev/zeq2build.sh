@@ -112,10 +112,14 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 	echo "=== generating aura mesh and texture into $ZEQ2_GAME/ ==="
 	mkdir -p "$ZEQ2_BUILD/$ZEQ2_GAME/models/effects" "$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura"
 	python3 "$ZEQ2_ROOT/Tools/dev/make_aura_mesh.py" \
-		"$ZEQ2_BUILD/$ZEQ2_GAME/models/effects/aura.iqm" >/dev/null
-	python3 "$ZEQ2_ROOT/Tools/dev/make_aura_texture.py" \
-		"$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura/auraSpikeStrip.png" >/dev/null
-	echo "ok: aura.iqm and auraSpikeStrip.png generated"
+		"$ZEQ2_BUILD/$ZEQ2_GAME/models/effects/aura.iqm" \
+		--segments 1024 --outline "$ZEQ2_ROOT/Tools/dev/aura_reference.png" >/dev/null
+	python3 "$ZEQ2_ROOT/Tools/dev/aura_band_from_reference.py" \
+		"$ZEQ2_ROOT/Tools/dev/aura_reference.png" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura/auraStrip.png" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura/auraStrip.raw" \
+		--inner-hug 0.05 --segments 1024 --width 2048 --height 512 >/dev/null
+	echo "ok: aura.iqm and auraStrip generated from the reference"
 
 	# The map-selection highlight and the missing-levelshot placeholder, for the
 	# same reason: ui_startserver.c names images the mod directory does not
