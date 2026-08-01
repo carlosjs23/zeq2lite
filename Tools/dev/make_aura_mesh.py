@@ -69,7 +69,7 @@ def read_outline(path, segments):
     its poles, and an angle-uniform coordinate stretches the flame there.
     """
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from png_sheet import decode_png
+    from png_sheet import decode_png, bake_luminance
 
     w, h, px = decode_png(path)
 
@@ -82,6 +82,8 @@ def read_outline(path, segments):
             alo = a if a < alo else alo
             ahi = a if a > ahi else ahi
     chan = 3 if ahi - alo > 32 else 0
+    if chan == 0:
+        bake_luminance(px, w, h)
 
     tot = cx = cy = 0.0
     for y in range(0, h, 2):

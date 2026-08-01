@@ -26,7 +26,7 @@ import tempfile
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from png_sheet import decode_png
+from png_sheet import decode_png, bake_luminance
 
 THRESHOLD = 112          # the bar the reference outline was measured at
 ANGLES = 512
@@ -73,6 +73,8 @@ def boundary(path):
             alo = a if a < alo else alo
             ahi = a if a > ahi else ahi
     chan = 3 if ahi - alo > 32 else 0
+    if chan == 0:
+        bake_luminance(px, w, h)
 
     # Anchor at the thresholded mask's bounding-box centre, not the coverage
     # centroid: a centroid moves with the mass distribution, so shortening
@@ -120,6 +122,8 @@ def width_profile(path, bands=256):
             alo = a if a < alo else alo
             ahi = a if a > ahi else ahi
     chan = 3 if ahi - alo > 32 else 0
+    if chan == 0:
+        bake_luminance(px, w, h)
 
     x0, x1, y0, y1 = w, -1, h, -1
     for y in range(h):
@@ -165,6 +169,8 @@ def field_stats(ref_path, gen_path, grid=(192, 240), diff_png=None):
                 alo = a if a < alo else alo
                 ahi = a if a > ahi else ahi
         chan = 3 if ahi - alo > 32 else 0
+        if chan == 0:
+            bake_luminance(px, w, h)
         x0, x1, y0, y1 = w, -1, h, -1
         for y in range(h):
             for x in range(w):

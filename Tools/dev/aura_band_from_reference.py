@@ -9,9 +9,11 @@ the inner ring to the outline. A fragment stage that samples this strip at
 (u, t) therefore reconstructs the reference field almost by construction -
 the mesh supplies the shape, the strip supplies every value inside it.
 
-The strip stores the reference's luminance in alpha with RGB solid white:
-the shaders' contract keeps colour in the entity and coverage in alpha, and
-on the black-shot reference luminance IS the visible truth.
+The strip stores the art's own colour over black in RGB and its coverage in
+alpha. A greyscale reference bakes RGB equal to its coverage, which the
+fragment stage multiplies exactly where it once multiplied solid white - so
+colourless art keeps the old behaviour bit for bit, and a coloured reference
+carries its own gradient, with auraColor as a multiplier on top.
 
 Writes a PNG for the game data and a raw RGBA blob (width, height as u32le,
 then pixels) for aurarender.c, which has a zlib but not a PNG reader.
@@ -30,7 +32,7 @@ import sys
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from png_sheet import decode_png
+from png_sheet import decode_png, bake_luminance
 from make_aura_mesh import read_outline
 
 def bilinear(px, w, h, chan, x, y):
@@ -75,6 +77,8 @@ def main():
             alo = a if a < alo else alo
             ahi = a if a > ahi else ahi
     chan = 3 if ahi - alo > 32 else 0
+    if chan == 0:
+        bake_luminance(px, w, h)
 
     # The outline and its arc table, exactly as the mesh bake computes them,
     # plus the centre the rays were cast from.
@@ -127,6 +131,22 @@ def main():
     # the mean IS the field there.
     CENTRE_BLEND = 0.10
 
+    # Each sample is (r, g, b, a): the art's own colour over black, and the
+    # coverage the blend attenuates by. A greyscale reference bakes rgb equal
+    # to its luminance, which the fragment stage multiplies exactly where it
+    # used to multiply white - so colourless art reproduces the old maths
+    # bit for bit, and colour appears only when the reference carries it.
+    def sample(X, Y):
+        if chan == 3:
+            a = bilinear(px, w, h, 3, X, Y)
+            return (bilinear(px, w, h, 0, X, Y) * a,
+                    bilinear(px, w, h, 1, X, Y) * a,
+                    bilinear(px, w, h, 2, X, Y) * a, a)
+        r = bilinear(px, w, h, 0, X, Y)
+        g = bilinear(px, w, h, 1, X, Y)
+        b = bilinear(px, w, h, 2, X, Y)
+        return (r, g, b, (r + g + b) / 3.0)
+
     base = []
     for j in range(args.height):
         t = (j + 0.5) / args.height
@@ -142,16 +162,17 @@ def main():
             r = rb * (args.inner_hug + (1.0 - args.inner_hug) * t)
             X = cx + math.cos(th) * r
             Y = cy - math.sin(th) * r
-            vals.append(bilinear(px, w, h, chan, X, Y))
+            vals.append(sample(X, Y))
         frac = args.inner_hug + (1.0 - args.inner_hug) * t
         if frac < CENTRE_BLEND:
-            mean = sum(vals) / len(vals)
+            means = tuple(sum(v[k] for v in vals) / len(vals) for k in range(4))
             keep = frac / CENTRE_BLEND
-            vals = [mean + (v - mean) * keep for v in vals]
+            vals = [tuple(means[k] + (v[k] - means[k]) * keep for k in range(4))
+                    for v in vals]
         base.append(vals)
 
     def band_sample(fu, ft):
-        """Bilinear read of the base band; u wraps, t clamps."""
+        """Bilinear read of the base band (all four channels); u wraps, t clamps."""
         H, W = args.height, args.width
         fu = (fu % 1.0) * W - 0.5
         ft = min(max(ft * H - 0.5, 0.0), H - 1.0)
@@ -161,8 +182,10 @@ def main():
         r0 = int(ft)
         r1 = min(r0 + 1, H - 1)
         frt = ft - r0
-        return ((base[r0][c0] * (1 - fru) + base[r0][c1] * fru) * (1 - frt)
-              + (base[r1][c0] * (1 - fru) + base[r1][c1] * fru) * frt)
+        a = base[r0][c0]; b = base[r0][c1]
+        c = base[r1][c0]; d = base[r1][c1]
+        return tuple((a[k] * (1 - fru) + b[k] * fru) * (1 - frt)
+                   + (c[k] * (1 - fru) + d[k] * fru) * frt for k in range(4))
 
     # The flipbook variants are the same band with the licks nudged: a smooth
     # periodic displacement in u and a length jitter in t, both scaled by t so
@@ -196,7 +219,8 @@ def main():
         for vals in f:
             row = bytearray()
             for v in vals:
-                row += bytes((255, 255, 255, max(0, min(255, int(round(v * 255))))))
+                row += bytes(max(0, min(255, int(round(v[k] * 255))))
+                             for k in range(4))
             rows.append(bytes(row))
 
     raw = b""
