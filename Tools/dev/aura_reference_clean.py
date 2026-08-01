@@ -134,8 +134,8 @@ def main():
 
     # The checker ghosts through translucent neutral cores; average it away
     # over roughly its own period, only there.
-    core = (chroma < args.neutral + 4) & (outlum > 40)
-    core = ndimage.binary_erosion(core, iterations=6)
+    core = (chroma < args.neutral + 4) & ~bg & (outlum > 12)
+    core = ndimage.binary_erosion(core, iterations=3)
     if core.any():
         if args.color:
             for k in range(3):

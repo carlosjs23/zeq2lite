@@ -32,7 +32,7 @@ import sys
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from png_sheet import decode_png, bake_luminance
+from png_sheet import decode_png, bake_luminance_alpha
 from make_aura_mesh import read_outline
 
 def bilinear(px, w, h, chan, x, y):
@@ -76,9 +76,13 @@ def main():
             a = px[y][x][3]
             alo = a if a < alo else alo
             ahi = a if a > ahi else ahi
-    chan = 3 if ahi - alo > 32 else 0
-    if chan == 0:
-        bake_luminance(px, w, h)
+    # On-black art gets its luminance folded into the flat alpha slot, so
+    # every reader below uses channel 3 for brightness while the colour
+    # channels stay what the art painted.
+    on_black = ahi - alo <= 32
+    if on_black:
+        bake_luminance_alpha(px, w, h)
+    chan = 3
 
     # The outline and its arc table, exactly as the mesh bake computes them,
     # plus the centre the rays were cast from.
@@ -137,15 +141,20 @@ def main():
     # used to multiply white - so colourless art reproduces the old maths
     # bit for bit, and colour appears only when the reference carries it.
     def sample(X, Y):
-        if chan == 3:
-            a = bilinear(px, w, h, 3, X, Y)
-            return (bilinear(px, w, h, 0, X, Y) * a,
-                    bilinear(px, w, h, 1, X, Y) * a,
-                    bilinear(px, w, h, 2, X, Y) * a, a)
         r = bilinear(px, w, h, 0, X, Y)
         g = bilinear(px, w, h, 1, X, Y)
         b = bilinear(px, w, h, 2, X, Y)
-        return (r, g, b, (r + g + b) / 3.0)
+        if not on_black:
+            # Real alpha: composite the colour over black, coverage is the
+            # art's own alpha.
+            a = bilinear(px, w, h, 3, X, Y)
+            return (r * a, g * a, b * a, a)
+        # On-black art is already "over black". Coverage is the brightest
+        # channel, not the mean: a saturated flame is opaque where it is
+        # vivid, and the mean read solid orange as two-thirds transparent,
+        # letting the scene bleed through. Equal channels - every greyscale
+        # reference - are untouched either way.
+        return (r, g, b, max(r, g, b))
 
     base = []
     for j in range(args.height):
