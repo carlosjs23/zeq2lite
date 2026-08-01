@@ -37,19 +37,32 @@ varying float v_wraps;
 /* Strand cells per wrap. Hair is the highest frequency in the reference by
    an order of magnitude - it has to stay far above the tongue count or the
    strands read as more tongues rather than as texture on them. */
-#define HAIR_FREQ    331.0
+#define HAIR_FREQ    479.0
+
+/* The two warp fields, in cells per wrap. CLUSTER_FREQ shifts tongues
+   sideways so they bunch and spread instead of marching evenly; LEAN_FREQ
+   varies how hard each region's tongues lean as they rise. Both are the
+   domain-warping idea: displace the coordinate with one noise before
+   evaluating another, which is what turns a lattice into something organic. */
+#define CLUSTER_FREQ 3.0
+#define LEAN_FREQ    5.0
+
+/* Hair length clusters, in cells per wrap: a slow mask over the needle
+   lengths so the hair comes in brushy patches rather than uniform fuzz. */
+#define MED_FREQ     37.0
 
 /* Where the solid body ends and the tongue zone begins, as a fraction of the
-   band. The reference holds its flame solid for about the inner third and
-   spends the rest on tongues and hair. */
-#define TONGUE_ROOT  0.28
+   band. Kept thin: an unbroken white expanse is the one thing the flame must
+   not have, so almost the whole band belongs to the tongues and the clefts
+   between them, and the solid ribbon only seals the ring at the body. */
+#define TONGUE_ROOT  0.10
 
 /* Deepest a gap between tongues can cut into the tongue zone, and the
    ceiling the tallest tongue body reaches; the wisps carry on above it. The
    floor keeps the ring visibly closed - a gap that reaches the body breaks
    the silhouette into petals. */
-#define TONGUE_FLOOR 0.10
-#define TONGUE_CEIL  0.72
+#define TONGUE_FLOOR 0.05
+#define TONGUE_CEIL  0.78
 
 /* Tint constants, unchanged from the sampled version: the tips deepen into
    the character's own colour, the core runs hotter than the body, and the
@@ -90,11 +103,21 @@ float flame( float u, float t ){
 	float P  = TONGUE_FREQ * cells;
 	float HP = HAIR_FREQ * cells;
 
+	/* Domain warp, before any lattice is consulted: a slow field bunches
+	   the tongues sideways so they cluster instead of marching evenly, and
+	   a second slow field leans each region's tongues as they rise. The
+	   lean term grows with x, which is what lets a tongue overhang its own
+	   base - the one thing a height field can never do. */
+	float xo   = max( (t - TONGUE_ROOT) / (1.0 - TONGUE_ROOT), 0.0);
+	float dw   = (vnoise( u * CLUSTER_FREQ, CLUSTER_FREQ * cells) - 0.5) * 2.4;
+	float lean = (vnoise( u * LEAN_FREQ + 3.1, LEAN_FREQ * cells) - 0.5) * 2.2;
+	float warp = dw + lean * xo;
+
 	/* One triangular tongue per cell, its peak height and position drawn
 	   from the cell's hash. A triangle rather than smooth noise because
 	   that is the shape the reference draws: straight-sided tongues meeting
 	   in sharp clefts, not rolling waves. */
-	float s    = u * TONGUE_FREQ;
+	float s    = u * TONGUE_FREQ + warp;
 	float cell = floor(s);
 	float f    = s - cell;
 	float hgt  = 0.35 + 0.65 * vhash( cell, P);
@@ -106,7 +129,7 @@ float flame( float u, float t ){
 	   as a max. One tongue per cell alone reads as a picket fence - every
 	   cleft reaching the same depth at the same spacing; the overlap breaks
 	   the metre. */
-	float s2   = u * TONGUE_FREQ * 0.5 + 0.37;
+	float s2   = s * 0.5 + 0.37;
 	float c2   = floor(s2);
 	float f2   = s2 - c2;
 	float hgt2 = 0.5 + 0.5 * vhash( c2 + 101.0, P * 0.5);
@@ -117,36 +140,51 @@ float flame( float u, float t ){
 	/* Position across the tongue zone; negative is inside the solid body. */
 	float x = (t - TONGUE_ROOT) / (1.0 - TONGUE_ROOT);
 
-	/* The strand field, shared by everything below so the teeth on the
-	   boundary, the streaks inside it and the wisps beyond it all line up
-	   into single continuous hairs. */
-	float strand = vnoise( u * HAIR_FREQ, HP);
-	float teeth  = strand * strand;
+	/* Hair as discrete needles: one per strand cell. The length is the
+	   cell's raw hash rather than smoothed noise - neighbouring needles
+	   have to disagree, or the fringe blurs into a soft gradient - and the
+	   thin triangular profile is what makes each one a distinct filament.
+	   The needle coordinate carries the same warp as the tongues, scaled
+	   to its own frequency, so every hair stays parallel to the tongue it
+	   belongs to. */
+	float sh   = u * HAIR_FREQ + warp * (HAIR_FREQ / TONGUE_FREQ);
+	float hc   = floor(sh);
+	float hf   = sh - hc;
+	float hlen = vhash( hc + 29.0, HP);
+	float med  = vnoise( u * MED_FREQ + 11.0, MED_FREQ * cells);
+	hlen *= 0.35 + 0.65 * med;
+	float prof = smoothstep( 0.20, 0.55, 1.0 - abs( hf - 0.5) * 2.0);
 
-	/* The tongue body: opaque inside the boundary, with the boundary
-	   itself lightly serrated at strand frequency. The solidity is the
-	   point - the reference's flame covers what is behind it, and a
-	   translucent band reads as fog, not ki. */
-	float nh   = n + 0.12 * teeth;
-	float body = 1.0 - smoothstep( nh - 0.02, nh + 0.02, x);
+	/* The tongue body: opaque inside the boundary, its edge serrated by
+	   the needles' roots. The solidity is the point - the reference's
+	   flame covers what is behind it, and a translucent band reads as
+	   fog, not ki. */
+	float nh   = n + 0.09 * hlen * prof;
+	float body = 1.0 - smoothstep( nh - 0.015, nh + 0.015, x);
 
-	/* Shallow streaks just inside the rim, where the hair runs down into
-	   the tongue it belongs to; without them the wisps look glued on. */
-	float rim = smoothstep( nh - 0.20, nh, x);
-	body *= 1.0 - 0.32 * rim * (1.0 - smoothstep( 0.20, 0.75, strand));
+	/* Rim striations: thin dark lines between strands near the edge,
+	   where the hair runs down into the tongue it belongs to; without
+	   them the needles look glued on. */
+	float rim = smoothstep( nh - 0.25, nh, x);
+	body *= 1.0 - 0.30 * rim * (1.0 - prof * smoothstep( 0.2, 0.8, hlen));
 
-	/* Wisps: strands carrying on past the edge, fading over their own
-	   reach, longest on the tall tongues. */
-	float reach = (0.08 + 0.50 * teeth) * (0.30 + 0.70 * n);
+	/* Needles past the edge, fading over their own reach. */
+	float reach = (0.05 + 0.55 * hlen * hlen) * (0.30 + 0.70 * n);
 	float over  = (x - nh) / max( reach, 0.001);
-	float wisp  = smoothstep( 0.30, 0.85, strand)
-	            * pow( clamp( 1.0 - over, 0.0, 1.0), 1.5);
+	float wisp  = prof * smoothstep( 0.25, 0.75, hlen)
+	            * pow( clamp( 1.0 - over, 0.0, 1.0), 1.2);
 	wisp *= step( nh, x);
+
+	/* The flame is a veil, not a wall: thin toward the body and swelling
+	   to full strength approaching the rim, so the scene ghosts through
+	   the interior and the tongues carry the brightness. The reference
+	   in situ shows rock through the crown's heart. */
+	float depth = mix( 0.55, 1.0, smoothstep( nh - 0.55, nh - 0.05, x));
 
 	/* The inner rows fade in rather than starting solid: the inner ring is
 	   a closed loop of geometry, and any coverage on it draws that loop as
 	   a hard oval over the character. */
-	return max( body, wisp) * smoothstep( 0.0, 0.06, t);
+	return max( body, wisp) * depth * smoothstep( 0.0, 0.06, t);
 }
 
 void main(void) {
