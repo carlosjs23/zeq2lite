@@ -129,9 +129,11 @@ vanish at time zero so the measured rest frame stays the reference.
 4. Duplicate the measurement loop with `--reference` pointed at the new art
    and converge: silhouette first, then the field, visually diagnosing
    between runs.
-5. Colour stays free: the strip is white-with-alpha and `auraColor` tints it,
-   so one strip serves any hue; only a different *shape or field* needs a new
-   bake.
+5. Colour: the strip carries the art's own colours over black, and
+   `auraColor` multiplies them - white shows the art as painted, a tint
+   shifts it. A greyscale reference behaves exactly as the old white-strip
+   system did, so recolouring a colourless aura still needs no rebake; use
+   `aura_reference_clean.py --color` to keep a coloured reference's hues.
 
 ## Traps (all hit once already)
 

@@ -69,9 +69,12 @@ varying float v_wraps;
    from bleeding one frame's tips into the next frame's body. */
 #define FRAME_ROWS   512.0
 
-/* Coverage of the flame at ring position u (already in strip S units) and
-   band position t (0 at the inner ring, 1 at the reference outline). */
-float flame( float u, float t ){
+/* The flame at ring position u (already in strip S units) and band position
+   t (0 at the inner ring, 1 at the reference outline): the art's own colour
+   over black in rgb, coverage in alpha. A greyscale reference bakes rgb
+   equal to its coverage, so colourless art multiplies through the tint
+   exactly as the old white-rgb strip did. */
+vec4 flame( float u, float t ){
 	/* The strip is the reference's own band, unwrapped over exactly one
 	   turn, so it tiles by construction and is sampled straight. */
 	float frame = mod( floor( u_Time * FLICKER_FPS), STRIP_FRAMES);
@@ -79,14 +82,11 @@ float flame( float u, float t ){
 	   whole field measurably - clamped only within the half texel at each
 	   frame edge that bilinear would blend into the neighbouring frame. */
 	float tIn   = clamp( t, 0.5 / FRAME_ROWS, 1.0 - 0.5 / FRAME_ROWS);
-	float strand = texture2D( u_Texture0, vec2( u, (frame + tIn) / STRIP_FRAMES)).a;
 
 	/* No mist, no boost, and no inner fade on top: the strip already
 	   carries the reference's interior glow and its hot rim - anything
-	   added here is a departure from the art. The fade guarded the inner
-	   ring back when it was a visible loop; at INNER_HUG 0 the ring is a
-	   point and the fade only dug a dark dip the reference does not have. */
-	return strand;
+	   added here is a departure from the art. */
+	return texture2D( u_Texture0, vec2( u, (frame + tIn) / STRIP_FRAMES));
 }
 
 
@@ -99,7 +99,8 @@ void main(void) {
 	float uu = gl_TexCoord[0].s / max( gl_TexCoord[0].q, 0.0001);
 	float tt = gl_TexCoord[1].t / max( gl_TexCoord[1].q, 0.0001);
 
-	float alpha = flame( uu, tt) * u_EntityColor.a;
+	vec4  strand = flame( uu, tt);
+	float alpha  = strand.a * u_EntityColor.a;
 
 	/* The tint pipeline is unchanged from the sampled version. The tips run
 	   cool by deepening into the character's own colour; a fixed target is a
@@ -118,5 +119,9 @@ void main(void) {
 	float boost = mix( CORE_GLOW, 1.0, smoothstep( 0.0, GLOW_END, v_edge));
 	boost += BASE_GLOW * v_base * (1.0 - smoothstep( 0.0, 0.7, v_edge));
 
-	gl_FragColor = vec4( tint * alpha * boost, alpha);
+	/* The strip's rgb is the art over black - premultiplied by its own
+	   coverage - so it takes the place white-times-alpha held: colourless
+	   strips reproduce the old output exactly, coloured strips carry the
+	   art's own gradient, and the entity tint multiplies either. */
+	gl_FragColor = vec4( strand.rgb * u_EntityColor.a * tint * boost, alpha);
 }
