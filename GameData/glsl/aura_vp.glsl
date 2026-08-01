@@ -295,6 +295,17 @@ void main(void) {
 	   the hardware's 1/w exactly. */
 	float wClip = gl_Position.w;
 
+	/* The ring's quads are trapezoids - the inner edge is shorter than the
+	   outer, and zero-length where the fan meets the centre - so an affine
+	   u across each triangle kinks at every quad boundary and draws faint
+	   radial hairlines through the interior. Riding u on a q proportional
+	   to the vertex's own fan radius makes the interpolation projective:
+	   the coordinate fans angularly inside each wedge, and neighbouring
+	   wedges agree along their shared edges. t stays on plain w in the
+	   second set - dividing it by the radius would collapse it at the
+	   centre. */
+	float fanQ = max(rr, FORCE_EPSILON);
+
 	/* Sheared with distance out, so every lick leans. The same sign on both
 	   copies: the mirrored one already reverses U, so an equal shear comes out
 	   leaning the opposite way on the far side of the aura - which is what is
@@ -303,8 +314,8 @@ void main(void) {
 	/* No shear and no mirrored copy: the strip is the reference's own
 	   field, its licks already lean in the art, and anything added on top
 	   moves the material off the geometry that carries its outline. */
-	gl_TexCoord[0] = vec4( u * wClip, gl_MultiTexCoord0.y * amplitude * wClip, 0.0, wClip);
-	gl_TexCoord[1] = gl_TexCoord[0];
+	gl_TexCoord[0] = vec4( u * wClip * fanQ, 0.0, 0.0, wClip * fanQ);
+	gl_TexCoord[1] = vec4( 0.0, gl_MultiTexCoord0.y * amplitude * wClip, 0.0, wClip);
 
 	v_edge = gl_MultiTexCoord0.y;
 	v_base = base;
