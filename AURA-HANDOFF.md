@@ -63,49 +63,51 @@ cd <worktree> && /tmp/aura-loop/measure.sh
 `python3 Tools/dev/aura_silhouette_check.py --keep-mask /tmp/aura-loop/mask.png --plot /tmp/aura-loop/plot.png`
 plus a pole-radius printout; recreate as convenient.)
 
-Regenerate after changing the bake or unwrap:
+Regenerate after changing the bake or unwrap - **the aura section of
+`Tools/dev/zeq2build.sh` is the source of truth for these arguments**; an
+earlier version of this file carried stale ones and cost a session an hour:
 ```
-python3 Tools/dev/make_aura_mesh.py Build/Release-darwin-arm/ZEQ2/models/effects/aura.iqm --segments 256 --outline Tools/dev/aura_reference.png
-python3 Tools/dev/aura_band_from_reference.py Tools/dev/aura_reference.png Build/Release-darwin-arm/ZEQ2/effects/aura/auraStrip.png Build/Release-darwin-arm/ZEQ2/effects/aura/auraStrip.raw --inner-hug 0.0
+python3 Tools/dev/make_aura_mesh.py Build/Release-darwin-arm/ZEQ2/models/effects/aura.iqm --segments 1024 --outline Tools/dev/aura_reference.png
+python3 Tools/dev/aura_band_from_reference.py Tools/dev/aura_reference.png Build/Release-darwin-arm/ZEQ2/effects/aura/auraStrip.png Build/Release-darwin-arm/ZEQ2/effects/aura/auraStrip.raw --inner-hug 0.05 --segments 1024 --width 2048 --height 512
 ```
-(`--inner-hug` must equal `INNER_HUG` in aura_vp.glsl.)
+(`--inner-hug` must equal `INNER_HUG` in aura_vp.glsl - both are 0.05.)
 
-## Metrics right now (CONVERGED)
+## Metrics right now
 
 ```
-field     : mean|d| 0.0570  rms 0.1373  p95 0.3333   (edge-AA noise mostly)
-width rms : 0.0209 (base +0.001, waist -0.001, crown +0.003)
-silhouette: rms 0.0267  bias +0.0121  worst -0.1372
-tongues   : 52 vs ref 54; depth 0.116 vs 0.120
+field     : mean|d| 0.0568  rms 0.1379  p95 0.3333   (edge-AA noise mostly)
+width rms : 0.0178 (base +0.001, waist +0.001, crown -0.002)
+silhouette: rms 0.0249  bias +0.0041  worst -0.1511
+tongues   : 60 vs ref 54; depth 0.117 vs 0.120
 ```
-The two big unlocks were removing SHEAR (authored in strip-repeat units;
-at one repeat per turn it rotated the field 40 degrees off the geometry)
-and removing the wobble harmonics (static +-7.5% outline warp at t=0).
-Known nits: a 1px hairline at the wrap seam on the +X flank; the small
-centre hole (INNER_HUG 0.05, character covers it in game).
+The big unlocks so far: removing SHEAR (authored in strip-repeat units; at
+one repeat per turn it rotated the field 40 degrees off the geometry),
+removing the wobble harmonics (static +-7.5% outline warp at t=0), and
+dropping the outline bake's three-tap smooth (it halved one-segment needle
+tips and the peak normalisation then inflated every other radius +1.2%).
+
+The vertex program now reprojects every vertex into the world along its own
+view ray - onto the player's view-facing plane, folded onto the feet plane
+where that is nearer - so the character occludes the aura cleanly, the
+skirt lies across the floor, and real occluders occlude. The texture rides
+clip w so the field still interpolates in screen space; both in-game
+questions from earlier rounds (veil over the player, floor swallowing the
+skirt) are answered by it. Verified in-game: base and SSJ2-config shots.
 
 ## Immediate next steps
 
-1. **Look at `/tmp/aura-loop/mask.png`** (Read it as an image). The field
-   mean barely moved when INNER_HUG went to 0 — suspects: the fp's inner
-   fade (`smoothstep(0.0, 0.04, t)`), the inner ring collapapsing to a point
-   (all inner verts at r=0 → check the disc actually fills), the field
-   metric's bbox alignment, or the strip's t=0 rows. Diagnose visually
-   FIRST; earlier rounds wasted iterations on numbers that moved against
-   geometry because of measurement artifacts.
-2. Drive `field mean|d|` toward ~0.02: region-by-region (the checker writes
-   a diff PNG next to --plot — read it; bright = mismatch).
-3. Then silhouette worst (−0.30 dropout — find its angle, likely tip/base
-   seam or a quantization notch).
-4. When the field converges: run ONE in-game check via
-   `Tools/dev/zeq2aura.sh --model goku --range 170 --crop none --out <png>`
-   (allowed then — the loop itself stays engine-free), because two in-game
-   questions are still open: the character stands INSIDE the now-full disc
-   (the band may wash over the player depending on depth sorting — vp uses
-   nearest-corner depth, sheet draws in front), and the veil sprite in
-   cg_auras.c (radius 0.34) may now be redundant since the strip carries
+1. **The inner player space** (user-directed): iterate how the interior
+   veil behaves in the region the character occupies - density of the
+   inner rows, the INNER_HUG hole, the fp inner fade, and whether the veil
+   sprite in cg_auras.c (radius 0.34) is redundant now the strip carries
    the interior.
-5. Commit in repo style; squash iteration; no trailers.
+2. Drive `field mean|d|` toward ~0.02. Diff mass localised so far: the base
+   skirt's two wings are ~2x the reference's brightness in the bottom rows
+   (233-235 of 240), plus the wrap-seam hairline. Diagnose visually FIRST -
+   the diff PNG next to --plot is the map (bright = mismatch).
+3. Then silhouette worst (-0.15 dropout - find its angle; likely a
+   quantization notch, the smooth is gone now).
+4. Commit in repo style; squash iteration; no trailers.
 
 ## Traps already hit — do not re-hit
 
