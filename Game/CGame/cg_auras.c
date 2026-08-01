@@ -1294,10 +1294,12 @@ void CG_Aura_DrawInnerSpike (vec3_t start, vec3_t end, float width, centity_t *p
 	verts[3].st[0] = 1;
 	verts[3].st[1] = 1;
 	
+	// auraColor is RGB only; alpha is not configurable for the inner spike.
 	for (i = 0;i < 4;i++){
-		for (j = 0;j < 4;j++){
+		for (j = 0;j < 3;j++){
 			verts[i].modulate[j] = 255 * config->auraColor[j];
 		}
+		verts[i].modulate[3] = 255;
 	}
 
 	trap_R_AddPolyToScene( config->auraShader, 4, verts);
