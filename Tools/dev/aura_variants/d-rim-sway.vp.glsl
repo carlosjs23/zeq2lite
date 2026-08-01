@@ -160,17 +160,19 @@ void main(void) {
 	   which is what gravity would give and keeps the tear-drop upright. */
 	forceDir = forceLen > FORCE_EPSILON ? forceDir / forceLen : vec2(0.0, -1.0);
 
-	/* The aura streams *against* the force: gravity pulling down makes it
-	   flare upward, and running forward trails it behind. But the response
-	   is proportional, not a hard rotation: it takes both speed (motion)
-	   and a screen-visible direction (lateral) before the shape leaves its
+	/* The crown follows the head. Standing, the head is up and the tear is
+	   upright; flying, the model pitches head-first into the motion, so the
+	   tip leads along the velocity and the skirt trails - the aura wraps
+	   the body rather than streaming off it. The response is proportional,
+	   not a hard rotation: it takes both speed (motion) and a
+	   screen-visible direction (lateral) before the shape leaves its
 	   upright rest pose. Flying into or out of the screen projects to a
 	   near-zero direction, and rotating the whole silhouette toward that
 	   noise is what used to shapelessly spin the flying aura. */
 	float lateral = clamp(forceLen / LATERAL_SAT, 0.0, 1.0);
 	float deform  = motion * lateral;
 
-	vec2 flowDir = normalize(mix(vec2(0.0, 1.0), -forceDir, deform) + vec2(FORCE_EPSILON, 0.0));
+	vec2 flowDir = normalize(mix(vec2(0.0, 1.0), forceDir, deform) + vec2(FORCE_EPSILON, 0.0));
 
 	/* The mesh carries the reference outline: gl_Normal.z is the boundary
 	   radius at this vertex's authored angle, crown-normalised, read off the
