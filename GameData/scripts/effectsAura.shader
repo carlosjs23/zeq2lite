@@ -82,12 +82,10 @@ Aura_ScreenSpace
 {
 	cull none
 	{
-		// A tiling spike strip, not the single-blob auraSpike.png: this
-		// technique wraps one texture around the whole ring and scrolls
-		// it, so it has to repeat seamlessly along U.
-		// clampmapT: S repeats around the ring, T clamps so the
-		// transparent spike tips never blend into the opaque body.
-		clampmapT effects/aura/auraSpikeStrip.png
+		// The flame is computed in the fragment program; no art is
+		// sampled. The stage still has to bind something, so it binds
+		// the built-in white image.
+		map $whiteimage
 		program aura
 		vertexProgram glsl/aura_vp.glsl
 		fragmentProgram glsl/aura_fp.glsl

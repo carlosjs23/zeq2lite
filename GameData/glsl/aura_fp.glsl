@@ -3,131 +3,173 @@
  * aura_fp.glsl
  * screen-space aura fragment program
  *
- * The vertex stage emits the spike texture twice - once scrolling each way -
- * because the texture has to flow toward the tip on both sides of the aura and
- * the direction therefore has to reverse somewhere. Crossfading the two copies
- * across that reversal hides the seam a hard mirror would leave, at the tip
- * where the spikes converge and at the base where nothing else would cover it.
+ * The flame is computed here, not sampled. A texture strip was tried and could
+ * not reach the reference art: a strip is a height field along the band, so a
+ * tongue can never be wider than its base, its interiors arrive semi-opaque
+ * from however the art was filtered, and every level of detail question turns
+ * into a mip question. What the reference actually shows is three separable
+ * things - an opaque white body, a rim broken into bold tongues, and hair-fine
+ * strands leaving the tongue edges - and each of those is cheaper to state as
+ * a function of ring position than to paint.
+ *
+ * The vertex stage still emits the coordinate twice, once scrolling each way,
+ * because the flame has to flow toward the tip on both sides and the direction
+ * must reverse somewhere. Crossfading the two evaluations hides that seam.
  */
 
-uniform sampler2D u_Texture0;
 uniform vec4 u_EntityColor;
+uniform float u_Time;
 
 varying float v_seamBlend;
 varying float v_edge;
-varying float v_texBias;
 varying float v_base;
+/* Wraps of the pattern around the ring, from the vertex stage. The noise
+   lattice is hashed modulo its cell count per ring, and that count is
+   frequency * wraps: without it the lattice does not close where the ring
+   does, and the flame tears open along one radius. */
+varying float v_wraps;
 
-/* Where along the ring the tip tint starts taking over. The dense body has to
-   stay the entity's own colour or the aura stops reading as that character's;
-   only the thinning outer spikes cool off. */
+/* Tongue cells per wrap. One tongue per cell, so at the default two wraps
+   the aura carries about twice this many tongues - which is what the
+   reference carries around its full turn. */
+#define TONGUE_FREQ  24.0
+
+/* Strand cells per wrap. Hair is the highest frequency in the reference by
+   an order of magnitude - it has to stay far above the tongue count or the
+   strands read as more tongues rather than as texture on them. */
+#define HAIR_FREQ    331.0
+
+/* Where the solid body ends and the tongue zone begins, as a fraction of the
+   band. The reference holds its flame solid for about the inner third and
+   spends the rest on tongues and hair. */
+#define TONGUE_ROOT  0.28
+
+/* Deepest a gap between tongues can cut into the tongue zone, and the
+   ceiling the tallest tongue body reaches; the wisps carry on above it. The
+   floor keeps the ring visibly closed - a gap that reaches the body breaks
+   the silhouette into petals. */
+#define TONGUE_FLOOR 0.10
+#define TONGUE_CEIL  0.72
+
+/* Tint constants, unchanged from the sampled version: the tips deepen into
+   the character's own colour, the core runs hotter than the body, and the
+   base carries an extra glow where the ki meets the ground. */
 #define TIP_START 0.35
-
-/* How far the tips deepen. The shift used to be toward a fixed blue, and that
-   is wrong for the material: a Super Saiyan aura is one hue from the body to
-   the ends of its spikes, and the only gradient in it is white core to
-   saturated gold. A fixed target cannot do that, because it is a different
-   hue for every character - plausible on gold, magenta on red, and it turned
-   the whole crown cyan, which is the single thing that most gave the effect
-   away against reference art.
-
-   The tips now deepen into the character's *own* colour instead. That keeps a
-   temperature gradient - the ends read cooler than the core because they are
-   more saturated and less white - without inventing a hue that belongs to
-   nobody. */
 #define TIP_SHIFT 0.85
-
-/* Where the white-hot core has faded back to the entity's own colour. Sits
-   just outside the strip's alpha peak, so the whitest pixels are also the
-   densest ones and the core reads as a single hot band rather than as a pale
-   wash over the whole body. */
-#define CORE_END 0.20
-
-/* How far the core is pushed toward white. Kept low: the animated reference
-   has no white sheath around the body at all - the flame is out at the edges
-   and the space the character occupies is left open, because the character is
-   lit on their own cel rather than by the aura. A strong core reads as the
-   aura being wrapped around them instead of standing behind them. */
+#define CORE_END  0.20
 #define CORE_SHIFT 0.25
-
-/* How far above alpha-over the core is driven, and where it settles back. Only
-   the core glows: pushing the whole aura past unity is just the additive
-   version again, hue and all. */
 #define CORE_GLOW 1.35
 #define GLOW_END  0.45
-
-/* Extra glow where the aura gathers under the character. Rides on top of the
-   core term rather than replacing it, so the point under the feet reads as the
-   same white-hot material as the core and not as a second light source. */
 #define BASE_GLOW 1.5
 
+/* Not the folkloric fract(sin(x) * 43758.5453): that one needs sin to be
+   accurate at arguments in the tens of thousands, and on this hardware it is
+   not - the hash flattens and the whole flame comes out as gentle waves.
+   Every intermediate here stays small enough to keep its precision. */
+float vhash( float i, float period ){
+	i = mod( i, period);
+	i = fract( i * 0.1031);
+	i *= i + 33.33;
+	i *= i + i;
+	return fract( i);
+}
+
+/* One-dimensional value noise on an integer lattice that wraps at `period`
+   cells, so the pattern closes exactly where the ring does. */
+float vnoise( float x, float period ){
+	float i = floor(x);
+	float f = x - i;
+	f = f * f * (3.0 - 2.0 * f);
+	return mix( vhash( i, period), vhash( i + 1.0, period), f);
+}
+
+/* Coverage of the flame at ring position u (in wraps) and band position t
+   (0 at the inner ring, 1 at the spike tips). */
+float flame( float u, float t ){
+	float cells = max( v_wraps, 1.0);
+	float P  = TONGUE_FREQ * cells;
+	float HP = HAIR_FREQ * cells;
+
+	/* One triangular tongue per cell, its peak height and position drawn
+	   from the cell's hash. A triangle rather than smooth noise because
+	   that is the shape the reference draws: straight-sided tongues meeting
+	   in sharp clefts, not rolling waves. */
+	float s    = u * TONGUE_FREQ;
+	float cell = floor(s);
+	float f    = s - cell;
+	float hgt  = 0.35 + 0.65 * vhash( cell, P);
+	float ctr  = 0.30 + 0.40 * vhash( cell + 13.0, P);
+	float tri  = f < ctr ? f / ctr : (1.0 - f) / (1.0 - ctr);
+	float n    = hgt * pow( tri, 0.75);
+
+	/* A second tongue layer at half the frequency and offset phase, taken
+	   as a max. One tongue per cell alone reads as a picket fence - every
+	   cleft reaching the same depth at the same spacing; the overlap breaks
+	   the metre. */
+	float s2   = u * TONGUE_FREQ * 0.5 + 0.37;
+	float c2   = floor(s2);
+	float f2   = s2 - c2;
+	float hgt2 = 0.5 + 0.5 * vhash( c2 + 101.0, P * 0.5);
+	float tri2 = pow( 1.0 - abs( f2 - 0.5) * 2.0, 1.6);
+	n = max( n, 0.85 * hgt2 * tri2);
+	n = TONGUE_FLOOR + (TONGUE_CEIL - TONGUE_FLOOR) * clamp( n, 0.0, 1.0);
+
+	/* Position across the tongue zone; negative is inside the solid body. */
+	float x = (t - TONGUE_ROOT) / (1.0 - TONGUE_ROOT);
+
+	/* The strand field, shared by everything below so the teeth on the
+	   boundary, the streaks inside it and the wisps beyond it all line up
+	   into single continuous hairs. */
+	float strand = vnoise( u * HAIR_FREQ, HP);
+	float teeth  = strand * strand;
+
+	/* The tongue body: opaque inside the boundary, with the boundary
+	   itself lightly serrated at strand frequency. The solidity is the
+	   point - the reference's flame covers what is behind it, and a
+	   translucent band reads as fog, not ki. */
+	float nh   = n + 0.12 * teeth;
+	float body = 1.0 - smoothstep( nh - 0.02, nh + 0.02, x);
+
+	/* Shallow streaks just inside the rim, where the hair runs down into
+	   the tongue it belongs to; without them the wisps look glued on. */
+	float rim = smoothstep( nh - 0.20, nh, x);
+	body *= 1.0 - 0.32 * rim * (1.0 - smoothstep( 0.20, 0.75, strand));
+
+	/* Wisps: strands carrying on past the edge, fading over their own
+	   reach, longest on the tall tongues. */
+	float reach = (0.08 + 0.50 * teeth) * (0.30 + 0.70 * n);
+	float over  = (x - nh) / max( reach, 0.001);
+	float wisp  = smoothstep( 0.30, 0.85, strand)
+	            * pow( clamp( 1.0 - over, 0.0, 1.0), 1.5);
+	wisp *= step( nh, x);
+
+	/* The inner rows fade in rather than starting solid: the inner ring is
+	   a closed loop of geometry, and any coverage on it draws that loop as
+	   a hard oval over the character. */
+	return max( body, wisp) * smoothstep( 0.0, 0.06, t);
+}
+
 void main(void) {
-	/* No coordinate fixing up needed here: the stage binds this texture with
-	   clampmapT, so S repeats around the ring while T clamps at the spike
-	   tips. Sampling past the last row therefore returns the tips rather than
-	   wrapping into the opaque body, which is what used to draw a bright
-	   hairline around the aura's outer rim. */
+	float forward  = flame( gl_TexCoord[0].s, gl_TexCoord[0].t);
+	float mirrored = flame( gl_TexCoord[1].s, gl_TexCoord[1].t);
+	float alpha    = mix( mirrored, forward, v_seamBlend) * u_EntityColor.a;
 
-	/* The bias is what stops a distant aura crawling: the vertex stage has
-	   already dropped as many wraps of the strip as it can, and this takes the
-	   sampler down the mip chain for whatever undersampling is left. */
-	vec4 forward  = texture2D(u_Texture0, gl_TexCoord[0].st, v_texBias);
-	vec4 mirrored = texture2D(u_Texture0, gl_TexCoord[1].st, v_texBias);
+	/* The tint pipeline is unchanged from the sampled version. The tips run
+	   cool by deepening into the character's own colour; a fixed target is a
+	   different hue for every character. */
+	float level = max( max( u_EntityColor.r, u_EntityColor.g), u_EntityColor.b);
+	vec3  deep  = u_EntityColor.rgb * u_EntityColor.rgb / max( level, 0.0001);
+	vec3  cool  = mix( u_EntityColor.rgb, deep, TIP_SHIFT);
+	vec3  tint  = mix( u_EntityColor.rgb, cool, smoothstep( TIP_START, 1.0, v_edge));
 
-	vec4 spikes = mix(mirrored, forward, v_seamBlend);
+	vec3  hot   = mix( u_EntityColor.rgb, vec3(level), CORE_SHIFT);
+	tint = mix( hot, tint, smoothstep( 0.0, CORE_END, v_edge));
 
-	/* The aura art keeps its silhouette in alpha and leaves RGB solid white, so
-	   everything below shapes the tint and the alpha carries the silhouette. */
+	/* Premultiplied output against GL_ONE / GL_ONE_MINUS_SRC_ALPHA: at unity
+	   this is alpha-over and the flame holds its colour against any sky;
+	   pushed past unity the excess adds, so the core glows into the scene. */
+	float boost = mix( CORE_GLOW, 1.0, smoothstep( 0.0, GLOW_END, v_edge));
+	boost += BASE_GLOW * v_base * (1.0 - smoothstep( 0.0, 0.7, v_edge));
 
-	/* The tips run cool while the body stays the entity's colour. The blue is
-	   derived from u_EntityColor rather than delivered as its own uniform:
-	   every programParams slot is spoken for, and scaling the target by the
-	   entity colour's brightest channel keeps a dim or a saturated aura from
-	   either blowing out or going black at the ends. */
-	float level = max(max(u_EntityColor.r, u_EntityColor.g), u_EntityColor.b);
-
-	/* Squaring and renormalising against the brightest channel pushes the
-	   colour away from grey while pinning that channel where it was, so the
-	   result is the same hue carrying more of it: gold deepens to amber,
-	   white stays white because it has no hue to deepen, and a colour that is
-	   already saturated is left alone. Scaling the channels down instead just
-	   darkens, which reads as the aura running out rather than concentrating. */
-	vec3  deep  = u_EntityColor.rgb * u_EntityColor.rgb / max(level, 0.0001);
-	vec3  cool  = mix(u_EntityColor.rgb, deep, TIP_SHIFT);
-	vec3  tint  = mix(u_EntityColor.rgb, cool, smoothstep(TIP_START, 1.0, v_edge));
-
-	/* Inside that, the core runs hotter than the body: ki is drawn brightest
-	   where it is densest, and without this the aura is one flat hue with a
-	   cool fringe - it has a colour but no temperature. Desaturating toward
-	   `level` rather than toward vec3(1.0) keeps a dim aura's core dim, so a
-	   character whose colour is deliberately muted does not get a white core
-	   as bright as everyone else's. */
-	vec3  hot   = mix(u_EntityColor.rgb, vec3(level), CORE_SHIFT);
-	tint = mix(hot, tint, smoothstep(0.0, CORE_END, v_edge));
-
-	float alpha = spikes.a * u_EntityColor.a;
-
-	/* Premultiplied output against GL_ONE / GL_ONE_MINUS_SRC_ALPHA, which is
-	   the reason one stage can be both things at once.
-
-	   That blend computes src.rgb + dst * (1 - src.a). Feed it rgb = tint *
-	   alpha and it is exactly alpha-over: the aura holds its own colour no
-	   matter how bright the scene behind it, which straight addition cannot do
-	   - gold over a lit sky sums past 1 and comes back white with the sky's
-	   own hue in it. Push rgb past tint * alpha and the excess is added rather
-	   than blended, so it glows into the scene the way the additive version
-	   did.
-
-	   So the core is driven well above unity and burns out into the world,
-	   while the body and spikes sit at unity and stay the character's colour.
-	   Which is what the reference art shows: a white-hot centre that clearly
-	   emits, surrounded by flame that is solidly, unmistakably gold. */
-	float boost = mix(CORE_GLOW, 1.0, smoothstep(0.0, GLOW_END, v_edge));
-
-	/* Weighted toward the inner rows as well as toward the base, so the hot
-	   spot sits where the flame leaves the ground rather than smearing along
-	   the whole length of the licks that spring from it. */
-	boost += BASE_GLOW * v_base * (1.0 - smoothstep(0.0, 0.7, v_edge));
-
-	gl_FragColor = vec4(spikes.rgb * tint * alpha * boost, alpha);
+	gl_FragColor = vec4( tint * alpha * boost, alpha);
 }

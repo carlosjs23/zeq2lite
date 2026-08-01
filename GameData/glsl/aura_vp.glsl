@@ -39,12 +39,11 @@ uniform float u_Time;
 #define SEAM_BLEND 0.25
 
 /* Screen half-extent, in NDC, at which the authored wrap count is exactly
-   right. The strip is 512 texels wide, so `wavelength` wraps of it lay
-   512 * wavelength texels around the ring - several times the ring's perimeter
-   in pixels at any reasonable size, which is deliberate: the filaments at the
-   lick tips are a couple of texels across and only survive being oversampled.
-   Anything below this is undersampling, which is where the crawling starts,
-   and the halving below is what answers it. */
+   right. The flame is computed in the fragment stage, so there is no texel
+   budget - but the tongue count is still an apparent-size question: a distant
+   aura carrying its full count crams the tongues into a few dozen pixels and
+   the rim shimmers. Halving the wraps as the aura halves on screen keeps the
+   tongues a steady width in pixels. */
 #define SPIKE_REF 0.34
 
 /* How far the flank skirt is measured off the character's height rather than
@@ -116,8 +115,10 @@ varying float v_seamBlend;
    tip tint has to key off the ring itself rather than off how far the strip
    has been stretched. */
 varying float v_edge;
-/* Extra mip level for the fragment stage, in LOD units. */
-varying float v_texBias;
+/* Wraps of the flame pattern around the ring. The fragment stage computes the
+   flame procedurally on a lattice that has to close where the ring does, so
+   it needs the count this stage settled on. */
+varying float v_wraps;
 /* 1 directly under the character, falling to 0 by the flanks. The fragment
    stage brightens against it: the reference puts a hot point where the ki
    meets the ground, and the geometry alone only gives that spot a shape. */
@@ -447,14 +448,20 @@ void main(void) {
 	float steps  = -floor(shrink);
 	float wraps  = max(floor(wavelength * exp2(-steps)), 1.0);
 
-	/* Once the count bottoms out at a single wrap there is nothing left to
-	   halve, so the rest of the shrink is handed to the sampler as a mip
-	   bias. This also covers the moment the count steps: dropping a wrap
-	   doubles the texel footprint, so the bias falls by the same amount and
-	   the apparent sharpness stays put instead of popping. */
-	v_texBias = max(log2(wraps / max(wavelength, FORCE_EPSILON)) - shrink, 0.0);
+	v_wraps = wraps;
 
-	float u = gl_MultiTexCoord0.x * wraps + u_Time * scrollSpeed;
+	/* Not the authored coordinate, which advances uniformly with ring angle.
+	   The aura is tall: at the flanks the ring covers screen distance at the
+	   rate of the box's half-height, at the crown only its half-width, so an
+	   angle-uniform pattern stretches its flank tongues by that ratio and
+	   they smear into sheets. Advancing u with atan2 of the direction scaled
+	   by the square roots of the two extents makes du/dtheta proportional to
+	   the local arc rate at both poles, which is where it matters; between
+	   them it is an approximation nobody can see. The result still spans one
+	   full turn, so the periodic lattice closes exactly as before. */
+	float arc = atan( sqrt(halfHeight) * dir.y, sqrt(halfWidth) * dir.x)
+	          * 0.15915494 + 0.5;
+	float u = arc * wraps + u_Time * scrollSpeed;
 
 	/* Sheared with distance out, so every lick leans. The same sign on both
 	   copies: the mirrored one already reverses U, so an equal shear comes out
