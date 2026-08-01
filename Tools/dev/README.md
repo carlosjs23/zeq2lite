@@ -19,6 +19,8 @@ Python scripts use only the standard library; shell scripts need bash.
 | `png_sheet.py` | flatten PNGs onto one background so transparent art can be looked at |
 | `make_ui_art.py` | generate the interface images the data set never shipped |
 | `make_aura_mesh.py` | generate the screen-space aura's ring mesh |
+| `auragen.c` | procedurally generate aura reference images (compile: `cc -O2 -o auragen auragen.c -lz`) |
+| `aura_reference_clean.py` | turn any aura art into pipeline form - strips painted checkerboards (**needs numpy+scipy**) |
 | `make_aura_texture.py` | generate the screen-space aura's spike strip |
 | `zeq2env.sh` | shared paths/helpers, sourced by the others (not run directly) |
 

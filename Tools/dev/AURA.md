@@ -29,6 +29,17 @@ to vanish at that rest pose.
   detached wisps, no licks folding back over themselves.
 - Beware AI-generated "transparent" images whose checkerboard is painted into
   the pixels — it bakes straight in. Corners must be actual black/transparent.
+  `aura_reference_clean.py` repairs all three delivery forms (real alpha,
+  black background, painted checker) into the canonical luminance-on-black.
+- References do not have to be found or painted: `auragen.c` generates them
+  procedurally (seeded, deterministic) — one seed per tier is a cheap way to
+  give every transformation its own field. Its canvas is 1024x1280, half the
+  scale the pipeline was tuned on, so fine strand grain softens; bump its
+  canvas constants for production bakes.
+- The reference is the aura **without the character**: the game draws the
+  real model in the middle, so art that shows a figure inside the flame must
+  have the figure's space left open (a pale interior column is fine — the
+  character covers it).
 
 ## Generation (two scripts, `zeq2build.sh` is the argument authority)
 
