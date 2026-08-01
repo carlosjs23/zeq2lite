@@ -336,6 +336,12 @@ void main(void) {
 	   a thin character, and the ring stops reading as closed. */
 	float spikeLen = mix(mix(girth, reach, FLANK_GIRTH), reach, crown);
 
+	/* Screen-space sizing has one pathological regime: a close camera puts
+	   the box's half-extent near a full screen, and a skirt proportional to
+	   it becomes a wall of flame towering over the character. The aura may
+	   fill the view; its flame may not. */
+	spikeLen = min(spikeLen, 0.45);
+
 	/* Draw the tip out along the flow. Scaling this by the signed `along` -
 	   which looks like the same thing - stretches the base just as hard in the
 	   opposite direction, so the aura grows downward out of frame exactly as
@@ -442,7 +448,10 @@ void main(void) {
 	   has to come out identical for every vertex is exactly the fractional
 	   mismatch this is written to avoid, and it would draw the seam it is
 	   trying to prevent. */
-	float shrink = min(log2(max(reach, FORCE_EPSILON) / SPIKE_REF), 0.0);
+	/* Unclamped in both directions: a distant aura halves its wraps so the
+	   tongues stay legible, and a close one doubles them so a tongue never
+	   becomes a monster filling half the screen. */
+	float shrink = log2(max(reach, FORCE_EPSILON) / SPIKE_REF);
 	float steps  = -floor(shrink);
 	float wraps  = max(floor(wavelength * exp2(-steps)), 1.0);
 
