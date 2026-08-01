@@ -1278,17 +1278,10 @@ qboolean GLimp_SpawnRenderThread( void (*function)( void ) )
 		GLimp_ShutdownRenderThread();
 		return qfalse;
 	}
-	else
-	{
-		// tma 01/09/07: don't think this is necessary anyway?
-		//
-		// !!! FIXME: No detach API available in SDL!
-		//ret = pthread_detach( renderThread );
-		//if ( ret ) {
-		//ri.Printf( PRINT_ALL, "pthread_detach returned %d: %s", ret, strerror( ret ) );
-		//}
-	}
 
+	// Deliberately left joinable rather than passed to SDL_DetachThread: the
+	// re-entry path above reaps a leftover thread with SDL_WaitThread, which is
+	// not allowed on a detached one.
 	return qtrue;
 }
 
