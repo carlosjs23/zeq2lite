@@ -46,65 +46,21 @@ uniform float u_Time;
    tongues a steady width in pixels. */
 #define SPIKE_REF 0.34
 
-/* How far the flank skirt is measured off the character's height rather than
-   their width; 0 is pure width, 1 is the height-everywhere sizing this
-   replaced.
-
-   Deliberately well up the range rather than at the bottom of it. Pure width
-   is the honest proportion and it does keep the aura fitted, but it also
-   leaves the flanks thin enough that the whole effect reads as a sheath drawn
-   round the character instead of as ki coming off them - the flame needs mass
-   at the sides to look like it has any volume at all. This keeps the sizing
-   tied to the body, so a broad character still gets a broader aura, while
-   leaving enough girth for the licks to be legible. */
-#define FLANK_GIRTH 0.85
-
-/* How far the lower half's licks are reflected from pointing down to pointing
-   up. Ki does not hang below a character like a hem - it gathers under them
-   and is thrown back up, so the flame at the base sweeps up and out into a V
-   rather than draping down. 1 mirrors it outright. */
-#define BASE_SWEEP 0.25
-
-/* How far every lick is biased toward the flow, on top of the base mirror. Ki
-   rises: the reference frames show tongues climbing more or less vertically
-   even out at the flanks, where a purely radial spike would be pointing
-   sideways at the camera. 0 leaves each lick on the ring's own radius, 1 aims
-   the whole aura straight up. */
-#define RISE 0.35
-
-/* How far the strip is sheared along U as it runs outward, in strip repeats.
-   The licks in the reference do not stand perpendicular to the edge they leave
-   - every one of them leans the same way, hard, so the flame reads as being
-   swept rather than as bristling. The strip cannot express that in its own
-   art: a lick that leans has to overhang its own base, and the silhouette is
-   built as a height field, which by definition cannot. Shearing the texture
-   coordinate does it instead, and costs nothing. */
+/* How far the streaks are sheared along U as they run outward, in pattern
+   repeats. The licks in the reference lean; a lick that leans has to
+   overhang its own base, and shearing the coordinate is what buys that. */
 #define SHEAR 0.11
 
-/* Width against height: w = h^V_OPEN * (1 - h^V_CLOSE)^V_TAPER, scaled by
-   V_NORM so the peak is 1. Fitted numerically to the reference art's
-   measured silhouette, which is a low-bulged teardrop: widest around 35%%
-   of the way up, tapering hard above 55%% and closing to a point. The old
-   exponents made an egg - bulge at half height, shoulders still wide at
-   70%% - and no amount of texture reads right on the wrong outline.
-   Recompute V_NORM if any exponent changes. */
-#define V_OPEN  0.54
-#define V_CLOSE 1.2
-#define V_TAPER 1.1
-#define V_NORM  2.544
+/* Where the inner ring sits, as a fraction of the outline. Far enough in
+   that the character's own body covers it; the band between it and the
+   outline is everything the fragment stage has to work with. */
+#define INNER_HUG 0.40
 
-/* How far below the box the V's apex is dropped, as a fraction of the box
-   half-height. The arms need somewhere to open from: with the apex exactly at
-   the soles they are still nearly closed by the time they reach the calves,
-   and the legs sit outside the flame. */
-#define APEX_DROP 0.22
+/* Hard ceiling on the outline's crown reach in NDC; see the span comment. */
+#define SPAN_CAP  0.85
 
-/* Peak radial deviation of the ring, as a fraction of the box half-extent.
-   This is what stops the aura's inner boundary being a perfect ellipse - the
-   ring is a unit circle mapped onto a box, so without it every character's
-   flame has the same geometric outline and the texture is left doing all the
-   work of not looking like one. Large enough to break the curve, small enough
-   that the crown still clears the hair and the base still reaches the feet. */
+/* Peak radial deviation of the boundary as it burns. Large enough to move,
+   small enough that the reference's outline stays recognisably itself. */
 #define WOBBLE 0.075
 
 varying float v_seamBlend;
@@ -201,228 +157,81 @@ void main(void) {
 	   expressed in terms of that flow direction rather than the force itself. */
 	vec2 flowDir = -forceDir;
 
-	/* +1 at the tip, -1 at the flattened base. Drives both the directional
-	   stretch and how far the outer ring is pushed out. */
-	float along = dot(dir, flowDir);
+	/* The mesh carries the reference outline: gl_Color.a is the boundary
+	   radius at this vertex's authored angle, crown-normalised, read off the
+	   reference art's alpha mask by make_aura_mesh.py. The silhouette is the
+	   reference's own - every tongue of it - rather than any width function's
+	   approximation. The tip is authored at +Y, so the directional terms below
+	   work in the authored frame, and the finished shape is rotated rigidly
+	   onto the flow at the end. */
+	float rRef = gl_Color.a;
 
-	/* Split rather than used raw: the tip and the base want opposite
-	   treatments, and a single signed term gives them the same one. */
-	float tip  = max(along, 0.0);
+	float along = dir.y;
 
-	/* Squared so the base tucks in with zero slope where it meets the flanks.
-	   A bare max() creases the silhouette at the ring's widest point. */
+	/* Squared so the base terms collapse away from the bottom pole. */
 	float base = max(-along, 0.0);
 	base *= base;
 
-	/* --- build the position --------------------------------------------- */
-
-	float crown = tip * tip;
-
-	/* Split the ring's own offset into the part along the flow and the part
-	   across it, because everything that pulls the ring inward should act on
-	   one and not the other.
-
-	   originDist used to scale the whole offset, and the two axes want
-	   opposite things from it. Across the flow it has to come in far enough
-	   that the ring's inner edge passes *behind* the player - an ellipse is
-	   never going to follow a human silhouette, so the only way that edge
-	   stops reading as a bare oval hung around the character is for their own
-	   body to cover it. Along the flow the ring wants the opposite: the ends
-	   of the box are the top of the hair and the soles of the feet, and any
-	   shrink at all lifts the base off the boots and drops the crown below the
-	   hair. Shrinking both together is why no single value ever looked right -
-	   tight enough to hide the oval left the feet outside, and low enough to
-	   reach the feet put the oval back.
-
-	   So the flow axis stays pinned to the box, and originDist, the base tuck
-	   and the crown taper all act across it. originDist now means exactly one
-	   thing: how tightly the flanks hug. */
-	vec2 alongVec = flowDir * along;
-	vec2 perpVec  = dir - alongVec;
-
-	/* How far up the aura this vertex is: 0 at the base apex, 1 at the crown. */
-	float height = 0.5 * (along + 1.0);
-
-	/* The ring's own circle gives a perpendicular extent of sqrt(1 - along^2),
-	   which is an ellipse - widest at its waist and curving back in above it,
-	   symmetrically. That is the shape being replaced, so only the direction
-	   is kept here and the magnitude comes from the profile below.
-
-	   An ellipse is why the aura read as an oval sitting on top of a V rather
-	   than as one shape: the V's arms rose out of the base, met the ellipse's
-	   waist, and stopped there because that is where the ellipse stops
-	   widening. Driving the width off height instead lets the arms keep
-	   opening the whole way, so the silhouette is a single V that narrows only
-	   where the crown has to close. */
-	vec2 perpUnit = perpVec / max(length(perpVec), FORCE_EPSILON);
-
-	float width = pow(height, V_OPEN)
-	            * pow(1.0 - pow(height, V_CLOSE), V_TAPER)
-	            * V_NORM;
-
-	/* originDist scales the whole profile and nothing else. It used to be
-	   opened out at the base by a separate term keyed on `base`, to clear the
-	   legs - but `base` collapses a short way up, so that widened the very
-	   bottom and then let the width fall back immediately above it. The result
-	   was a bulge at the feet with a pinch over it: the aura got *narrower*
-	   going up before widening again, which breaks the V outright. Anything
-	   that widens one band and not its neighbours will do the same.
-
-	   The leg clearance comes from V_OPEN instead, which is a property of the
-	   whole profile, so the width can only grow on the way up. */
-	float spread = originDist;
-
-	/* Dropping the apex below the box is what gives the arms room to open
-	   before they reach the legs. It only moves the bottom pole - `base`
-	   collapses away from it - so the crown and flanks stay pinned. */
-	vec2 shaped = flowDir * along * (1.0 + APEX_DROP * base)
-	            + perpUnit * width * spread;
-
-	/* Push the ring in and out around its circumference. An ellipse is the one
-	   shape ki never has, and it is the shape this technique produces for
-	   free: mapping a circle onto the bounding box gives a curve with no
-	   feature anywhere on it, so the aura's inner boundary reads as geometry
-	   however good the texture on top of it is.
-
-	   Three harmonics rather than one, at rates that do not divide each other,
-	   so the sum never settles into a recognisable lobed shape - one term
-	   alone is just an ellipse with bumps, and the eye finds the period
-	   immediately. Integer multiples of the angle, though, and that is not
-	   optional: the ring closes where theta wraps, and a non-integer harmonic
-	   leaves a step there that tears the aura open along one radius.
-
-	   Driven by scrollSpeed so the boundary crawls at the same rate the flame
-	   on it does. A static perturbation is worse than none - it reads as a
-	   dented ring rather than as something burning. */
+	/* Push the boundary in and out as it burns. Driven by scrollSpeed so the
+	   outline crawls at the same rate the flame on it does - a static
+	   perturbation reads as a dented ring rather than as something burning.
+	   Integer harmonics only: the ring closes where theta wraps, and a
+	   non-integer one leaves a step there that tears the aura open. */
 	float theta  = atan(dir.y, dir.x);
 	float wobble = sin(theta * 3.0 + u_Time * scrollSpeed * 1.7)
 	             + 0.6 * sin(theta * 5.0 - u_Time * scrollSpeed * 2.3)
 	             + 0.4 * sin(theta * 8.0 + u_Time * scrollSpeed * 1.1);
+	rRef *= 1.0 + WOBBLE * wobble;
 
-	vec2 pos = boxCentre + shaped * boxHalf * (1.0 + WOBBLE * wobble);
+	/* The inner ring hugs a scaled copy of the same outline, so the band's
+	   thickness follows the tongues instead of cutting across them. */
+	float rr  = mix(rRef * INNER_HUG, rRef, isOuter);
+	vec2 pRef = dir * rr;
 
-	/* Spikes need a length that does not depend on which way they point.
-	   Scaling by boxHalf per axis - the obvious thing to write - gives sideways
-	   spikes the player's narrow width and upward ones their full height, so
-	   the ring reads as two bright vertical bands with nothing top or bottom.
-	   One scalar length, aspect-corrected, keeps them even all the way round.
+	/* Rotate the authored shape rigidly so its tip rides the flow. With the
+	   flow straight up this is the identity. */
+	/* The in-situ mockup carries the drop wider than the cut-out reference
+	   does - the flame spreads once it has a figure inside it - so the
+	   across-flow axis gets that spread before the rotation. */
+	vec2 rightDir = vec2(flowDir.y, -flowDir.x);
+	vec2 shape    = rightDir * pRef.x * 1.3 + flowDir * pRef.y;
 
-	   NDC spans -1..1 on both axes regardless of window shape, so an equal
+	/* NDC spans -1..1 on both axes regardless of window shape, so an equal
 	   offset in x and y is not equal on screen. The projection matrix carries
 	   the ratio: [1][1]/[0][0] is width/height. */
 	float aspect   = u_ProjectionMatrix[1][1] / u_ProjectionMatrix[0][0];
 	vec2  evenly   = vec2(1.0 / max(aspect, FORCE_EPSILON), 1.0);
 
-	/* One scalar, but not the same one all the way round. Taking the larger
-	   extent everywhere - which is what "even spikes" seemed to require - sizes
-	   the *sideways* skirt off the character's height, and a standing character
-	   is roughly three times as tall as they are wide. The flanks therefore
-	   came out about as long as the player's half-height, which put the aura's
-	   silhouette at over twice the width of the body it belongs to. It read as
-	   a blob the character was standing inside rather than as their own ki.
-
-	   So: the flanks measure against the body's width, the crown against its
-	   height, blended along `crown` so the length still varies smoothly around
-	   the ring and no direction gets a visible step. The two extents have to be
-	   compared in the same units first - NDC spans -1..1 on both axes whatever
-	   the window shape, so a half-width in NDC is not comparable to a
-	   half-height until the aspect ratio is folded in. */
 	float halfWidth  = boxHalf.x * aspect;
 	float halfHeight = boxHalf.y;
 	float girth      = min(halfWidth, halfHeight);
 	float reach      = max(halfWidth, halfHeight);
 
-	/* Not the bare width: a skirt that narrow leaves the flanks a hairline on
-	   a thin character, and the ring stops reading as closed. */
-	float spikeLen = mix(mix(girth, reach, FLANK_GIRTH), reach, crown);
+	/* One scalar span maps the outline onto the character: the crown reach -
+	   the outline's unit radius - lands above the box top by however much
+	   plume `strength` buys. Height alone, deliberately: the reference's
+	   proportions are the aura's own, and sizing any part of the outline off
+	   the body's width would squeeze the drop around a thin character and
+	   fatten it around a broad one.
 
-	/* Screen-space sizing has one pathological regime: a close camera puts
-	   the box's half-extent near a full screen, and a skirt proportional to
-	   it becomes a wall of flame towering over the character. The aura may
-	   fill the view; its flame may not. */
-	spikeLen = min(spikeLen, 0.45);
+	   Clamped because screen-space sizing has one pathological regime: a
+	   close camera puts the half-extent near a full screen, and a span
+	   proportional to it towers a wall of flame over the character. The aura
+	   may fill the view; its flame may not. */
+	float span = halfHeight * (0.7 + 1.0 * strength);
+	span = min(span, SPAN_CAP);
 
-	/* Draw the tip out along the flow. Scaling this by the signed `along` -
-	   which looks like the same thing - stretches the base just as hard in the
-	   opposite direction, so the aura grows downward out of frame exactly as
-	   fast as it grows upward and never closes anywhere visible.
-
-	   Both this and the crown's share of the skirt below are measured against
-	   the character's half-height, so they compound: between them they were
-	   putting most of a character's height of flame above the head. That reads
-	   as a pillar the character happens to be standing at the bottom of rather
-	   than as their own aura, and it is the crown alone that has to come down -
-	   the flanks are already sized off the body's width and are fine. */
-	pos += flowDir * evenly * spikeLen * strength * 0.34 * tip;
-
-	/* The outer ring carries the spikes: a real skirt everywhere so the ring
-	   closes visibly, growing toward the tip. Only the outer vertices move.
-
-	   Weighted on `crown` rather than on `tip` so the growth is concentrated
-	   at the top instead of spread evenly around the ring. Spread evenly, the
-	   flanks carry nearly as much skirt as the crown and the aura reads as an
-	   even fur; a flame puts almost all of its length in one direction. The
-	   floor is what keeps the ring visibly closed at the sides and base.
-
-	   The floor carries most of the weight now and the crown's share is small,
-	   which looks backwards but is not. These two are the only ways to add
-	   flame, and raising `strength` instead - the obvious lever, and the one
-	   auraScale pulls - moves both at once: the crown term is twice the floor,
-	   so scaling up grows the plume far faster than the flanks and the aura
-	   gets taller when what it needed was to get thicker. Loading the floor
-	   adds mass at the sides and leaves the plume where it was.
-
-	   The base gets the same tuck the inner ring does. Without it the inner
-	   ring draws in under the feet while the outer one does not, so the skirt
-	   *widens* exactly where the aura should be gathering, and the effect
-	   stands the character in a puddle rather than lifting off them. */
-	float spike = strength * (0.55 + 0.17 * crown) * (1.0 - 0.15 * base);
-
-	/* Spikes leave along the ring's own radius everywhere except the base,
-	   where they are turned back up the flow. Left radial, the licks directly
-	   under the character point at the floor, and the aura ends in a fringe
-	   hanging off the soles - the one place the reference never puts flame.
-	   What it shows instead is a bright point beneath the character with the
-	   flame sweeping up and outward either side of it, like something struck
-	   the ground there.
-
-	   Two halves to that. This turns the direction; the far heavier base
-	   falloff above closes the length, so the very bottom of the ring carries
-	   almost no skirt at all and becomes the point of the V. Without the
-	   falloff the turn alone would aim a full-length spike straight up through
-	   the character's legs.
-	   Mirrored rather than rotated toward the flow. Rotating only turns the
-	   licks already pointing nearly straight down, because `base` is squared
-	   and collapses either side of the bottom - the lower flanks kept pointing
-	   sideways and the V never closed. Reflecting the downward component turns
-	   the entire lower half at once, and because each lick keeps its sideways
-	   component untouched the two wings splay outward instead of collapsing
-	   into one upward jet. */
-	vec2 across = dir - flowDir * along;
-
-	/* Two stages. The mirror turns the lower half up; the rise then leans the
-	   whole ring toward the flow on top of it, which is what stops the flanks
-	   throwing their licks straight out sideways. Radially, a lick at the
-	   waist points at the camera's left or right - correct for a ring, wrong
-	   for fire, which climbs whatever part of the body it is leaving. */
-	float lift = mix(along, abs(along), BASE_SWEEP);
-	lift = mix(lift, 1.0, RISE);
-
-	vec2 swept = across + flowDir * lift;
-
-	vec2 spikeDir = normalize(swept + vec2(FORCE_EPSILON));
-
-	pos += spikeDir * evenly * spikeLen * spike * isOuter;
+	vec2 pos = boxCentre + shape * evenly * span;
 
 	gl_Position.xy = pos;
 	gl_Position.w  = 1.0;
 
 	/* --- texturing ------------------------------------------------------ */
 
-	/* Which side of the force axis this vertex is on decides which way the
-	   texture scrolls, so that it always flows toward the tip. */
-	vec2  perp = vec2(-forceDir.y, forceDir.x);
-	float side = dot(dir, perp);
+	/* Which side of the tip axis this vertex is on decides which way the
+	   texture scrolls, so that it always flows toward the tip. Authored
+	   frame: the shape is rotated rigidly, and the pattern rides the shape. */
+	float side = dir.x;
 
 	/* Blended rather than mirrored: smoothstep gives 0 on one side, 1 on the
 	   other, and a short ramp through the tip and base where the two meet. */
@@ -442,12 +251,8 @@ void main(void) {
 	   ring closes. Everything here reads only uniforms, so every vertex of
 	   the ring agrees on the answer.
 
-	   `reach`, deliberately, and not `spikeLen`: spikeLen is blended along the
-	   ring so the flanks can be sized off the body's width, which makes it a
-	   per-vertex quantity. Feeding a per-vertex value into a wrap count that
-	   has to come out identical for every vertex is exactly the fractional
-	   mismatch this is written to avoid, and it would draw the seam it is
-	   trying to prevent. */
+	   `reach`, deliberately, and not anything per-vertex: a wrap count that
+	   has to come out identical for every vertex can only be fed uniforms. */
 	/* Unclamped in both directions: a distant aura halves its wraps so the
 	   tongues stay legible, and a close one doubles them so a tongue never
 	   becomes a monster filling half the screen. */
@@ -457,18 +262,10 @@ void main(void) {
 
 	v_wraps = wraps;
 
-	/* Not the authored coordinate, which advances uniformly with ring angle.
-	   The aura is tall: at the flanks the ring covers screen distance at the
-	   rate of the box's half-height, at the crown only its half-width, so an
-	   angle-uniform pattern stretches its flank tongues by that ratio and
-	   they smear into sheets. Advancing u with atan2 of the direction scaled
-	   by the square roots of the two extents makes du/dtheta proportional to
-	   the local arc rate at both poles, which is where it matters; between
-	   them it is an approximation nobody can see. The result still spans one
-	   full turn, so the periodic lattice closes exactly as before. */
-	float arc = atan( sqrt(halfHeight) * dir.y, sqrt(halfWidth) * dir.x)
-	          * 0.15915494 + 0.5;
-	float u = arc * wraps + u_Time * scrollSpeed;
+	/* The authored coordinate advances with the outline's own arc length -
+	   make_aura_mesh.py bakes the cumulative arc into it - so the pattern is
+	   even along the boundary however tall the outline is at that angle. */
+	float u = gl_MultiTexCoord0.x * wraps + u_Time * scrollSpeed;
 
 	/* Sheared with distance out, so every lick leans. The same sign on both
 	   copies: the mirrored one already reverses U, so an equal shear comes out

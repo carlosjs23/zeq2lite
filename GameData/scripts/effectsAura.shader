@@ -96,10 +96,9 @@ Aura_ScreenSpace
 {
 	cull none
 	{
-		// The flame is computed in the fragment program; no art is
-		// sampled. The stage still has to bind something, so it binds
-		// the built-in white image.
-		map $whiteimage
+		// The strand grain is auragen.c's strip: S repeats around the
+		// ring, T clamps so past-the-tip reads return empty air.
+		clampmapT effects/aura/auraStrip.png
 		program aura
 		vertexProgram glsl/aura_vp.glsl
 		fragmentProgram glsl/aura_fp.glsl

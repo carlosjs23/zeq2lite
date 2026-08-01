@@ -30,6 +30,7 @@ usage:
 
 import argparse
 import math
+import os
 import struct
 import sys
 
@@ -50,7 +51,86 @@ JOINT_SIZE = 2 * 4 + 10 * 4
 POSE_SIZE = 2 * 4 + 20 * 4
 
 
-def build_geometry(segments, inner_r, outer_r):
+def read_outline(path, segments):
+    """Sample the reference silhouette's boundary radius at each ring angle.
+
+    The reference is a transparent PNG whose alpha is the aura's mask. The
+    boundary - every tongue of it - is the outermost alpha along each ray
+    from the coverage centroid. That radius goes into the vertex colour's
+    alpha byte, so the vertex program rebuilds the reference's own outline
+    instead of approximating it with a width function.
+
+    The mesh's tip convention is +Y at angle pi/2; the reference is authored
+    tip-up, which is image -y, so the image is sampled with y flipped.
+
+    Also returns the outline's cumulative arc length per angle, normalised to
+    one turn. The pattern coordinate advances with it rather than with angle:
+    a tall outline covers far more distance per radian at its flanks than at
+    its poles, and an angle-uniform coordinate stretches the flame there.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from png_sheet import decode_png
+
+    w, h, px = decode_png(path)
+
+    # The silhouette lives in alpha when the reference carries one that
+    # varies, in luminance when it was shot on black. Decide once.
+    alo = ahi = px[0][0][3]
+    for y in range(0, h, 8):
+        for x in range(0, w, 8):
+            a = px[y][x][3]
+            alo = a if a < alo else alo
+            ahi = a if a > ahi else ahi
+    chan = 3 if ahi - alo > 32 else 0
+
+    tot = cx = cy = 0.0
+    for y in range(0, h, 2):
+        for x in range(0, w, 2):
+            a = px[y][x][chan]
+            if a:
+                tot += a
+                cx += x * a
+                cy += y * a
+    if tot <= 0.0:
+        sys.exit("outline reference carries no alpha: %s" % path)
+    cx /= tot
+    cy /= tot
+
+    reach = int(math.hypot(max(cx, w - cx), max(cy, h - cy))) + 1
+    rs = []
+    for i in range(segments):
+        th = 2.0 * math.pi * i / segments
+        dx, dy = math.cos(th), -math.sin(th)
+        hi = 0
+        for r in range(reach, 0, -1):
+            x, y = int(cx + dx * r), int(cy + dy * r)
+            if 0 <= x < w and 0 <= y < h and px[y][x][chan] >= 112:
+                hi = r
+                break
+        rs.append(float(hi))
+
+    # A three-tap smooth: enough to take single-hair jitter out of the
+    # boundary, far too narrow to blunt a tongue.
+    rs = [(rs[i - 1] + 2.0 * rs[i] + rs[(i + 1) % segments]) / 4.0
+          for i in range(segments)]
+    peak = max(rs)
+    rs = [max(r / peak, 0.05) for r in rs]
+
+    us = [0.0]
+    for i in range(segments):
+        a0 = 2.0 * math.pi * i / segments
+        a1 = 2.0 * math.pi * (i + 1) / segments
+        r1 = rs[(i + 1) % segments]
+        p0 = (rs[i] * math.cos(a0), rs[i] * math.sin(a0))
+        p1 = (r1 * math.cos(a1), r1 * math.sin(a1))
+        us.append(us[-1] + math.hypot(p1[0] - p0[0], p1[1] - p0[1]))
+    total = us[-1]
+    us = [u / total for u in us]
+
+    return rs, us
+
+
+def build_geometry(segments, inner_r, outer_r, outline=None):
     """Four unshared vertices per quad, laid out inner-first."""
     positions, texcoords, normals, colors = [], [], [], []
     triangles = []
@@ -59,9 +139,15 @@ def build_geometry(segments, inner_r, outer_r):
         """Unit-circle coordinate (-1..1) to a colour byte, centre at 0.5."""
         return max(0, min(255, int(round((rel + 1.0) * 0.5 * 255.0))))
 
+    if outline is not None:
+        rads, arcs = outline
+    else:
+        rads, arcs = [1.0] * segments, [i / segments for i in range(segments + 1)]
+
     for i in range(segments):
         a0 = (i / segments) * 2.0 * math.pi
         a1 = ((i + 1) / segments) * 2.0 * math.pi
+        r0, r1 = rads[i], rads[(i + 1) % segments]
 
         base = len(positions)
 
@@ -76,19 +162,23 @@ def build_geometry(segments, inner_r, outer_r):
         #
         # v runs inner(0) to outer(1), so the texture's vertical axis is the
         # spike's length, which is what the amplitude parameter scales.
-        u0 = i / segments
-        u1 = (i + 1) / segments
-        for angle, radius, outer, u, v in (
-            (a0, inner_r, 0, u0, 0.0),
-            (a1, inner_r, 0, u1, 0.0),
-            (a1, outer_r, 1, u1, 1.0),
-            (a0, outer_r, 1, u0, 1.0),
+        u0 = arcs[i]
+        u1 = arcs[i + 1]
+        for angle, radius, ref, outer, u, v in (
+            (a0, inner_r, r0, 0, u0, 0.0),
+            (a1, inner_r, r1, 0, u1, 0.0),
+            (a1, outer_r, r1, 1, u1, 1.0),
+            (a0, outer_r, r0, 1, u0, 1.0),
         ):
             cx, cy = math.cos(angle), math.sin(angle)
-            positions.append((cx * radius, cy * radius, 0.0))
+            positions.append((cx * radius * ref, cy * radius * ref, 0.0))
             texcoords.append((u, v))
             normals.append((0.0, 0.0, 1.0))
-            colors.append((encode(cx), encode(cy), 255 if outer else 0, 255))
+            # Alpha carries the reference outline's radius at this angle,
+            # crown-normalised; a mesh built without a reference carries 255
+            # everywhere and the ring stays a plain circle.
+            colors.append((encode(cx), encode(cy), 255 if outer else 0,
+                           max(0, min(255, int(round(ref * 255.0))))))
 
         triangles.append((base + 0, base + 1, base + 2))
         triangles.append((base + 0, base + 2, base + 3))
@@ -96,9 +186,9 @@ def build_geometry(segments, inner_r, outer_r):
     return positions, texcoords, normals, colors, triangles
 
 
-def build_iqm(segments, inner_r, outer_r):
+def build_iqm(segments, inner_r, outer_r, outline=None):
     positions, texcoords, normals, colors, triangles = build_geometry(
-        segments, inner_r, outer_r)
+        segments, inner_r, outer_r, outline)
     nverts, ntris = len(positions), len(triangles)
 
     # --- text blob: mesh name and material -------------------------------
@@ -213,6 +303,9 @@ def main():
                     help="inner radius in model units (default: 0.5)")
     ap.add_argument("--outer", type=float, default=1.0,
                     help="outer radius in model units (default: 1.0)")
+    ap.add_argument("--outline", default=None,
+                    help="transparent PNG whose alpha mask supplies the "
+                         "ring's outline; without it the ring is a circle")
     args = ap.parse_args()
 
     if args.segments < 3:
@@ -220,7 +313,9 @@ def main():
     if not 0.0 < args.inner < args.outer:
         sys.exit("need 0 < --inner < --outer")
 
-    blob, nverts, ntris = build_iqm(args.segments, args.inner, args.outer)
+    outline = read_outline(args.outline, args.segments) if args.outline else None
+    blob, nverts, ntris = build_iqm(args.segments, args.inner, args.outer,
+                                    outline)
     with open(args.output, "wb") as fh:
         fh.write(blob)
 
