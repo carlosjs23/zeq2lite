@@ -49,12 +49,29 @@ varying float v_wraps;
 
 
 
+/* The strip is a flipbook: STRIP_FRAMES bands stacked vertically, frame 0
+   the reference exactly, the rest lick-jittered variants of it. Hard cuts
+   between them are the anime's own animation - two or three drawings of the
+   same flame alternating - and at time zero frame 0 shows, which is the
+   frame the measurement harness compares against the art. Must match
+   --frames in aura_band_from_reference.py. */
+#define STRIP_FRAMES 4.0
+#define FLICKER_FPS  8.0
+/* Rows per frame, for the half-texel inset that keeps bilinear filtering
+   from bleeding one frame's tips into the next frame's body. */
+#define FRAME_ROWS   512.0
+
 /* Coverage of the flame at ring position u (already in strip S units) and
    band position t (0 at the inner ring, 1 at the reference outline). */
 float flame( float u, float t ){
 	/* The strip is the reference's own band, unwrapped over exactly one
 	   turn, so it tiles by construction and is sampled straight. */
-	float strand = texture2D( u_Texture0, vec2( u, t)).a;
+	float frame = mod( floor( u_Time * FLICKER_FPS), STRIP_FRAMES);
+	/* Identity in the interior - rescaling by (rows-1)/rows squeezed the
+	   whole field measurably - clamped only within the half texel at each
+	   frame edge that bilinear would blend into the neighbouring frame. */
+	float tIn   = clamp( t, 0.5 / FRAME_ROWS, 1.0 - 0.5 / FRAME_ROWS);
+	float strand = texture2D( u_Texture0, vec2( u, (frame + tIn) / STRIP_FRAMES)).a;
 
 	/* No mist, no boost, and no inner fade on top: the strip already
 	   carries the reference's interior glow and its hot rim - anything

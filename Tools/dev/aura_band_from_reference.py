@@ -54,6 +54,12 @@ def main():
     ap.add_argument("--inner-hug", type=float, default=0.40,
                     help="where the band starts, as a fraction of the "
                          "outline; must match INNER_HUG in aura_vp.glsl")
+    ap.add_argument("--frames", type=int, default=1,
+                    help="flipbook frames stacked vertically; frame 0 is the "
+                         "reference exactly, the rest are lick-jittered "
+                         "variants of it; must match STRIP_FRAMES in "
+                         "aura_fp.glsl (total height stays power-of-two "
+                         "friendly: height * frames)")
     ap.add_argument("--segments", type=int, default=256,
                     help="outline samples; must match the mesh bake")
     args = ap.parse_args()
@@ -121,7 +127,7 @@ def main():
     # the mean IS the field there.
     CENTRE_BLEND = 0.10
 
-    rows = []
+    base = []
     for j in range(args.height):
         t = (j + 0.5) / args.height
         vals = []
@@ -142,10 +148,56 @@ def main():
             mean = sum(vals) / len(vals)
             keep = frac / CENTRE_BLEND
             vals = [mean + (v - mean) * keep for v in vals]
-        row = bytearray()
-        for v in vals:
-            row += bytes((255, 255, 255, max(0, min(255, int(round(v * 255))))))
-        rows.append(bytes(row))
+        base.append(vals)
+
+    def band_sample(fu, ft):
+        """Bilinear read of the base band; u wraps, t clamps."""
+        H, W = args.height, args.width
+        fu = (fu % 1.0) * W - 0.5
+        ft = min(max(ft * H - 0.5, 0.0), H - 1.0)
+        c0 = int(math.floor(fu)) % W
+        c1 = (c0 + 1) % W
+        fru = fu - math.floor(fu)
+        r0 = int(ft)
+        r1 = min(r0 + 1, H - 1)
+        frt = ft - r0
+        return ((base[r0][c0] * (1 - fru) + base[r0][c1] * fru) * (1 - frt)
+              + (base[r1][c0] * (1 - fru) + base[r1][c1] * fru) * frt)
+
+    # The flipbook variants are the same band with the licks nudged: a smooth
+    # periodic displacement in u and a length jitter in t, both scaled by t so
+    # the interior veil holds still and only the flame moves. The anime does
+    # exactly this - two or three drawings of the same flame, licks redrawn in
+    # slightly different places - and deriving the variants from the band
+    # keeps every frame the reference's own field.
+    SWAY_U = 0.02       # turns, at the tips
+    JITTER_T = 0.08     # fraction of lick length, at the tips
+    frames = [base]
+    for k in range(1, max(args.frames, 1)):
+        du = []
+        dt = []
+        for c in range(args.width):
+            x = (c + 0.5) / args.width * 2.0 * math.pi
+            du.append((math.sin(3 * x + 1.7 * k)
+                       + 0.6 * math.sin(7 * x + 0.9 * k * k + 2.1)
+                       + 0.4 * math.sin(13 * x + 2.6 * k)) * SWAY_U / 2.0)
+            dt.append((math.sin(5 * x + 2.3 * k + 1.1)
+                       + 0.7 * math.sin(11 * x + 1.4 * k)) * JITTER_T / 1.7)
+        var = []
+        for j in range(args.height):
+            t = (j + 0.5) / args.height
+            var.append([band_sample((c + 0.5) / args.width + du[c] * t,
+                                    t * (1.0 + dt[c] * t))
+                        for c in range(args.width)])
+        frames.append(var)
+
+    rows = []
+    for f in frames:
+        for vals in f:
+            row = bytearray()
+            for v in vals:
+                row += bytes((255, 255, 255, max(0, min(255, int(round(v * 255))))))
+            rows.append(bytes(row))
 
     raw = b""
     for row in rows:
@@ -156,19 +208,20 @@ def main():
         return struct.pack(">I", len(d)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
 
     png = (b"\x89PNG\r\n\x1a\n"
-           + chunk(b"IHDR", struct.pack(">IIBBBBB", args.width, args.height, 8, 6, 0, 0, 0))
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", args.width, args.height * len(frames), 8, 6, 0, 0, 0))
            + chunk(b"IDAT", zlib.compress(raw, 9))
            + chunk(b"IEND", b""))
     with open(args.out_png, "wb") as fh:
         fh.write(png)
 
     with open(args.out_raw, "wb") as fh:
-        fh.write(struct.pack("<II", args.width, args.height))
+        fh.write(struct.pack("<II", args.width, args.height * len(frames)))
         for row in rows:
             fh.write(row)
 
-    print("%s + %s: %dx%d band from %s" %
-          (args.out_png, args.out_raw, args.width, args.height, args.reference))
+    print("%s + %s: %dx%d band (%d frame(s)) from %s" %
+          (args.out_png, args.out_raw, args.width, args.height * len(frames),
+           len(frames), args.reference))
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 		"$ZEQ2_ROOT/Tools/dev/aura_reference.png" \
 		"$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura/auraStrip.png" \
 		"$ZEQ2_BUILD/$ZEQ2_GAME/effects/aura/auraStrip.raw" \
-		--inner-hug 0.0 --segments 1024 --width 2048 --height 512 >/dev/null
+		--inner-hug 0.0 --segments 1024 --width 2048 --height 512 --frames 4 >/dev/null
 	echo "ok: aura.iqm and auraStrip generated from the reference"
 
 	# The map-selection highlight and the missing-levelshot placeholder, for the
