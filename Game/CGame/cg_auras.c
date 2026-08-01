@@ -834,6 +834,11 @@ static void CG_Aura_AddPartBounds( const refEntity_t *part, int frame, const vec
 	}
 }
 
+// The tailLength the ring was authored against. Scaling by the ratio rather
+// than the value itself keeps a config carrying the stock 32 rendering exactly
+// as it did before tailLength was consulted here at all.
+#define AURA_TAILLENGTH_REFERENCE	32.0f
+
 static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, auraConfig_t *config ){
 	static qhandle_t	auraMesh;
 	static qhandle_t	auraShader;
@@ -892,6 +897,13 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	// player does not stretch the aura off the screen.
 	strength = config->auraScale * state->modulate;
 	strength *= 1.0f + (speed / 1000.0f > 1.0f ? 1.0f : speed / 1000.0f);
+
+	// tailLength is how far down the tail direction the hull path pushes its
+	// tail point. Here it stretches the teardrop by the same proportion. Zero
+	// means the config never set it, which is not a request for no aura.
+	if(config->tailLength > 0.0f){
+		strength *= config->tailLength / AURA_TAILLENGTH_REFERENCE;
+	}
 
 	memset( &ent, 0, sizeof(ent) );
 	ent.reType = RT_MODEL;
