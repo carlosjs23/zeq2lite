@@ -68,9 +68,9 @@ Regenerate after changing the bake or unwrap - **the aura section of
 earlier version of this file carried stale ones and cost a session an hour:
 ```
 python3 Tools/dev/make_aura_mesh.py Build/Release-darwin-arm/ZEQ2/models/effects/aura.iqm --segments 1024 --outline Tools/dev/aura_reference.png
-python3 Tools/dev/aura_band_from_reference.py Tools/dev/aura_reference.png Build/Release-darwin-arm/ZEQ2/effects/aura/auraStrip.png Build/Release-darwin-arm/ZEQ2/effects/aura/auraStrip.raw --inner-hug 0.05 --segments 1024 --width 2048 --height 512
+python3 Tools/dev/aura_band_from_reference.py Tools/dev/aura_reference.png Build/Release-darwin-arm/ZEQ2/effects/aura/auraStrip.png Build/Release-darwin-arm/ZEQ2/effects/aura/auraStrip.raw --inner-hug 0.0 --segments 1024 --width 2048 --height 512
 ```
-(`--inner-hug` must equal `INNER_HUG` in aura_vp.glsl - both are 0.05.)
+(`--inner-hug` must equal `INNER_HUG` in aura_vp.glsl - both are 0.0.)
 
 ## Metrics right now
 
