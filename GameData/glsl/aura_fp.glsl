@@ -54,9 +54,14 @@ varying float v_wraps;
    between them are the anime's own animation - two or three drawings of the
    same flame alternating - and at time zero frame 0 shows, which is the
    frame the measurement harness compares against the art. Must match
-   --frames in aura_band_from_reference.py. */
+   --frames in aura_band_from_reference.py.
+
+   FLICKER_FPS 0 holds frame 0: the shipped animation is the vertex stage's
+   sway alone, which the A/B clips read as the calmer of the two. The strip
+   still carries all four frames so the flipbook variant
+   (Tools/dev/aura_variants/c-flipbook.fp.glsl) is a pure shader swap. */
 #define STRIP_FRAMES 4.0
-#define FLICKER_FPS  8.0
+#define FLICKER_FPS  0.0
 /* Rows per frame, for the half-texel inset that keeps bilinear filtering
    from bleeding one frame's tips into the next frame's body. */
 #define FRAME_ROWS   512.0
