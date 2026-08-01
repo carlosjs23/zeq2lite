@@ -109,10 +109,10 @@ def read_outline(path, segments):
                 break
         rs.append(float(hi))
 
-    # A three-tap smooth: enough to take single-hair jitter out of the
-    # boundary, far too narrow to blunt a tongue.
-    rs = [(rs[i - 1] + 2.0 * rs[i] + rs[(i + 1) % segments]) / 4.0
-          for i in range(segments)]
+    # No smoothing: at these segment counts a crown needle subtends about
+    # one sample, and any averaging halves it - then peak-normalising
+    # against the shaved tip inflates every other radius to match. The
+    # jitter a smooth would remove is real hair in this reference.
     peak = max(rs)
     rs = [max(r / peak, 0.05) for r in rs]
 

@@ -100,9 +100,8 @@ def main():
                 hi = r
                 break
         rpix.append(float(hi))
-    # The same three-tap smooth the bake applies, so band and mesh agree.
-    rpix = [(rpix[i - 1] + 2.0 * rpix[i] + rpix[(i + 1) % args.segments]) / 4.0
-            for i in range(args.segments)]
+    # No smoothing, matching the bake: the ray lengths must agree with the
+    # mesh's outline or the band's rows sample the wrong radii.
 
     # Column u -> angle, by inverting the arc table.
     inv = []
