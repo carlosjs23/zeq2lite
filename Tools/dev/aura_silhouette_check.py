@@ -32,7 +32,7 @@ THRESHOLD = 112          # the bar the reference outline was measured at
 ANGLES = 512
 
 
-def render_mask(root, out_png, size=1024):
+def render_mask(root, out_png, size=2048):
     """Compile aurarender if needed and run the real pipeline."""
     dev = os.path.join(root, "Tools/dev")
     build = os.path.join(root, "Build/Release-darwin-arm")
