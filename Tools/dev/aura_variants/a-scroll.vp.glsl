@@ -20,7 +20,8 @@
  *   [0].xyz  force direction in world space   [0].w  strength
  *   [1].xyz  bounding box mins                [1].w  origin distance
  *   [2].xyz  bounding box maxs                [2].w  bounding box padding
- *   [3].x    amplitude  .y wavelength  .z scroll speed  .w unused
+ *   [3].x    amplitude  .y wavelength  .z scroll speed
+ *   [3].w    motion, 0 standing to 1 at full boost speed
  */
 
 uniform vec4 u_ProgramParams[4];
@@ -64,6 +65,16 @@ uniform float u_Time;
    against it instead of z-fighting, small enough to read as on the ground. */
 #define GROUND_LIFT 2.0
 
+/* How the shape answers motion. The screen projection of a unit direction
+   saturates near LATERAL_SAT for sideways motion and collapses toward zero
+   for motion into the screen - and only the visible part of the motion may
+   deform the shape, or the silhouette rotates toward a direction the viewer
+   cannot see. At full response the tear stretches STRETCH_ALONG of itself
+   along the flow and narrows STRETCH_SIDE across it: a comet, not a spin. */
+#define LATERAL_SAT   1.2
+#define STRETCH_ALONG 0.5
+#define STRETCH_SIDE  0.25
+
 /* How far the flame sways around its home position, in turns of the ring.
    The strip is the reference unwrapped, so every column belongs to one place
    on the boundary - the skirt's licks live at the base, the needles at the
@@ -100,6 +111,7 @@ void main(void) {
 	float amplitude    = u_ProgramParams[3].x;
 	float wavelength   = u_ProgramParams[3].y;
 	float scrollSpeed  = u_ProgramParams[3].z;
+	float motion       = u_ProgramParams[3].w;
 
 	/* --- the player's bounding box, in screen space -------------------- */
 
@@ -149,9 +161,16 @@ void main(void) {
 	forceDir = forceLen > FORCE_EPSILON ? forceDir / forceLen : vec2(0.0, -1.0);
 
 	/* The aura streams *against* the force: gravity pulling down makes it
-	   flare upward, and running forward trails it behind. Everything below is
-	   expressed in terms of that flow direction rather than the force itself. */
-	vec2 flowDir = -forceDir;
+	   flare upward, and running forward trails it behind. But the response
+	   is proportional, not a hard rotation: it takes both speed (motion)
+	   and a screen-visible direction (lateral) before the shape leaves its
+	   upright rest pose. Flying into or out of the screen projects to a
+	   near-zero direction, and rotating the whole silhouette toward that
+	   noise is what used to shapelessly spin the flying aura. */
+	float lateral = clamp(forceLen / LATERAL_SAT, 0.0, 1.0);
+	float deform  = motion * lateral;
+
+	vec2 flowDir = normalize(mix(vec2(0.0, 1.0), -forceDir, deform) + vec2(FORCE_EPSILON, 0.0));
 
 	/* The mesh carries the reference outline: gl_Normal.z is the boundary
 	   radius at this vertex's authored angle, crown-normalised, read off the
@@ -177,6 +196,13 @@ void main(void) {
 	   thickness follows the tongues instead of cutting across them. */
 	float rr  = mix(rRef * INNER_HUG, rRef, isOuter);
 	vec2 pRef = dir * rr;
+
+	/* The comet: at speed the shape stretches along its tip axis and pulls
+	   in across it. In the authored frame the tip is +Y, so this happens
+	   before the rotation onto the flow; at rest deform is zero and the
+	   outline is untouched - which is the frame the harness measures. */
+	pRef.y *= 1.0 + STRETCH_ALONG * deform;
+	pRef.x *= 1.0 - STRETCH_SIDE  * deform;
 
 	/* Rotate the authored shape rigidly so its tip rides the flow. With the
 	   flow straight up this is the identity. */
