@@ -75,11 +75,18 @@ python3 Tools/dev/aura_band_from_reference.py Tools/dev/aura_reference.png Build
 ## Metrics right now
 
 ```
-field     : mean|d| 0.0568  rms 0.1379  p95 0.3333   (edge-AA noise mostly)
-width rms : 0.0178 (base +0.001, waist +0.001, crown -0.002)
-silhouette: rms 0.0249  bias +0.0041  worst -0.1511
-tongues   : 60 vs ref 54; depth 0.117 vs 0.120
+field     : mean|d| 0.0486  rms 0.1225  p95 0.2941
+width rms : 0.0170 (base +0.003, waist +0.004, crown +0.005)
+silhouette: rms 0.0227  bias +0.0082  worst -0.1343
+tongues   : 51 vs ref 54; depth 0.115 vs 0.120
 ```
+The mask now renders at 2048 (the reference's own scale); the numbers
+above are on that footing. The remaining bottom-row |d| is mostly bbox
+registration: the reference's finest hair extremities set its bbox, the
+render's version of those sub-pixel hairs dilutes below the 112
+threshold, and the grid shifts ~a row. The t/u diagnostic masks (render
+the fp with tt or uu as luminance) proved texturing is exact - every
+remaining error is in the mapping.
 The big unlocks so far: removing SHEAR (authored in strip-repeat units; at
 one repeat per turn it rotated the field 40 degrees off the geometry),
 removing the wobble harmonics (static +-7.5% outline warp at t=0), and
