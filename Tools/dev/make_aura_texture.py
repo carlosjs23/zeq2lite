@@ -31,6 +31,13 @@ internal edge - which is exactly what a single solid band produced. And the
 licks come in two tiers, a few long ones over many short ones, because a comb
 of equal spikes reads as a sawblade no matter how much per-spike jitter is
 applied to it.
+
+The body band is kept deliberately thin and the taper steep, so most of the
+strip's area is gap rather than flame. Reference art draws a ki aura as
+separate needles with the scene plainly visible between them; a wide body and
+a shallow taper give broad scallops that meet at the base, and once the strip
+is wrapped several times around the ring those merge into one lit shell that
+hides both the character and the world behind it.
 """
 
 import argparse
@@ -301,16 +308,16 @@ def main():
                     help="0 = every lick identical, 1 = highly varied")
     ap.add_argument("--peak", type=int, default=240,
                     help="brightest alpha value (default: 240)")
-    ap.add_argument("--solid", type=float, default=0.32,
-                    help="fraction of V that is unbroken body (default: 0.32)")
+    ap.add_argument("--solid", type=float, default=0.14,
+                    help="fraction of V that is unbroken body (default: 0.14)")
     ap.add_argument("--softness", type=float, default=0.07,
                     help="lick edge feather in V, 0 = aliased hard edge")
-    ap.add_argument("--taper", type=float, default=2.8,
+    ap.add_argument("--taper", type=float, default=7.5,
                     help="lick profile exponent; 1 = straight triangle, higher = "
-                         "needle with concave flanks (default: 2.8)")
-    ap.add_argument("--minor", type=float, default=0.30,
-                    help="reach of a short lick against a long one (default: 0.30)")
-    ap.add_argument("--striation", type=float, default=0.09,
+                         "needle with concave flanks (default: 7.5)")
+    ap.add_argument("--minor", type=float, default=0.22,
+                    help="reach of a short lick against a long one (default: 0.22)")
+    ap.add_argument("--striation", type=float, default=0.28,
                     help="depth of the streaks through the body, 0 = flat slab")
     ap.add_argument("--tip-alpha", type=float, default=0.52,
                     help="alpha at the outer row against the core (default: 0.52)")
@@ -318,7 +325,7 @@ def main():
                     help="how far the lick tips come apart into filaments")
     ap.add_argument("--fine", type=float, default=4.0,
                     help="filaments per lick (default: 4)")
-    ap.add_argument("--rim", type=float, default=0.20,
+    ap.add_argument("--rim", type=float, default=0.12,
                     help="fraction of V the inner shoulder fades across")
     args = ap.parse_args()
 
