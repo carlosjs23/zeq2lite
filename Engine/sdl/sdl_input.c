@@ -34,19 +34,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../client/client.h"
 #include "../sys/sys_local.h"
 
-#ifdef MACOS_X
-// Mouse acceleration needs to be disabled
-#define MACOS_X_ACCELERATION_HACK
-// SDL 1.2 needed SDL_ShowCursor toggled repeatedly to actually hide the cursor
-// on macOS.  SDL2's relative mouse mode hides it itself, so that hack is gone.
-#endif
-
-#ifdef MACOS_X_ACCELERATION_HACK
-#include <IOKit/IOTypes.h>
-#include <IOKit/hidsystem/IOHIDLib.h>
-#include <IOKit/hidsystem/IOHIDParameter.h>
-#include <IOKit/hidsystem/event_status_driver.h>
-#endif
+// SDL2's relative mouse mode hides the cursor itself and reports unscaled
+// deltas (SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE defaults to 0), so macOS needs
+// neither the repeated SDL_ShowCursor toggle nor an IOKit acceleration poke.
 
 static cvar_t *in_keyboardDebug     = NULL;
 
@@ -63,10 +53,6 @@ static qboolean mouseAvailable = qfalse;
 static qboolean mouseActive = qfalse;
 
 static cvar_t *in_mouse             = NULL;
-#ifdef MACOS_X_ACCELERATION_HACK
-static cvar_t *in_disablemacosxmouseaccel = NULL;
-static double originalMouseSpeed = -1.0;
-#endif
 static cvar_t *in_nograb;
 
 static cvar_t *in_joystick          = NULL;
@@ -339,34 +325,6 @@ static keyNum_t IN_TranslateSDLToQ3Key( SDL_Keysym *keysym, qboolean down )
 	return key;
 }
 
-#ifdef MACOS_X_ACCELERATION_HACK
-/*
-===============
-IN_GetIOHandle
-===============
-*/
-static io_connect_t IN_GetIOHandle(void) // mac os x mouse accel hack
-{
-	io_connect_t iohandle = MACH_PORT_NULL;
-	kern_return_t status;
-	io_service_t iohidsystem = MACH_PORT_NULL;
-	mach_port_t masterport;
-
-	status = IOMasterPort(MACH_PORT_NULL, &masterport);
-	if(status != KERN_SUCCESS)
-		return 0;
-
-	iohidsystem = IORegistryEntryFromPath(masterport, kIOServicePlane ":/IOResources/IOHIDSystem");
-	if(!iohidsystem)
-		return 0;
-
-	status = IOServiceOpen(iohidsystem, mach_task_self(), kIOHIDParamConnectType, &iohandle);
-	IOObjectRelease(iohidsystem);
-
-	return iohandle;
-}
-#endif
-
 /*
 ===============
 IN_GobbleMotionEvents
@@ -395,41 +353,6 @@ static void IN_ActivateMouse( void )
 {
 	if (!mouseAvailable || !SDL_WasInit( SDL_INIT_VIDEO ) )
 		return;
-
-#ifdef MACOS_X_ACCELERATION_HACK
-	if (!mouseActive) // mac os x mouse accel hack
-	{
-		// Save the status of mouse acceleration
-		originalMouseSpeed = -1.0; // in case of error
-		if(in_disablemacosxmouseaccel->integer)
-		{
-			io_connect_t mouseDev = IN_GetIOHandle();
-			if(mouseDev != 0)
-			{
-				if(IOHIDGetAccelerationWithKey(mouseDev, CFSTR(kIOHIDMouseAccelerationType), &originalMouseSpeed) == kIOReturnSuccess)
-				{
-					Com_Printf("previous mouse acceleration: %f\n", originalMouseSpeed);
-					if(IOHIDSetAccelerationWithKey(mouseDev, CFSTR(kIOHIDMouseAccelerationType), -1.0) != kIOReturnSuccess)
-					{
-						Com_Printf("Could not disable mouse acceleration (failed at IOHIDSetAccelerationWithKey).\n");
-						Cvar_Set ("in_disablemacosxmouseaccel", 0);
-					}
-				}
-				else
-				{
-					Com_Printf("Could not disable mouse acceleration (failed at IOHIDGetAccelerationWithKey).\n");
-					Cvar_Set ("in_disablemacosxmouseaccel", 0);
-				}
-				IOServiceClose(mouseDev);
-			}
-			else
-			{
-				Com_Printf("Could not disable mouse acceleration (failed at IO_GetIOHandle).\n");
-				Cvar_Set ("in_disablemacosxmouseaccel", 0);
-			}
-		}
-	}
-#endif
 
 	if( !mouseActive )
 	{
@@ -481,25 +404,6 @@ static void IN_DeactivateMouse( void )
 
 	if( !mouseAvailable )
 		return;
-
-#ifdef MACOS_X_ACCELERATION_HACK
-	if (mouseActive) // mac os x mouse accel hack
-	{
-		if(originalMouseSpeed != -1.0)
-		{
-			io_connect_t mouseDev = IN_GetIOHandle();
-			if(mouseDev != 0)
-			{
-				Com_Printf("restoring mouse acceleration to: %f\n", originalMouseSpeed);
-				if(IOHIDSetAccelerationWithKey(mouseDev, CFSTR(kIOHIDMouseAccelerationType), originalMouseSpeed) != kIOReturnSuccess)
-					Com_Printf("Could not re-enable mouse acceleration (failed at IOHIDSetAccelerationWithKey).\n");
-				IOServiceClose(mouseDev);
-			}
-			else
-				Com_Printf("Could not re-enable mouse acceleration (failed at IO_GetIOHandle).\n");
-		}
-	}
-#endif
 
 	if( mouseActive )
 	{
@@ -1142,10 +1046,6 @@ void IN_Init( void )
 	in_joystick = Cvar_Get( "in_joystick", "0", CVAR_ARCHIVE|CVAR_LATCH );
 	in_joystickDebug = Cvar_Get( "in_joystickDebug", "0", CVAR_TEMP );
 	in_joystickThreshold = Cvar_Get( "joy_threshold", "0.15", CVAR_ARCHIVE );
-
-#ifdef MACOS_X_ACCELERATION_HACK
-	in_disablemacosxmouseaccel = Cvar_Get( "in_disablemacosxmouseaccel", "1", CVAR_ARCHIVE );
-#endif
 
 	// SDL_EnableUNICODE / SDL_EnableKeyRepeat are gone.  Text now arrives as
 	// SDL_TEXTINPUT events, and key repeat is filtered per-event in
