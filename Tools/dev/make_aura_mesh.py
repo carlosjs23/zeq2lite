@@ -173,10 +173,12 @@ def build_geometry(segments, inner_r, outer_r, outline=None):
             cx, cy = math.cos(angle), math.sin(angle)
             positions.append((cx * radius * ref, cy * radius * ref, 0.0))
             texcoords.append((u, v))
-            normals.append((0.0, 0.0, 1.0))
-            # Alpha carries the reference outline's radius at this angle,
-            # crown-normalised; a mesh built without a reference carries 255
-            # everywhere and the ring stays a plain circle.
+            # The normal is a float payload channel: xy the exact unit
+            # direction, z the outline radius. The colour bytes carried both
+            # once, and at a thousand segments a byte's 1/127 step is coarser
+            # than the segment spacing - adjacent directions alias, and a
+            # needle's radius lands on a gap's angle.
+            normals.append((cx, cy, ref))
             colors.append((encode(cx), encode(cy), 255 if outer else 0,
                            max(0, min(255, int(round(ref * 255.0))))))
 

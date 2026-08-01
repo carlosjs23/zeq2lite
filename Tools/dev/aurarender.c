@@ -125,6 +125,7 @@ typedef struct {
 	int            numVerts, numTris;
 	float         *positions;	/* 3f */
 	float         *texcoords;	/* 2f */
+	float         *normals;		/* 3f: direction + outline radius payload */
 	unsigned char *colors;		/* 4ub */
 	unsigned int  *tris;		/* 3ui */
 } mesh_t;
@@ -166,6 +167,7 @@ static int LoadIQM(const char *path, mesh_t *m) {
 	m->numTris = (int)numTri;
 	m->positions = NULL;
 	m->texcoords = NULL;
+	m->normals = NULL;
 	m->colors = NULL;
 
 	for (i = 0; i < numVA; i++) {
@@ -177,12 +179,14 @@ static int LoadIQM(const char *path, mesh_t *m) {
 			m->positions = (float *)(data + va[4]);
 		else if (va[0] == 1 && va[2] == 7)	/* IQM_TEXCOORD, float */
 			m->texcoords = (float *)(data + va[4]);
+		else if (va[0] == 2 && va[2] == 7)	/* IQM_NORMAL, float */
+			m->normals = (float *)(data + va[4]);
 		else if (va[0] == 6 && va[2] == 1)	/* IQM_COLOR, ubyte */
 			m->colors = data + va[4];
 	}
 	m->tris = (unsigned int *)(data + ofsTri);
 
-	if (!m->positions || !m->texcoords || !m->colors) {
+	if (!m->positions || !m->texcoords || !m->normals || !m->colors) {
 		fprintf(stderr, "aurarender: %s lacks a needed vertex array\n", path);
 		return 0;
 	}
@@ -434,6 +438,8 @@ int main(int argc, char **argv) {
 
 	glEnableClientState(GL_VERTEX_ARRAY);
 	glVertexPointer(3, GL_FLOAT, 0, mesh.positions);
+	glEnableClientState(GL_NORMAL_ARRAY);
+	glNormalPointer(GL_FLOAT, 0, mesh.normals);
 	glEnableClientState(GL_COLOR_ARRAY);
 	glColorPointer(4, GL_UNSIGNED_BYTE, 0, mesh.colors);
 	glClientActiveTexture(GL_TEXTURE0);

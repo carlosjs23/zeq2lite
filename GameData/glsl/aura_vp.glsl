@@ -119,9 +119,11 @@ void main(void) {
 
 	/* --- where this vertex sits ---------------------------------------- */
 
-	vec2  rel     = gl_Color.rg * 2.0 - 1.0;   /* unit-circle direction */
+	/* Direction rides the normal, not the colour bytes: a byte's 1/127 step
+	   is coarser than the segment spacing at high segment counts, and the
+	   aliased directions put one segment's radius on its neighbour's angle. */
 	float isOuter = gl_Color.b;
-	vec2  dir     = normalize(rel + vec2(FORCE_EPSILON));
+	vec2  dir     = normalize(gl_Normal.xy + vec2(FORCE_EPSILON));
 
 	/* --- force, flattened onto the view plane --------------------------- */
 
@@ -138,14 +140,15 @@ void main(void) {
 	   expressed in terms of that flow direction rather than the force itself. */
 	vec2 flowDir = -forceDir;
 
-	/* The mesh carries the reference outline: gl_Color.a is the boundary
+	/* The mesh carries the reference outline: gl_Normal.z is the boundary
 	   radius at this vertex's authored angle, crown-normalised, read off the
-	   reference art's alpha mask by make_aura_mesh.py. The silhouette is the
-	   reference's own - every tongue of it - rather than any width function's
-	   approximation. The tip is authored at +Y, so the directional terms below
-	   work in the authored frame, and the finished shape is rotated rigidly
-	   onto the flow at the end. */
-	float rRef = gl_Color.a;
+	   reference art's alpha mask by make_aura_mesh.py - a float, because the
+	   colour byte it once rode in stepped the needle tips visibly. The
+	   silhouette is the reference's own - every tongue of it - rather than
+	   any width function's approximation. The tip is authored at +Y, so the
+	   directional terms below work in the authored frame, and the finished
+	   shape is rotated rigidly onto the flow at the end. */
+	float rRef = gl_Normal.z;
 
 	float along = dir.y;
 
