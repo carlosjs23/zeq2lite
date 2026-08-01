@@ -61,6 +61,16 @@ uniform float u_Time;
    against it instead of z-fighting, small enough to read as on the ground. */
 #define GROUND_LIFT 2.0
 
+/* How far the flame sways around its home position, in turns of the ring.
+   The strip is the reference unwrapped, so every column belongs to one place
+   on the boundary - the skirt's licks live at the base, the needles at the
+   crown - and a continuous scroll parades each around the whole ring.
+   Swaying keeps every lick in its own neighbourhood. Two incommensurate
+   sines so the motion does not tick like a metronome; both vanish at
+   u_Time 0, where the measurement harness compares against the art. */
+#define OSC_SPAN 0.02
+#define OSC_RATE 4.0
+
 
 varying float v_seamBlend;
 /* 0 on the inner ring, 1 at the spike tips. Carried separately from the
@@ -286,9 +296,12 @@ void main(void) {
 	/* The authored coordinate advances with the outline's own arc length -
 	   make_aura_mesh.py bakes the cumulative arc into it - and the band
 	   strip is that same arc unwrapped, so one turn of the ring is one width
-	   of the strip: no wrap count. Scroll slides the reference's own field
-	   around the boundary. */
-	float u = gl_MultiTexCoord0.x + u_Time * scrollSpeed;
+	   of the strip: no wrap count. The field sways rather than rotates:
+	   scrollSpeed drives the sway rate, OSC_SPAN bounds its reach, so the
+	   configured cvar still means "how alive is this aura". */
+	float phase = u_Time * scrollSpeed * OSC_RATE;
+	float u = gl_MultiTexCoord0.x
+	        + OSC_SPAN * (sin(phase) + 0.5 * sin(2.7 * phase));
 
 	/* The art is a flat drawing: its field is authored against the screen,
 	   so the strip must interpolate in screen space even across the quads
