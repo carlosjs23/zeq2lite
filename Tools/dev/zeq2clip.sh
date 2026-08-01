@@ -17,6 +17,10 @@
 #   --record  join --map, wait --settle frames, record demos/NAME for
 #             --frames frames, quit. The recording session's own shader
 #             state does not matter - shaders apply at replay time.
+#   --input   a cfg of +button/+move commands (with `wait` pacing) exec'd
+#             just after recording starts, so the demo captures scripted
+#             motion. It has to be a cfg: the engine's command line strips
+#             the +/- prefixes, so key commands cannot ride it directly.
 #   --play    replay demos/NAME with `video`, write --out. A .gif out needs
 #             ffmpeg on PATH; anything else keeps the engine's MJPEG-AVI.
 #   --vp/--fp overlay these files as glsl/aura_vp.glsl / aura_fp.glsl in the
@@ -42,7 +46,7 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/zeq2env.sh"
 
-MODE="" NAME="" OUT="" MAP="desert" FRAMES=500 SETTLE=400 VP="" FP=""
+MODE="" NAME="" OUT="" MAP="desert" FRAMES=500 SETTLE=400 VP="" FP="" INPUT=""
 SETS=()
 EXTRA=()
 while [[ $# -gt 0 ]]; do
@@ -55,6 +59,7 @@ while [[ $# -gt 0 ]]; do
 		--settle) SETTLE="$2"; shift 2 ;;
 		--vp)     VP="$2"; shift 2 ;;
 		--fp)     FP="$2"; shift 2 ;;
+		--input)  INPUT="$2"; shift 2 ;;
 		--set)    SETS+=("$2"); shift 2 ;;
 		--)       shift; EXTRA=("$@"); break ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
@@ -71,6 +76,7 @@ GLSL="$GAME/glsl"
 WORK="$(mktemp -d)"
 
 cleanup() {
+	rm -f "$GAME/zeq2clip_input.cfg"
 	[[ -f "$WORK/zeq2config.cfg" ]] && cp "$WORK/zeq2config.cfg" "$CONFIG"
 	[[ -f "$WORK/tierDefault.cfg" ]] && cp "$WORK/tierDefault.cfg" "$TIER"
 	[[ -f "$WORK/aura_vp.glsl" ]] && cp "$WORK/aura_vp.glsl" "$GLSL/aura_vp.glsl"
@@ -124,8 +130,14 @@ base=( $(zeq2_base_args) +set r_mode 3 +cg_draw2D 0
        +cg_thirdPersonAngle 0 +cg_thirdPersonRange 170 )
 
 if [[ "$MODE" == record ]]; then
+	inputcmd=()
+	if [[ -n "$INPUT" ]]; then
+		cp "$INPUT" "$GAME/zeq2clip_input.cfg"
+		inputcmd=(+exec zeq2clip_input)
+	fi
 	"$ZEQ2_BIN" "${base[@]}" "${EXTRA[@]}" +devmap "$MAP" \
-		+wait "$SETTLE" +record "$NAME" +wait "$FRAMES" +stoprecord \
+		+wait "$SETTLE" +record "$NAME" "${inputcmd[@]}" \
+		+wait "$FRAMES" +stoprecord \
 		+wait 30 +quit >/dev/null 2>&1
 	demo="$(ls "$GAME/demos/$NAME".dm_* 2>/dev/null | head -1)"
 	if [[ -z "$demo" ]]; then
