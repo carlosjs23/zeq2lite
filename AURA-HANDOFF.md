@@ -1,5 +1,8 @@
 # Aura 1:1 reproduction — session handoff
 
+> The durable documentation is `Tools/dev/AURA.md`; this file is the working
+> session state on top of it.
+
 ## Goal
 
 Make the screen-space aura pipeline reproduce the reference art **1:1 — the
@@ -10,7 +13,8 @@ match 1:1, without actually using the engine."
 ## Where the work lives
 
 - Worktree: `/Users/carlos/Documents/antigravity/modest-einstein/.claude/worktrees/peaceful-wu-a66acb`
-  on branch `ispm/peaceful-wu-a66acb`. **The shell often resets cwd to the
+  on branch `aura-reference-pipeline` (renamed from the
+  generated worktree name). **The shell often resets cwd to the
   main checkout between turns — `cd` to the worktree in EVERY command, and
   verify with `git log --oneline -1` before committing (one commit already
   landed on the wrong branch once and had to be reset away).**

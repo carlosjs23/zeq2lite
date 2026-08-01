@@ -25,6 +25,10 @@ Python scripts use only the standard library; shell scripts need bash.
 `zeq2smoke.sh` and `zeq2test.sh` are gates (non-zero exit on failure). The rest
 are reports.
 
+The screen-space aura's whole pipeline - one reference image to the 1:1
+in-game effect, its measurement loop and its animation A/B - is documented in
+`AURA.md`.
+
 ## Regression tests (`zeq2test.sh`)
 
 `zeq2test.sh` with no arguments runs only the static checks — fast, no build.
