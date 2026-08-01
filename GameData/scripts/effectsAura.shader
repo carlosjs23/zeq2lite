@@ -78,20 +78,6 @@ AuraLightningSparks2
 // rgbGen-processed ones, and this mesh carries per-vertex data in that channel
 // rather than colour. The tint comes from the entity colour in the fragment
 // program instead.
-// The interior veil behind the screen-space aura: a camera-facing sprite the
-// size of the player's box. The ring mesh never covers the space it encloses,
-// and the reference fills that space with a soft glow.
-Aura_InnerGlow
-{
-	cull none
-	{
-		map $whiteimage
-		program auraGlow
-		vertexProgram glsl/generic_vp.glsl
-		fragmentProgram glsl/aura_glow_fp.glsl
-		blendFunc GL_ONE GL_ONE
-	}
-}
 Aura_ScreenSpace
 {
 	cull none
