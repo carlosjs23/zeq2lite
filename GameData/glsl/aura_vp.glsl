@@ -57,20 +57,20 @@ uniform float u_Time;
    at the sides to look like it has any volume at all. This keeps the sizing
    tied to the body, so a broad character still gets a broader aura, while
    leaving enough girth for the licks to be legible. */
-#define FLANK_GIRTH 0.65
+#define FLANK_GIRTH 0.85
 
 /* How far the lower half's licks are reflected from pointing down to pointing
    up. Ki does not hang below a character like a hem - it gathers under them
    and is thrown back up, so the flame at the base sweeps up and out into a V
    rather than draping down. 1 mirrors it outright. */
-#define BASE_SWEEP 0.9
+#define BASE_SWEEP 0.25
 
 /* How far every lick is biased toward the flow, on top of the base mirror. Ki
    rises: the reference frames show tongues climbing more or less vertically
    even out at the flanks, where a purely radial spike would be pointing
    sideways at the camera. 0 leaves each lick on the ring's own radius, 1 aims
    the whole aura straight up. */
-#define RISE 0.55
+#define RISE 0.35
 
 /* How far the strip is sheared along U as it runs outward, in strip repeats.
    The licks in the reference do not stand perpendicular to the edge they leave
@@ -81,19 +81,17 @@ uniform float u_Time;
    coordinate does it instead, and costs nothing. */
 #define SHEAR 0.11
 
-/* Width against height. V_OPEN sets how the two arms leave the apex: 1 is
-   straight lines, below 1 bows them outward so the aura is already wide low
-   down. Held under 1 because straight arms are still nearly shut at ankle
-   height and leave the boots outside the flame - the V has to reach its width
-   by the feet, not by the knees. V_CLOSE shuts the ring again at the crown so
-   the plume has something to spring from.
-
-   V_NORM restores the profile's peak to 1; the product of the two terms peaks
-   well short of it, and without this every other width constant would have to
-   absorb the difference. Recompute it if either exponent changes. */
-#define V_OPEN  0.35
-#define V_CLOSE 4.0
-#define V_NORM  1.36
+/* Width against height: w = h^V_OPEN * (1 - h^V_CLOSE)^V_TAPER, scaled by
+   V_NORM so the peak is 1. Fitted numerically to the reference art's
+   measured silhouette, which is a low-bulged teardrop: widest around 35%%
+   of the way up, tapering hard above 55%% and closing to a point. The old
+   exponents made an egg - bulge at half height, shoulders still wide at
+   70%% - and no amount of texture reads right on the wrong outline.
+   Recompute V_NORM if any exponent changes. */
+#define V_OPEN  0.54
+#define V_CLOSE 1.2
+#define V_TAPER 1.1
+#define V_NORM  2.544
 
 /* How far below the box the V's apex is dropped, as a fraction of the box
    half-height. The arms need somewhere to open from: with the apex exactly at
@@ -259,7 +257,7 @@ void main(void) {
 	vec2 perpUnit = perpVec / max(length(perpVec), FORCE_EPSILON);
 
 	float width = pow(height, V_OPEN)
-	            * (1.0 - pow(height, V_CLOSE))
+	            * pow(1.0 - pow(height, V_CLOSE), V_TAPER)
 	            * V_NORM;
 
 	/* originDist scales the whole profile and nothing else. It used to be
@@ -349,7 +347,7 @@ void main(void) {
 	   as a pillar the character happens to be standing at the bottom of rather
 	   than as their own aura, and it is the crown alone that has to come down -
 	   the flanks are already sized off the body's width and are fine. */
-	pos += flowDir * evenly * spikeLen * strength * 0.22 * tip;
+	pos += flowDir * evenly * spikeLen * strength * 0.34 * tip;
 
 	/* The outer ring carries the spikes: a real skirt everywhere so the ring
 	   closes visibly, growing toward the tip. Only the outer vertices move.
@@ -372,7 +370,7 @@ void main(void) {
 	   ring draws in under the feet while the outer one does not, so the skirt
 	   *widens* exactly where the aura should be gathering, and the effect
 	   stands the character in a puddle rather than lifting off them. */
-	float spike = strength * (0.55 + 0.17 * crown) * (1.0 - 0.5 * base);
+	float spike = strength * (0.55 + 0.17 * crown) * (1.0 - 0.15 * base);
 
 	/* Spikes leave along the ring's own radius everywhere except the base,
 	   where they are turned back up the flow. Left radial, the licks directly
