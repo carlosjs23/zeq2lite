@@ -154,7 +154,7 @@ def filaments(u, spikes, fine, taper):
     return best
 
 
-def flame_boundary(u, spikes, jitter, solid, taper, minor, fray, fine):
+def flame_boundary(u, spikes, jitter, solid, taper, minor, fray, fine, major):
     """How far out the flame reaches at this u, in V. Periodic in u.
 
     The silhouette is a height field rather than a set of drawn shapes, and
@@ -176,7 +176,13 @@ def flame_boundary(u, spikes, jitter, solid, taper, minor, fray, fine):
     Licks come in two tiers. A comb of same-height spikes reads as machined no
     matter how much the heights are jittered, because the eye picks up the
     constant period before it picks up the variation; giving one lick in three
-    a full-length reach breaks that period at a scale the eye reads as flame.
+    a longer reach breaks that period at a scale the eye reads as flame.
+
+    The two reaches have to stay near each other. Letting the long tier run to
+    the top of the strip made it a handful of thin straight shards flung clear
+    of everything else - conspicuous rather than energetic, because nothing at
+    that length is going anywhere near the body it comes off. The tiers want to
+    differ enough to break the period and no more.
     """
     scaled = u * spikes
     index = int(math.floor(scaled))
@@ -191,8 +197,8 @@ def flame_boundary(u, spikes, jitter, solid, taper, minor, fray, fine):
         wrapped = cell % spikes            # keeps the u = 1 -> 0 seam exact
         frac = scaled - cell
 
-        major = (wrapped * 3) % 7 < 3
-        reach = 1.0 if major else minor
+        is_major = (wrapped * 3) % 7 < 3
+        reach = major if is_major else minor
 
         height = reach * (1.0 - jitter * hash01(wrapped, 1.0))
         lean = (hash01(wrapped, 2.0) - 0.5) * 0.6 * jitter
@@ -254,10 +260,10 @@ def embers(u, v, spikes, solid, softness):
 
 
 def spike_alpha(u, v, spikes, jitter, solid, softness, taper, minor,
-                striation, tip_alpha, rim, fray, fine):
+                striation, tip_alpha, rim, fray, fine, major):
     """Alpha at (u, v), both 0..1. Periodic in u so the strip tiles."""
     boundary = flame_boundary(u, spikes, jitter, solid, taper, minor,
-                              fray, fine)
+                              fray, fine, major)
 
     # Feathered in V. The boundary is a height, so the edge softens along the
     # direction the flame grows - which is what keeps a near-vertical needle
@@ -272,7 +278,7 @@ def spike_alpha(u, v, spikes, jitter, solid, softness, taper, minor,
 
 
 def build_png(width, height, spikes, jitter, peak, solid, softness, taper,
-              minor, striation, tip_alpha, rim, fray, fine):
+              minor, striation, tip_alpha, rim, fray, fine, major):
     rows = []
     for y in range(height):
         v = (y + 0.5) / height
@@ -281,7 +287,8 @@ def build_png(width, height, spikes, jitter, peak, solid, softness, taper,
         for x in range(width):
             u = (x + 0.5) / width
             a = spike_alpha(u, v, spikes, jitter, solid, softness, taper,
-                            minor, striation, tip_alpha, rim, fray, fine)
+                            minor, striation, tip_alpha, rim, fray, fine,
+                            major)
             a = int(round(max(0.0, min(1.0, a)) * peak))
             row += bytes((255, 255, 255, a))
         rows.append(bytes(row))
@@ -315,8 +322,13 @@ def main():
     ap.add_argument("--taper", type=float, default=7.5,
                     help="lick profile exponent; 1 = straight triangle, higher = "
                          "needle with concave flanks (default: 7.5)")
-    ap.add_argument("--minor", type=float, default=0.22,
-                    help="reach of a short lick against a long one (default: 0.22)")
+    ap.add_argument("--minor", type=float, default=0.35,
+                    help="reach of a short lick, as a fraction of the strip "
+                         "past the body (default: 0.35)")
+    ap.add_argument("--major", type=float, default=0.55,
+                    help="reach of a long lick; keep it near --minor, since a "
+                         "long tier that outruns the short one reads as loose "
+                         "shards rather than flame (default: 0.55)")
     ap.add_argument("--striation", type=float, default=0.28,
                     help="depth of the streaks through the body, 0 = flat slab")
     ap.add_argument("--tip-alpha", type=float, default=0.52,
@@ -338,7 +350,7 @@ def main():
     blob = build_png(args.width, args.height, args.spikes, args.jitter,
                      args.peak, args.solid, args.softness, args.taper,
                      args.minor, args.striation, args.tip_alpha, args.rim,
-                     args.fray, args.fine)
+                     args.fray, args.fine, args.major)
     with open(args.output, "wb") as fh:
         fh.write(blob)
 
