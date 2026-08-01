@@ -67,7 +67,11 @@ float flame( float u, float t ){
 
 
 void main(void) {
-	float alpha = flame( gl_TexCoord[0].s, gl_TexCoord[0].t) * u_EntityColor.a;
+	/* The vertex stage scales the coordinate by clip w so it interpolates in
+	   screen space across the ground fold; dividing by q restores it. */
+	vec2 st = gl_TexCoord[0].st / max( gl_TexCoord[0].q, 0.0001);
+
+	float alpha = flame( st.s, st.t) * u_EntityColor.a;
 
 	/* The tint pipeline is unchanged from the sampled version. The tips run
 	   cool by deepening into the character's own colour; a fixed target is a

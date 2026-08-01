@@ -56,6 +56,11 @@ uniform float u_Time;
 /* Hard ceiling on the outline's crown reach in NDC; see the span comment. */
 #define SPAN_CAP  0.85
 
+/* How far above the feet plane the grounded part of the sheet sits, in world
+   units: enough that the flame lying across the floor wins the depth test
+   against it instead of z-fighting, small enough to read as on the ground. */
+#define GROUND_LIFT 2.0
+
 
 varying float v_seamBlend;
 /* 0 on the inner ring, 1 at the spike tips. Carried separately from the
@@ -90,7 +95,6 @@ void main(void) {
 	   vertices per aura that is cheaper than any means of avoiding it. */
 	vec2 boxMin = vec2( 1e9);
 	vec2 boxMax = vec2(-1e9);
-	float depth = 1e9;
 
 	for (int i = 0; i < 8; i++) {
 		vec3 corner = vec3(
@@ -108,24 +112,7 @@ void main(void) {
 		boxMin = min(boxMin, ndc);
 		boxMax = max(boxMax, ndc);
 
-		/* One depth for the whole ring, so the aura sorts as a flat sheet
-		   rather than slicing into geometry - but the *nearest* corner, not
-		   the box centre and certainly not corner zero, which is whichever
-		   corner happens to be at the world-space minimum. The skirt hangs
-		   below the player's feet, and the floor it hangs over is nearer to
-		   the camera than the player is; sorting the sheet any further back
-		   lets that floor swallow the base of the ring, leaving the two
-		   flanks standing unconnected. Which corner is furthest also depends
-		   on the view azimuth, which is why the base used to survive from
-		   some angles and not others. */
-		depth = min(depth, clip.z / w);
 	}
-
-	/* A corner behind the camera lands at an absurd depth once w is clamped.
-	   Pinning the result inside the frustum turns that into "draw in front of
-	   everything", which is what a camera sitting inside the player should
-	   look like anyway, instead of near-plane clipping the aura away. */
-	gl_Position.z = clamp(depth, -0.99, 0.99);
 
 	vec2 boxCentre = (boxMin + boxMax) * 0.5;
 	vec2 boxHalf   = (boxMax - boxMin) * 0.5 + vec2(padding);
@@ -209,8 +196,53 @@ void main(void) {
 
 	vec2 pos = boxCentre + shape * evenly * span;
 
-	gl_Position.xy = pos;
-	gl_Position.w  = 1.0;
+	/* --- back into the world -------------------------------------------- */
+
+	/* The shape is authored in NDC, but a sheet needs honest depths: behind
+	   the character it must lose their pixels, lying across the ground it
+	   must win the floor's, and anything genuinely between camera and flame
+	   must still occlude it. So each vertex goes back into model space along
+	   its own view ray - onto the view-facing plane through the player, or
+	   onto the ground plane at the feet where that is nearer - and then
+	   reprojects. The ray is the same, so the screen position is unchanged
+	   by construction; only the depth becomes real. */
+	float pa  = u_ProjectionMatrix[0][0];
+	float pb  = u_ProjectionMatrix[1][1];
+	float p22 = u_ProjectionMatrix[2][2];
+	float p32 = u_ProjectionMatrix[3][2];
+
+	/* MV = P^-1 * MVP, with the perspective inverse written out. */
+	mat4 invP  = mat4(0.0);
+	invP[0][0] = 1.0 / pa;
+	invP[1][1] = 1.0 / pb;
+	invP[3][2] = -1.0;
+	invP[2][3] = 1.0 / p32;
+	invP[3][3] = p22 / p32;
+	mat4 mv     = invP * u_ModelViewProjectionMatrix;
+	mat3 rot    = mat3(mv);
+	vec3 trans  = mv[3].xyz;
+	vec3 camPos = -(trans * rot);   /* vec * mat multiplies by the transpose */
+
+	/* Eye-space distance of the plane the sheet stands on. */
+	float dRef = max(-(mv * vec4((boxMins + boxMaxs) * 0.5, 1.0)).z, FORCE_EPSILON);
+
+	/* This pixel's point on that plane, back in model space. */
+	vec3 eyePt   = vec3(pos.x * dRef / pa, pos.y * dRef / pb, -dRef);
+	vec3 sheetPt = (eyePt - trans) * rot;
+
+	/* Where the same ray crosses the feet plane, held GROUND_LIFT above it.
+	   While that crossing is in front of the sheet the flame lies down onto
+	   it; past the fold line it stands up the player's plane. The camera has
+	   to be above the plane, or a low camera would fold the crown onto it. */
+	vec3  rayDir  = sheetPt - camPos;
+	float groundZ = boxMins.z + GROUND_LIFT;
+	float rayFall = abs(rayDir.z) > FORCE_EPSILON ? rayDir.z : -FORCE_EPSILON;
+	float hit     = (groundZ - camPos.z) / rayFall;
+	if (camPos.z > groundZ && hit > 0.0 && hit < 1.0) {
+		sheetPt = camPos + rayDir * hit;
+	}
+
+	gl_Position = u_ModelViewProjectionMatrix * vec4(sheetPt, 1.0);
 
 	/* --- texturing ------------------------------------------------------ */
 
@@ -255,6 +287,14 @@ void main(void) {
 	   around the boundary. */
 	float u = gl_MultiTexCoord0.x + u_Time * scrollSpeed;
 
+	/* The art is a flat drawing: its field is authored against the screen,
+	   so the strip must interpolate in screen space even across the quads
+	   the ground fold tilts into the world - perspective-correct
+	   interpolation there slides the field off its authoring. Scaling the
+	   coordinate by clip w and dividing it back out per fragment cancels
+	   the hardware's 1/w exactly. */
+	float wClip = gl_Position.w;
+
 	/* Sheared with distance out, so every lick leans. The same sign on both
 	   copies: the mirrored one already reverses U, so an equal shear comes out
 	   leaning the opposite way on the far side of the aura - which is what is
@@ -263,7 +303,7 @@ void main(void) {
 	/* No shear and no mirrored copy: the strip is the reference's own
 	   field, its licks already lean in the art, and anything added on top
 	   moves the material off the geometry that carries its outline. */
-	gl_TexCoord[0] = vec4( u, gl_MultiTexCoord0.y * amplitude, 0.0, 1.0);
+	gl_TexCoord[0] = vec4( u * wClip, gl_MultiTexCoord0.y * amplitude * wClip, 0.0, wClip);
 	gl_TexCoord[1] = gl_TexCoord[0];
 
 	v_edge = gl_MultiTexCoord0.y;
