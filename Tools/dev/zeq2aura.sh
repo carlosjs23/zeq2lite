@@ -22,6 +22,13 @@
 #   zeq2aura.sh --set auraColor="1 0 0" --hull        # stock old aura, for A/B
 #   zeq2aura.sh --sweep auraScale=1,2,3 --crop none      # keep whole frames
 #   zeq2aura.sh --sweep auraScale=1,2,3 --range 160      # pull the camera back
+#   zeq2aura.sh --model krillin                          # a character, not the saved one
+#   zeq2aura.sh --sweep model=frieza,krillin,nappa --columns 3
+#
+# `model` sweeps like a config key but is a cvar, not one: the aura's size comes
+# from the player's bounding box, so how it sits is a property of the character
+# and the roster has to be looked at side by side to tune it. A bare name gets
+# /default appended.
 #
 # Writes a labelled contact sheet, one cell per sample.
 
@@ -36,6 +43,8 @@ CROP=470x640
 RANGE=110
 HULL=0
 KEEP=0
+MODEL=""
+COLUMNS=""
 
 # Keys the hull path does not read at all - passing them to it does nothing.
 SS_ONLY="auraOriginDistance auraPadding auraAmplitude auraWavelength auraScrollSpeed"
@@ -54,9 +63,11 @@ while [[ $# -gt 0 ]]; do
 		--frames)  FRAMES="$2"; shift 2 ;;
 		--crop)    CROP="$2"; shift 2 ;;
 		--range)   RANGE="$2"; shift 2 ;;
+		--model)   MODEL="$2"; shift 2 ;;
+		--columns) COLUMNS="$2"; shift 2 ;;
 		--hull)    HULL=1; shift ;;
 		--keep)    KEEP=1; shift ;;
-		-h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}"; exit 0 ;;
+		-h|--help) sed -n '2,33p' "${BASH_SOURCE[0]}"; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
 	esac
 done
@@ -155,6 +166,10 @@ for value in "${SWEEP_VALUES[@]}"; do
 	set_key auraAlways  True "$TIER"
 	for kv in "${FIXED[@]}"; do
 		key="${kv%%=*}"
+		if [[ "$key" == "model" ]]; then
+			echo "error: model is a cvar, not a tier config key - use --model" >&2
+			exit 2
+		fi
 		if [[ $HULL -eq 1 && " $SS_ONLY " == *" $key "* ]]; then
 			echo "  (hull: ignoring $key - the hull path never reads it)" >&2
 			continue
@@ -166,12 +181,24 @@ for value in "${SWEEP_VALUES[@]}"; do
 		fi
 		set_key "$key" "${kv#*=}" "$TIER"
 	done
-	if [[ "$SWEEP_KEY" != "sample" ]]; then
+	# model is a cvar rather than a key in the tier config, so it is carried to
+	# the engine below instead of written here.
+	sample_model="$MODEL"
+	if [[ "$SWEEP_KEY" == "model" ]]; then
+		sample_model="$value"
+	elif [[ "$SWEEP_KEY" != "sample" ]]; then
 		if [[ $HULL -eq 1 && " $SS_ONLY $SS_SHARED " == *" $SWEEP_KEY "* ]]; then
 			echo "  (hull: ignoring swept $SWEEP_KEY - see --hull notes)" >&2
 		else
 			set_key "$SWEEP_KEY" "$value" "$TIER"
 		fi
+	fi
+
+	# A bare character name means the default skin.
+	model_cmd=()
+	if [[ -n "$sample_model" ]]; then
+		[[ "$sample_model" == */* ]] || sample_model="$sample_model/default"
+		model_cmd=(+model "$sample_model")
 	fi
 
 	label="$SWEEP_KEY $value"
@@ -186,11 +213,13 @@ for value in "${SWEEP_VALUES[@]}"; do
 	# The camera cvars are passed as bare commands rather than `+set`: they are
 	# CVAR_ARCHIVE and sit in zeq2config.cfg, whose exec would overwrite an early
 	# `+set`. A command goes into the buffer and runs after that. cg_thirdPersonSlide
-	# defaults to -20, which is what pushes the player off to one side.
+	# defaults to -20, which is what pushes the player off to one side. model is
+	# CVAR_ARCHIVE too, so it goes the same way.
 	if "$ZEQ2_DEV/zeq2shot.sh" --map "$MAP" --frames "$FRAMES" --out "$shot" \
 		-- +set cg_auraScreenSpace $(( HULL ? 0 : 1 )) +set cg_draw2D 0 \
 		   +cg_thirdPersonSlide 0 +cg_thirdPersonHeight 0 \
-		   +cg_thirdPersonAngle 0 +cg_thirdPersonRange "$RANGE" >/dev/null 2>&1 && [[ -f "$shot" ]]; then
+		   +cg_thirdPersonAngle 0 +cg_thirdPersonRange "$RANGE" \
+		   "${model_cmd[@]}" >/dev/null 2>&1 && [[ -f "$shot" ]]; then
 		echo "ok"
 		shots+=("$shot")
 	else
@@ -205,6 +234,7 @@ fi
 
 cols=2
 [[ ${#shots[@]} -eq 1 ]] && cols=1
+[[ -n "$COLUMNS" ]] && cols="$COLUMNS"
 crop_arg=()
 [[ -n "$CROP" && "$CROP" != "none" ]] && crop_arg=(--crop "$CROP")
 python3 "$ZEQ2_DEV/png_sheet.py" "$OUT" "${shots[@]}" --columns "$cols" --label --pad 6 "${crop_arg[@]}"
