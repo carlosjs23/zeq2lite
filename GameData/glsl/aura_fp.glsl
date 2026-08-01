@@ -56,12 +56,12 @@ float flame( float u, float t ){
 	   turn, so it tiles by construction and is sampled straight. */
 	float strand = texture2D( u_Texture0, vec2( u, t)).a;
 
-	/* No mist and no boost on top: the strip already carries the
-	   reference's interior glow and its hot rim - anything added here is a
-	   departure from the art. The inner rows still fade in, because the
-	   inner ring is a closed loop of geometry and any coverage on it draws
-	   that loop as a hard oval over the character. */
-	return strand * smoothstep( 0.0, 0.04, t);
+	/* No mist, no boost, and no inner fade on top: the strip already
+	   carries the reference's interior glow and its hot rim - anything
+	   added here is a departure from the art. The fade guarded the inner
+	   ring back when it was a visible loop; at INNER_HUG 0 the ring is a
+	   point and the fade only dug a dark dip the reference does not have. */
+	return strand;
 }
 
 

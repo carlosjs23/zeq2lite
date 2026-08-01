@@ -46,12 +46,12 @@ uniform float u_Time;
    tongues a steady width in pixels. */
 #define SPIKE_REF 0.34
 
-/* Where the inner ring sits, as a fraction of the outline. Nearly the
-   whole disc - the reference's interior veil is part of its field - but
-   not exactly zero: at the centre every strip column converges on one
-   point, and the wedge interpolation streaks spokes through it. The
-   character stands on the hole this leaves. */
-#define INNER_HUG 0.05
+/* Where the inner ring sits, as a fraction of the outline. Zero - the band
+   is the whole disc. The wedge spokes that once streaked through the centre
+   came from per-angle sampling magnifying the centroid's pixels; the strip's
+   inner rows are blended to their angular mean now, so every column agrees
+   at the point where they converge. */
+#define INNER_HUG 0.0
 
 /* Hard ceiling on the outline's crown reach in NDC; see the span comment. */
 #define SPAN_CAP  0.85

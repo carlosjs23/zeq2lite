@@ -114,10 +114,17 @@ def main():
         f = (u - arcs[seg]) / span if span > 0 else 0.0
         inv.append((seg + f) / args.segments * 2.0 * math.pi)
 
+    # Below this fraction of the outline the rows blend toward their angular
+    # mean: every column converges on the same few pixels at the centre, and
+    # sampling them per angle magnifies that handful into wedge spokes and a
+    # hard blob. A polar field has no angular information at its centre, so
+    # the mean IS the field there.
+    CENTRE_BLEND = 0.10
+
     rows = []
     for j in range(args.height):
         t = (j + 0.5) / args.height
-        row = bytearray()
+        vals = []
         for c in range(args.width):
             th = inv[c]
             # nearest outline sample for the ray length
@@ -129,7 +136,14 @@ def main():
             r = rb * (args.inner_hug + (1.0 - args.inner_hug) * t)
             X = cx + math.cos(th) * r
             Y = cy - math.sin(th) * r
-            v = bilinear(px, w, h, chan, X, Y)
+            vals.append(bilinear(px, w, h, chan, X, Y))
+        frac = args.inner_hug + (1.0 - args.inner_hug) * t
+        if frac < CENTRE_BLEND:
+            mean = sum(vals) / len(vals)
+            keep = frac / CENTRE_BLEND
+            vals = [mean + (v - mean) * keep for v in vals]
+        row = bytearray()
+        for v in vals:
             row += bytes((255, 255, 255, max(0, min(255, int(round(v * 255))))))
         rows.append(bytes(row))
 
