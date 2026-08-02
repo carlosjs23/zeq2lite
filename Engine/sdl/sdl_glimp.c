@@ -1107,7 +1107,17 @@ static qboolean GLimp_ProbeGamma( void )
 
 	SDL_SetWindowBrightness( SDL_window, 1.0f );
 
+#ifdef MACOS_X
+	// A ramp that survives the round trip proves only that SDL stored it. macOS
+	// accepts one and does not apply it to the display - measured as fullscreen
+	// coming out a quarter darker than windowed with overbright enabled. Report
+	// no hardware gamma so the software path in R_LightScaleTexture is used,
+	// which bakes both r_gamma and the overbright multiply into the textures.
+	ri.Printf( PRINT_ALL, "...gamma ramp is stored but not applied here, using software gamma\n" );
+	return qfalse;
+#else
 	return qtrue;
+#endif
 }
 
 /*
