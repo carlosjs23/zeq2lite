@@ -26,7 +26,7 @@ BUILD             := bin
 # Adding a suite: create suites/test_<name>.c, add <name> here, and give it an
 # SRC_<name> line listing the engine translation units it needs. Keep that list
 # minimal - a short list is a sign the unit under test is well isolated.
-SUITES := q_shared screen cg_screen vidmodes fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers
+SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers
 
 SHARED_CORE := $(ROOT)/Shared/q_shared.c $(ROOT)/Shared/q_math.c
 SUPPORT     := support/engine_stubs.c
@@ -36,6 +36,7 @@ SRC_screen   := $(SHARED_CORE) $(SUPPORT)
 SRC_cg_screen := $(ROOT)/Game/CGame/cg_drawtools.c $(SHARED_CORE) $(SUPPORT) \
                 support/cgame_stubs.c support/fake_draw.c
 SRC_vidmodes := $(ROOT)/Engine/renderer/tr_vidmodes.c $(SHARED_CORE) $(SUPPORT)
+SRC_bloomsize := $(ROOT)/Engine/renderer/tr_bloomsize.c $(SHARED_CORE) $(SUPPORT)
 # files.c is the least isolated unit here - it reaches cvars, the command buffer,
 # the allocators and the platform layer - so its seam is correspondingly wide.
 # The zip reader and zlib are linked for real rather than stubbed, because
