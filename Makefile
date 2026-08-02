@@ -1441,6 +1441,7 @@ Q3ROBJ = \
   $(B)/renderer/tr_shadows.o \
   $(B)/renderer/tr_sky.o \
   $(B)/renderer/tr_surface.o \
+  $(B)/renderer/tr_bloomsize.o \
   $(B)/renderer/tr_vidmodes.o \
   $(B)/renderer/tr_world.o \
   \
