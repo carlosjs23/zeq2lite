@@ -1140,7 +1140,13 @@ const void	*RB_SwapBuffers( const void *data ) {
 
 	GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
 
-	GLimp_EndFrame();
+	{
+		unsigned int swapStart = GLimp_Microseconds( );
+
+		GLimp_EndFrame();
+
+		backEnd.pc.usecSwap += GLimp_Microseconds( ) - swapStart;
+	}
 
 	backEnd.projection2D = qfalse;
 	backEnd.doneBloom = qfalse;
@@ -1158,9 +1164,11 @@ smp extensions, or asynchronously by another thread.
 ====================
 */
 void RB_ExecuteRenderCommands( const void *data ) {
-	int		t1, t2;
+	int				t1, t2;
+	unsigned int	usecStart;
 
 	t1 = ri.Milliseconds ();
+	usecStart = GLimp_Microseconds ();
 
 	if ( !r_smp->integer || data == backEndData[0]->commands.cmds ) {
 		backEnd.smpFrame = 0;
@@ -1208,6 +1216,7 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			// stop rendering on this thread
 			t2 = ri.Milliseconds ();
 			backEnd.pc.msec = t2 - t1;
+			backEnd.pc.usecBackEnd += GLimp_Microseconds () - usecStart;
 			return;
 		}
 	}

@@ -1292,17 +1292,14 @@ void R_SetColorMappings( void ) {
 	int		inf;
 	int		shift;
 
-	// setup the overbright lighting
-	tr.overbrightBits = r_overBrightBits->integer;
-	if ( !glConfig.deviceSupportsGamma ) {
-		tr.overbrightBits = 0;		// need hardware gamma for overbright
-	}
-
-	// never overbright in windowed mode
-	if ( !glConfig.isFullscreen ) 
-	{
-		tr.overbrightBits = 0;
-	}
+	// Overbright halves every lighting value and expects a display gamma ramp to
+	// double it back at scan-out. Nothing here does that: measured on the static
+	// menu, fullscreen came out at 67.5 mean against 87.9 windowed, and 87.9
+	// again once overbright was off. Whatever ramp macOS accepts, it is not
+	// compensating, so the halving is all the player sees - a flat, lightless
+	// world. r_overBrightBits is inert as a result. It used to be gated on
+	// isFullscreen, back when that meant "has a gamma ramp of its own".
+	tr.overbrightBits = 0;
 
 	// allow 2 overbright bits in 24 bit, but only 1 in 16 bit
 	if ( glConfig.colorBits > 16 ) {

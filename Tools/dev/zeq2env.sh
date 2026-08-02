@@ -6,6 +6,9 @@
 #   ZEQ2_ARCH   engine arch suffix, e.g. arm / x86_64 (default: uname -p)
 #   ZEQ2_BUILD  build output dir (default: $ZEQ2_ROOT/Build/Release-darwin-$ZEQ2_ARCH)
 #   ZEQ2_GAME   mod/base game dir name under the build dir (default: ZEQ2)
+#   ZEQ2_FULLSCREEN  r_fullscreen for a run (default: 0, windowed)
+#   ZEQ2_MODE        r_mode for a run (default: 3; -2 is the desktop resolution)
+#   ZEQ2_HUNKMEGS    com_hunkMegs for a run (default: 256)
 
 set -euo pipefail
 
@@ -18,12 +21,18 @@ ZEQ2_DEV="$ZEQ2_ROOT/Tools/dev"
 
 # Engine args that keep a run non-interactive and reproducible: windowed, fixed
 # resolution, enough hunk for the stock maps, and the mod dir wired up.
+#
+# Windowed at r_mode 3 is right for a crash gate and wrong for anything
+# measuring the renderer: a windowed run presents through the compositor, so
+# these defaults quietly decide what you are timing. Override per run -
+# ZEQ2_FULLSCREEN=1 ZEQ2_MODE=-2 zeq2run.sh ... - rather than passing a second
+# +set and relying on the later one winning.
 zeq2_base_args() {
 	printf '%s\n' \
 		+set fs_game "$ZEQ2_GAME" \
-		+set r_fullscreen 0 \
-		+set r_mode 3 \
-		+set com_hunkMegs 256
+		+set r_fullscreen "${ZEQ2_FULLSCREEN:-0}" \
+		+set r_mode "${ZEQ2_MODE:-3}" \
+		+set com_hunkMegs "${ZEQ2_HUNKMEGS:-256}"
 }
 
 zeq2_require_bin() {

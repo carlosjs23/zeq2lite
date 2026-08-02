@@ -250,6 +250,30 @@ cpuFeatures_t Sys_GetProcessorFeatures( void )
 
 /*
 =================
+Sys_LowPhysicalMemory
+
+Gates the two prewarm passes that touch everything once so the driver and the
+pager have it resident - Com_TouchMemory over the hunk and RB_ShowImages over
+the texture set. On a machine this small both would thrash swap instead.
+=================
+*/
+#define MEM_THRESHOLD_MB 96
+
+qboolean Sys_LowPhysicalMemory( void )
+{
+#ifdef DEDICATED
+	return qfalse;
+#else
+	// 0 means SDL could not tell, which must not read as "tiny machine" and
+	// turn both passes off.
+	int ram = SDL_GetSystemRAM( );
+
+	return ( ram > 0 && ram <= MEM_THRESHOLD_MB ) ? qtrue : qfalse;
+#endif
+}
+
+/*
+=================
 Sys_Init
 =================
 */

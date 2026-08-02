@@ -175,20 +175,6 @@ char *Sys_GetClipboardData(void)
 	return NULL;
 }
 
-#define MEM_THRESHOLD 96*1024*1024
-
-/*
-==================
-Sys_LowPhysicalMemory
-
-TODO
-==================
-*/
-qboolean Sys_LowPhysicalMemory( void )
-{
-	return qfalse;
-}
-
 /*
 ==================
 Sys_Basename
