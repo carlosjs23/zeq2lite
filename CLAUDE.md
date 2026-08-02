@@ -151,10 +151,14 @@ genuinely unported.
 ZEQ2-Lite clients, servers and demos. The gameplay work on `combat-and-ai`
 widens `powerLevel[]` on the wire and moves to 72; keep that off this branch.
 
-**`Sys_SigHandler` (`Engine/sys/sys_main.c`) installs a `SIGABRT` handler**, so a
-stack-protector abort or sanitizer abort surfaces only as
-`Sys_SigHandler: caught signal 6` with no diagnostic. A silent `Abort trap: 6`
-with a log that just stops is the signature — disable the handler to debug it.
+**`Sys_SigHandler` catches the fault signals**, so a stack-protector abort, a
+sanitizer abort or a segfault surfaces only as `=== fatal signal, exiting ===`
+with no address and no stack. A log that just stops is the signature. Set
+`ZEQ2_NO_SIGHANDLER=1` to leave the fault signals to a debugger, a sanitizer or
+the OS crash reporter; the termination signals — `SIGTERM`, `SIGINT`, `SIGHUP` —
+stay handled either way, so a run that sets it still exercises the orderly
+shutdown. The handler installs from two places — `main()` and
+`Sys_PlatformInit` (`Engine/sys/sys_unix.c`).
 
 **Config exec order bites.** Startup execs `default.cfg` (all 47 binds) and *then*
 the saved `zeq2config.cfg`, which begins with `unbindall`. A config saved from a
@@ -163,12 +167,14 @@ itself on exit, presenting as "keyboard and mouse do nothing" while Escape and t
 console key still work. Check with `+bindlist`, and remember the engine writes the
 config back at shutdown.
 
-The same ordering defeats `+set` on the command line: it is applied before the
-configs exec, so any `CVAR_ARCHIVE` cvar the saved config mentions —
-`s_musicvolume`, `r_picmip`, `cg_thirdPersonSlide`, `model` — silently reverts
-to the config's value. Pass it as a bare command instead (`+cg_thirdPersonSlide
-0`), which goes into the command buffer and runs after. `+set` still works for
-cvars absent from both configs. `Tools/dev/README.md` has the full version.
+`+set` on the command line is *not* defeated by that ordering:
+`Com_StartupVariable( NULL )` runs after the configs exec, under the comment
+"override anything from the config files with command line args"
+(`Shared/common.c`), so `+set r_picmip 3` wins over an archived `seta r_picmip
+"0"` and is written back at shutdown. What does eat a `+set` is a cvar
+something reassigns later — `s_musicvolume` is re-derived from `cg_music` on
+every track change, so set `cg_music`. Grep for who else writes a cvar before
+blaming the config. `Tools/dev/README.md` has the full version.
 
 **The configs are CRLF, and rewriting one in text mode silently converts it.**
 `tierDefault.cfg`, the per-character `tier.cfg` files and the rest of the player

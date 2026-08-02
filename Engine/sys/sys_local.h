@@ -52,7 +52,9 @@ void Sys_GLimpSafeInit( void );
 void Sys_GLimpInit( void );
 void Sys_PlatformInit( void );
 void Sys_PlatformExit( void );
-void Sys_SigHandler( int signal ) __attribute__ ((noreturn));
+// Not noreturn: SIGTERM and SIGINT set a flag and return to the interrupted
+// frame, and the main loop shuts down from there.
+void Sys_SigHandler( int signal );
 void Sys_ErrorDialog( const char *error );
 void Sys_AnsiColorPrint( const char *msg );
 

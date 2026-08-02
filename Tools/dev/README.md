@@ -109,33 +109,31 @@ server-only smoke test would have passed while the game was unplayable. Use
 
 ## Four traps these scripts exist to avoid
 
-**`+set` loses to the config for any archived cvar.** Startup execs
-`default.cfg` and then `zeq2config.cfg`, and both are full of `seta` lines. A
-`+set` on the command line is applied *before* that, so the config overwrites it
-and the game runs with the value you thought you had replaced. This is silent:
-nothing warns, and the cvar reads back as the config's value.
+**`+set` beats the config; code that assigns the cvar later beats `+set`.**
+Startup execs `default.cfg` and then `zeq2config.cfg`, both full of `seta`
+lines — but `Com_StartupVariable( NULL )` runs *after* that pass, in
+`Shared/common.c` directly beneath the comment "override anything from the
+config files with command line args". So `+set r_picmip 3` and
+`+set cg_thirdPersonSlide 7` both win over the saved config, and both are
+written back at shutdown. Verified against the source and by launching.
 
-It applies to every `CVAR_ARCHIVE` cvar the saved config mentions —
-`s_musicvolume`, `cg_thirdPersonSlide`, `r_picmip`, `model`, and most of the
-rest. Cvars absent from both configs are unaffected, which is why
-`+set s_initsound 0` sticks and `+set s_musicvolume 0` does not.
+What does silently eat a `+set` is a cvar something else keeps assigning.
+`s_musicvolume` is the case that taught the wrong lesson here: `cg_music.c`
+re-derives it from `cg_music` every time a track starts, so neither
+`+set s_musicvolume 0.5` nor a bare `+s_musicvolume 0.5` survives the first
+track change — set `cg_music` instead. When a cvar refuses to hold a value,
+grep for who else writes it before blaming the config.
 
-Two ways round it, in order of preference:
+A bare cvar name is a console command rather than a startup variable, so it
+lands in the command buffer and runs later still. That ordering rarely matters
+now, but it costs nothing:
 
 ```bash
-# a bare cvar name is a console command, so it goes into the command buffer
-# and runs after the configs have exec'd - this wins
 ZEQ2.arm ... +cg_thirdPersonSlide 0 +map desert
-
-# or edit zeq2config.cfg, but the engine rewrites it at shutdown, so change it
-# with the game closed or the change is lost
 ```
 
-Check which you got: the value is echoed in the startup log for some cvars
-(`picmip: 1`), and `+cvarlist <name>` or the console shows the rest. If a
-`+set` appears to do nothing, this is why — reach for it before assuming the
-feature is broken. `zeq2aura.sh` passes its camera cvars as bare commands for
-exactly this reason.
+Either form is echoed in the startup log for some cvars (`picmip: 1`);
+`+cvarlist <name>` or the console covers the rest.
 
 **The other half of that: a bare cvar command *persists*.** Winning the fight
 above means the cvar is genuinely set, and the engine writes every
@@ -248,14 +246,16 @@ Reading the output:
   whether they appear depends on ASLR. If the `is located` line says the access
   sits inside a global large enough for it, ignore it.
 - UBSan findings are a latent-UB inventory, not necessarily live bugs.
-- About one run in four dies early with SIGSEGV or SIGTERM. Re-run;
-  `reached in-game: yes` is what tells you the run was usable.
+- `reached in-game: yes` is what tells you the run was usable — a run that stops
+  short covers only loading, so the absence of a finding means nothing.
 
 Two environment notes. ASan misbehaves under a sandboxed shell (`Checking file
 existence is not allowed under sandbox`), so run it unsandboxed. And
-`Sys_SigHandler` (`Engine/sys/sys_main.c`) installs a `SIGABRT` handler, so a
-sanitizer abort surfaces only as `Sys_SigHandler: caught signal 6` with no
-diagnostic — disable that handler if you need to debug an abort directly.
+`Sys_SigHandler` catches the fault signals, so a sanitizer abort surfaces only
+as `=== fatal signal, exiting ===` with no diagnostic — set
+`ZEQ2_NO_SIGHANDLER=1` to hand the fault straight to the sanitizer. The
+termination signals — `SIGTERM`, `SIGINT`, `SIGHUP` — stay handled with it set,
+so the orderly shutdown is still under test.
 
 ## Environment overrides
 

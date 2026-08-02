@@ -23,9 +23,9 @@
 #    reports AND poisons one copy of each duplicated global, which then shows up
 #    as bogus global-buffer-overflows in unrelated code (tr_shader.c and friends).
 #
-# 3. Sys_SigHandler in Engine/sys/sys_main.c installs a handler for SIGABRT, so a
-#    sanitizer abort surfaces only as "Sys_SigHandler: caught signal 6" with no
-#    diagnostic. If you ever need to debug an abort directly, disable it first.
+# 3. Sys_SigHandler catches the fault signals, so a sanitizer abort surfaces only
+#    as "=== fatal signal, exiting ===" with no diagnostic. Set
+#    ZEQ2_NO_SIGHANDLER=1 to hand the fault straight to the sanitizer.
 #
 # Also note: ASan misbehaves under a sandboxed shell ("Checking file existence is
 # not allowed under sandbox"). Run this outside the sandbox.
@@ -42,8 +42,8 @@
 #   ASLR. A report whose "is located" line says 0 bytes inside a global big
 #   enough for the access is one of these; ignore it.
 #
-# - Roughly one run in four dies early with SIGSEGV or SIGTERM instead of
-#   completing. Just re-run; "reached in-game: yes" tells you the run was good.
+# "reached in-game: yes" is what tells you the run was good: a run that stops
+# short covers only loading, so the absence of a finding means nothing.
 #
 # usage:
 #   zeq2sanitize.sh                 # build (if needed), run 'desert', report

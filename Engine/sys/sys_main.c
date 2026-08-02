@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include <signal.h>
 #include <stdlib.h>
+#include <unistd.h>		// write, _exit, STDERR_FILENO - the async-signal-safe
+						// half of Sys_SigHandler
 #include <limits.h>
 #include <sys/types.h>
 #include <stdarg.h>
@@ -244,6 +246,30 @@ cpuFeatures_t Sys_GetProcessorFeatures( void )
 #endif
 
 	return features;
+}
+
+/*
+=================
+Sys_LowPhysicalMemory
+
+Gates the two prewarm passes that touch everything once so the driver and the
+pager have it resident - Com_TouchMemory over the hunk and RB_ShowImages over
+the texture set. On a machine this small both would thrash swap instead.
+=================
+*/
+#define MEM_THRESHOLD_MB 96
+
+qboolean Sys_LowPhysicalMemory( void )
+{
+#ifdef DEDICATED
+	return qfalse;
+#else
+	// 0 means SDL could not tell, which must not read as "tiny machine" and
+	// turn both passes off.
+	int ram = SDL_GetSystemRAM( );
+
+	return ( ram > 0 && ram <= MEM_THRESHOLD_MB ) ? qtrue : qfalse;
+#endif
 }
 
 /*
@@ -545,37 +571,62 @@ void Sys_ParseArgs( int argc, char **argv )
 #	endif
 #endif
 
+// Set by the handler, read by the main loop. sig_atomic_t and volatile because
+// this is the only thing a handler may safely hand to the rest of the program.
+volatile sig_atomic_t	sys_quitRequested = 0;
+
 /*
 =================
 Sys_SigHandler
+
+Async-signal-safe, which the previous version was not: it ran the whole engine
+teardown - VM_Forced_Unload_Start, CL_Shutdown, SV_Shutdown - from inside the
+handler, along with fprintf and va. Those take locks and touch the allocator, so
+a signal that arrived while the main thread was already inside malloc re-entered
+it from the handler and faulted. That is why killing the engine mid-frame died
+about one time in four while a clean "quit" never did, and why the second fault
+landed on top of the first with no usable diagnostic.
+
+A termination request - SIGTERM, SIGINT or SIGHUP - now only sets a flag; the
+main loop performs the same shutdown it would for a typed "quit", on its own
+stack, between frames.
+
+A fault signal cannot be handled that way - there is no safe frame to return to
+- so it writes a fixed string with write(), which is on the safe list, and
+leaves. No teardown: a crashed process has nothing to gain from unloading its
+dylibs, and attempting it is what turned a diagnosable fault into a double one.
 =================
 */
 void Sys_SigHandler( int signal )
 {
-	static qboolean signalcaught = qfalse;
+	static volatile sig_atomic_t	signalcaught = 0;
 
-	fprintf( stderr, "\n=== Sys_SigHandler: caught signal %d ===\n", signal ); fflush( stderr );
+	// SIGHUP is conditional because the C standard does not require it and the
+	// mingw headers do not always define it.
+	if( signal == SIGTERM || signal == SIGINT
+#ifdef SIGHUP
+		|| signal == SIGHUP
+#endif
+		)
+	{
+		sys_quitRequested = signal;
+		return;
+	}
 
 	if( signalcaught )
+		_exit( 2 );
+
+	signalcaught = 1;
+
+	// write() rather than fprintf(): the stdio lock may be held by the code
+	// this signal interrupted.
 	{
-		fprintf( stderr, "DOUBLE SIGNAL FAULT: Received signal %d, exiting...\n",
-			signal );
-	}
-	else
-	{
-		signalcaught = qtrue;
-		VM_Forced_Unload_Start();
-#ifndef DEDICATED
-		CL_Shutdown(va("Received signal %d", signal), qtrue, qtrue);
-#endif
-		SV_Shutdown(va("Received signal %d", signal) );
-		VM_Forced_Unload_Done();
+		static const char msg[] = "\n=== fatal signal, exiting ===\n";
+		ssize_t written = write( STDERR_FILENO, msg, sizeof( msg ) - 1 );
+		(void)written;
 	}
 
-	if( signal == SIGTERM || signal == SIGINT )
-		Sys_Exit( 1 );
-	else
-		Sys_Exit( 2 );
+	_exit( 2 );
 }
 
 /*
@@ -647,30 +698,48 @@ int main( int argc, char **argv )
 
 	CON_Init( );
 
-	// ZEQ2_NO_SIGHANDLER leaves the fault signals to whatever is watching. This
-	// handler catches SIGSEGV, so a sanitizer or a debugger never sees the
-	// fault: the crash surfaces as "caught signal 11" and nothing else, no
-	// faulting address and no stack. A duel crash went a whole session
-	// unattributed for exactly that reason - both ASan and the smoke gate
-	// reported clean while runs died.
-	if( !getenv( "ZEQ2_NO_SIGHANDLER" ) )
 	{
 		struct sigaction sa;
 		memset(&sa, 0, sizeof(sa));
 		sa.sa_handler = Sys_SigHandler;
 		sigemptyset(&sa.sa_mask);
 		sa.sa_flags = 0;
-		sigaction( SIGILL, &sa, NULL );
-		sigaction( SIGFPE, &sa, NULL );
-		sigaction( SIGSEGV, &sa, NULL );
+
+		// ZEQ2_NO_SIGHANDLER leaves the fault signals to whatever is watching.
+		// Catching SIGSEGV means a sanitizer, a debugger or the OS crash
+		// reporter never sees the fault: it surfaces as one line of ours with
+		// no faulting address and no stack.
+		if( !getenv( "ZEQ2_NO_SIGHANDLER" ) )
+		{
+			sigaction( SIGILL, &sa, NULL );
+			sigaction( SIGFPE, &sa, NULL );
+			sigaction( SIGSEGV, &sa, NULL );
+			sigaction( SIGABRT, &sa, NULL );
+			sigaction( SIGBUS, &sa, NULL );
+		}
+
+		// Termination is not a fault, and the flag it sets is what runs the
+		// orderly shutdown. Always handled, so a debugging run can drop the
+		// fault handlers and still exercise that path. SIGHUP is the third of
+		// these and installs in Sys_PlatformInit, with the rest of the signals
+		// that only exist on unix.
 		sigaction( SIGTERM, &sa, NULL );
 		sigaction( SIGINT, &sa, NULL );
-		sigaction( SIGABRT, &sa, NULL );
-		sigaction( SIGBUS, &sa, NULL );
 	}
 
 	while( 1 )
 	{
+		// Between frames, on the main stack, where the allocator and the stdio
+		// locks are ours to take. Through the command buffer rather than
+		// calling Com_Quit_f directly: it names the shutdown reason with
+		// Cmd_Args(), which without a command to parse holds the arguments of
+		// whatever ran last, and prints those as the reason. Does not return.
+		if( sys_quitRequested )
+		{
+			Com_Printf( "Received signal %d, shutting down\n", (int)sys_quitRequested );
+			Cbuf_ExecuteText( EXEC_NOW, "quit\n" );
+		}
+
 		IN_Frame( );
 		Com_Frame( );
 	}

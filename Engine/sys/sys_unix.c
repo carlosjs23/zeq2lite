@@ -175,20 +175,6 @@ char *Sys_GetClipboardData(void)
 	return NULL;
 }
 
-#define MEM_THRESHOLD 96*1024*1024
-
-/*
-==================
-Sys_LowPhysicalMemory
-
-TODO
-==================
-*/
-qboolean Sys_LowPhysicalMemory( void )
-{
-	return qfalse;
-}
-
 /*
 ==================
 Sys_Basename
@@ -825,11 +811,22 @@ void Sys_PlatformInit( void )
 {
 	const char* term = getenv( "TERM" );
 
+	// A hangup is a request to stop rather than a fault, so it takes the orderly
+	// shutdown alongside SIGTERM and SIGINT - and installs whether or not
+	// ZEQ2_NO_SIGHANDLER is set, for the same reason they do.
 	signal( SIGHUP, Sys_SigHandler );
-	signal( SIGQUIT, Sys_SigHandler );
-	signal( SIGTRAP, Sys_SigHandler );
-	signal( SIGIOT, Sys_SigHandler );
-	signal( SIGBUS, Sys_SigHandler );
+
+	// Gated the same way as the set main() installs, and for the same reason:
+	// each of these takes the handler's fatal path, so leaving them hooked here
+	// defeated ZEQ2_NO_SIGHANDLER. A run asking for the raw fault still had
+	// SIGBUS, SIGIOT and SIGTRAP taken out from under the debugger.
+	if( !getenv( "ZEQ2_NO_SIGHANDLER" ) )
+	{
+		signal( SIGQUIT, Sys_SigHandler );
+		signal( SIGTRAP, Sys_SigHandler );
+		signal( SIGIOT, Sys_SigHandler );
+		signal( SIGBUS, Sys_SigHandler );
+	}
 
 	stdinIsATTY = isatty( STDIN_FILENO ) &&
 		!( term && ( !strcmp( term, "raw" ) || !strcmp( term, "dumb" ) ) );
