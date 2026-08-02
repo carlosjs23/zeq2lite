@@ -977,6 +977,10 @@ typedef struct {
 	int		c_flareRenders;
 
 	int		msec;			// total msec for backend run
+
+	int		c_drawElements;	// draw calls issued
+	int		usecBackEnd;	// whole backend run
+	int		usecSwap;		// of usecBackEnd, time inside GLimp_EndFrame
 } backEndCounters_t;
 
 // all state modified by the back end is seperated
@@ -1438,6 +1442,11 @@ IMPLEMENTATION SPECIFIC FUNCTIONS
 void		GLimp_Init( void );
 void		GLimp_Shutdown( void );
 void		GLimp_EndFrame( void );
+
+// Monotonic microseconds. ri.Milliseconds() cannot resolve the parts of a
+// frame that is itself only a few milliseconds long, and the renderer links
+// SDL directly, so this stays here rather than widening refimport_t.
+unsigned int	GLimp_Microseconds( void );
 
 qboolean	GLimp_SpawnRenderThread( void (*function)( void ) );
 void		*GLimp_RendererSleep( void );

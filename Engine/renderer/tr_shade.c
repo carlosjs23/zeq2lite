@@ -166,6 +166,8 @@ without compiled vertex arrays.
 static void R_DrawElements( int numIndexes, const glIndex_t *indexes ) {
 	int		primitives;
 
+	backEnd.pc.c_drawElements++;
+
 	primitives = r_primitives->integer;
 
 	// Auto resolves to one glDrawElements. It used to fall back to the strip

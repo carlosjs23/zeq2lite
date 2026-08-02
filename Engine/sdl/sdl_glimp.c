@@ -1101,6 +1101,35 @@ success:
 
 /*
 ===============
+GLimp_Microseconds
+
+Monotonic, and fine enough to time the parts of a frame against each other.
+===============
+*/
+unsigned int GLimp_Microseconds( void )
+{
+	static Uint64	freq = 0;
+	static Uint64	base = 0;
+	Uint64			now;
+
+	if ( !freq )
+	{
+		freq = SDL_GetPerformanceFrequency( );
+		base = SDL_GetPerformanceCounter( );
+	}
+
+	now = SDL_GetPerformanceCounter( ) - base;
+
+	// Seconds and remainder separately: the counter is nanosecond-scale here,
+	// so scaling it whole would overflow after a few hours of run time. The
+	// unsigned int wraps every ~71 minutes, which only ever spans a
+	// subtraction of two samples taken in the same frame.
+	return (unsigned int)( ( now / freq ) * 1000000ULL
+		+ ( ( now % freq ) * 1000000ULL ) / freq );
+}
+
+/*
+===============
 GLimp_EndFrame
 
 Responsible for doing a swapbuffers
