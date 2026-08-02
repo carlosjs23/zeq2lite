@@ -167,12 +167,14 @@ itself on exit, presenting as "keyboard and mouse do nothing" while Escape and t
 console key still work. Check with `+bindlist`, and remember the engine writes the
 config back at shutdown.
 
-The same ordering defeats `+set` on the command line: it is applied before the
-configs exec, so any `CVAR_ARCHIVE` cvar the saved config mentions —
-`s_musicvolume`, `r_picmip`, `cg_thirdPersonSlide`, `model` — silently reverts
-to the config's value. Pass it as a bare command instead (`+cg_thirdPersonSlide
-0`), which goes into the command buffer and runs after. `+set` still works for
-cvars absent from both configs. `Tools/dev/README.md` has the full version.
+`+set` on the command line is *not* defeated by that ordering:
+`Com_StartupVariable( NULL )` runs after the configs exec, under the comment
+"override anything from the config files with command line args"
+(`Shared/common.c`), so `+set r_picmip 3` wins over an archived `seta r_picmip
+"0"` and is written back at shutdown. What does eat a `+set` is a cvar
+something reassigns later — `s_musicvolume` is re-derived from `cg_music` on
+every track change, so set `cg_music`. Grep for who else writes a cvar before
+blaming the config. `Tools/dev/README.md` has the full version.
 
 **The configs are CRLF, and rewriting one in text mode silently converts it.**
 `tierDefault.cfg`, the per-character `tier.cfg` files and the rest of the player

@@ -166,15 +166,18 @@ without compiled vertex arrays.
 static void R_DrawElements( int numIndexes, const glIndex_t *indexes ) {
 	int		primitives;
 
+	backEnd.pc.c_drawElements++;
+
 	primitives = r_primitives->integer;
 
-	// default is to use triangles if compiled vertex arrays are present
+	// Auto resolves to one glDrawElements. It used to fall back to the strip
+	// walker below when GL_EXT_compiled_vertex_array was missing, on the theory
+	// that glDrawElements without CVA was the slower of the two. No driver has
+	// shipped that extension in twenty years, so the fallback had quietly become
+	// the only path - and it spends a qglArrayElement call per vertex, tens of
+	// thousands a frame, which is far worse than the case it was avoiding.
 	if ( primitives == 0 ) {
-		if ( qglLockArraysEXT ) {
-			primitives = 2;
-		} else {
-			primitives = 1;
-		}
+		primitives = 2;
 	}
 
 

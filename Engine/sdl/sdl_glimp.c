@@ -422,6 +422,20 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder)
 	}
 	ri.Printf( PRINT_ALL, " %d %d\n", glConfig.vidWidth, glConfig.vidHeight);
 
+	// Desktop fullscreen covers the display whatever size we ask for, and macOS
+	// makes that transition asynchronously - a drawable measured right after
+	// SDL_CreateWindow would still report the size requested here. Ask for the
+	// desktop size to begin with and the two agree immediately.
+	if( fullscreen && desktopMode.w > 0 && desktopMode.h > 0 )
+	{
+		glConfig.vidWidth = desktopMode.w;
+		glConfig.vidHeight = desktopMode.h;
+		glConfig.windowAspect = (float)desktopMode.w / (float)desktopMode.h;
+
+		ri.Printf( PRINT_ALL, "...fullscreen uses the desktop resolution %d x %d\n",
+				desktopMode.w, desktopMode.h );
+	}
+
 	// r_centerWindow used to be handled by the SDL_VIDEO_CENTERED environment
 	// variable, which SDL2 ignores; position the window explicitly instead.
 	if( r_centerWindow->integer && !fullscreen )
@@ -447,6 +461,15 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder)
 
 	if (fullscreen)
 	{
+		// Exclusive fullscreen, switched to the mode the display is already in
+		// (set below). Asking for r_mode's size instead needs a mode the
+		// display enumerates, and a Retina panel driven at a scaled resolution
+		// enumerates none - SDL then either declines outright ("Couldn't find
+		// display mode match") or grants a fullscreen window still sized to
+		// r_mode, covering part of the screen. SDL_WINDOW_FULLSCREEN_DESKTOP
+		// avoids that but is fitted to the screen's *visible* frame, which
+		// leaves the menu bar's 33 points as a dark band along the top.
+		// r_mode therefore sizes the window only.
 		flags |= SDL_WINDOW_FULLSCREEN;
 		glConfig.isFullscreen = qtrue;
 	}
@@ -598,37 +621,12 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder)
 
 		if( fullscreen )
 		{
-			SDL_DisplayMode desiredMode;
-
-			switch( tcolorbits )
-			{
-				case 16: desiredMode.format = SDL_PIXELFORMAT_RGB565; break;
-				case 24: desiredMode.format = SDL_PIXELFORMAT_RGB24;  break;
-				default:
-					ri.Printf( PRINT_DEVELOPER, "tcolorbits is %d, can't fullscreen\n", tcolorbits );
-					SDL_GL_DeleteContext( SDL_glContext );
-					SDL_glContext = NULL;
-					SDL_DestroyWindow( SDL_window );
-					SDL_window = NULL;
-					continue;
-			}
-
-			desiredMode.w = glConfig.vidWidth;
-			desiredMode.h = glConfig.vidHeight;
-			desiredMode.refresh_rate = glConfig.displayFrequency =
-					ri.Cvar_VariableIntegerValue( "r_displayRefresh" );
-			desiredMode.driverdata = NULL;
-
-			if( SDL_SetWindowDisplayMode( SDL_window, &desiredMode ) < 0 )
-			{
-				ri.Printf( PRINT_DEVELOPER, "SDL_SetWindowDisplayMode failed: %s\n",
+			// Exclusive fullscreen, but switched to the mode the display is
+			// already in - the one request guaranteed to match.
+			if( SDL_SetWindowDisplayMode( SDL_window, &desktopMode ) < 0 )
+				ri.Printf( PRINT_ALL, "SDL_SetWindowDisplayMode failed: %s\n",
 						SDL_GetError( ) );
-				SDL_GL_DeleteContext( SDL_glContext );
-				SDL_glContext = NULL;
-				SDL_DestroyWindow( SDL_window );
-				SDL_window = NULL;
-				continue;
-			}
+			glConfig.displayFrequency = desktopMode.refresh_rate;
 		}
 
 		if( icon )
@@ -668,6 +666,59 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder)
 	}
 
 	SDL_ShowWindow( SDL_window );
+
+	// What we asked for is not always what we got, and a request SDL declined
+	// leaves a plain window behind. Report the window we actually have.
+	glConfig.isFullscreen = !!( SDL_GetWindowFlags( SDL_window ) &
+			SDL_WINDOW_FULLSCREEN_DESKTOP );
+
+	// macOS enters fullscreen asynchronously, so the drawable measured just
+	// after SDL_CreateWindow is still the pre-transition size. Rendering into a
+	// viewport that does not match the real buffer leaves black margins down
+	// two sides and pushes the top of the picture off the screen, so wait for
+	// the size to stop moving before believing it.
+	if( glConfig.isFullscreen )
+	{
+		int w = glConfig.vidWidth, h = glConfig.vidHeight;
+		int settled = 0, i;
+
+		for( i = 0; i < 200 && settled < 5; i++ )
+		{
+			int nw, nh;
+
+			SDL_PumpEvents( );
+			SDL_Delay( 5 );
+			SDL_GL_GetDrawableSize( SDL_window, &nw, &nh );
+
+			if( nw == w && nh == h )
+			{
+				settled++;
+			}
+			else
+			{
+				w = nw;
+				h = nh;
+				settled = 0;
+			}
+		}
+
+		{
+			SDL_Rect bounds;
+			int ww = 0, wh = 0;
+
+			SDL_GetWindowSize( SDL_window, &ww, &wh );
+			if( SDL_GetDisplayBounds( 0, &bounds ) == 0 )
+				ri.Printf( PRINT_ALL, "...display %d x %d pts, window %d x %d pts, drawable %d x %d px\n",
+						bounds.w, bounds.h, ww, wh, w, h );
+		}
+
+		if( w != glConfig.vidWidth || h != glConfig.vidHeight )
+			ri.Printf( PRINT_ALL, "...fullscreen settled at %d x %d\n", w, h );
+
+		glConfig.vidWidth = w;
+		glConfig.vidHeight = h;
+		glConfig.windowAspect = (float)w / (float)h;
+	}
 
 	GLimp_DetectAvailableModes();
 
@@ -1016,6 +1067,51 @@ static void GLimp_InitExtensions( void )
 
 /*
 ===============
+GLimp_ProbeGamma
+
+Whether a gamma ramp set on this window reaches the display.
+
+Asking SDL to set one and taking a non-negative return for an answer is not
+enough: on a compositing desktop the call is accepted and then ignored, and the
+renderer reads that as permission to enable overbright - which halves every
+lighting value and expects the ramp to double it back at scan-out. With no ramp
+the halving is all that happens and the world renders dark and flat. Write a
+ramp that is nothing like the identity, read it back, and believe the result.
+===============
+*/
+static qboolean GLimp_ProbeGamma( void )
+{
+	Uint16	want[3][256], got[3][256];
+	int		i;
+
+	for( i = 0; i < 256; i++ )
+	{
+		// Half brightness: distinct from the identity ramp at every entry
+		// except zero, so a stored-but-ignored ramp cannot pass by accident.
+		want[0][i] = want[1][i] = want[2][i] = (Uint16)( ( i << 8 ) / 2 );
+	}
+
+	if( SDL_SetWindowGammaRamp( SDL_window, want[0], want[1], want[2] ) < 0 )
+	{
+		ri.Printf( PRINT_ALL, "...gamma ramp rejected: %s\n", SDL_GetError( ) );
+		return qfalse;
+	}
+
+	if( SDL_GetWindowGammaRamp( SDL_window, got[0], got[1], got[2] ) < 0 ||
+			memcmp( got, want, sizeof( got ) ) != 0 )
+	{
+		ri.Printf( PRINT_ALL, "...gamma ramp did not take, ignoring hardware gamma\n" );
+		SDL_SetWindowBrightness( SDL_window, 1.0f );
+		return qfalse;
+	}
+
+	SDL_SetWindowBrightness( SDL_window, 1.0f );
+
+	return qtrue;
+}
+
+/*
+===============
 GLimp_Init
 
 This routine is responsible for initializing the OS specific portions
@@ -1071,15 +1167,7 @@ success:
 	// This values force the UI to disable driver selection
 	glConfig.driverType = GLDRV_ICD;
 	glConfig.hardwareType = GLHW_GENERIC;
-	glConfig.deviceSupportsGamma =
-			SDL_SetWindowBrightness( SDL_window, 1.0f ) >= 0;
-
-	// Mysteriously, if you use an NVidia graphics card and multiple monitors,
-	// setting gamma will incorrectly return false... the first time; ask
-	// again and you get the correct answer. This is a suspected driver bug, see
-	// http://bugzilla.icculus.org/show_bug.cgi?id=4316
-	glConfig.deviceSupportsGamma =
-			SDL_SetWindowBrightness( SDL_window, 1.0f ) >= 0;
+	glConfig.deviceSupportsGamma = GLimp_ProbeGamma( );
 
 	// get our config strings
 	Q_strncpyz( glConfig.vendor_string, (char *) qglGetString (GL_VENDOR), sizeof( glConfig.vendor_string ) );
@@ -1098,6 +1186,35 @@ success:
 	ri.IN_Init( );
 }
 
+
+/*
+===============
+GLimp_Microseconds
+
+Monotonic, and fine enough to time the parts of a frame against each other.
+===============
+*/
+unsigned int GLimp_Microseconds( void )
+{
+	static Uint64	freq = 0;
+	static Uint64	base = 0;
+	Uint64			now;
+
+	if ( !freq )
+	{
+		freq = SDL_GetPerformanceFrequency( );
+		base = SDL_GetPerformanceCounter( );
+	}
+
+	now = SDL_GetPerformanceCounter( ) - base;
+
+	// Seconds and remainder separately: the counter is nanosecond-scale here,
+	// so scaling it whole would overflow after a few hours of run time. The
+	// unsigned int wraps every ~71 minutes, which only ever spans a
+	// subtraction of two samples taken in the same frame.
+	return (unsigned int)( ( now / freq ) * 1000000ULL
+		+ ( ( now % freq ) * 1000000ULL ) / freq );
+}
 
 /*
 ===============
@@ -1135,6 +1252,8 @@ void GLimp_EndFrame( void )
 
 		if( needToToggle )
 		{
+			// The window's display mode is already the desktop's, set in
+			// GLimp_SetMode, so exclusive fullscreen matches by construction.
 			sdlToggled = SDL_SetWindowFullscreen( SDL_window,
 					r_fullscreen->integer ? SDL_WINDOW_FULLSCREEN : 0 ) >= 0;
 

@@ -66,8 +66,18 @@ void R_PerformanceCounters( void ) {
 	}
 	else if (r_speeds->integer == 6 )
 	{
-		ri.Printf( PRINT_ALL, "flare adds:%i tests:%i renders:%i\n", 
+		ri.Printf( PRINT_ALL, "flare adds:%i tests:%i renders:%i\n",
 			backEnd.pc.c_flareAdds, backEnd.pc.c_flareTests, backEnd.pc.c_flareRenders );
+	}
+	else if (r_speeds->integer == 7 )
+	{
+		// Where the backend time actually goes: blocked in the swap, or
+		// issuing draws. These are the previous frame's counters, this being
+		// the point before the current frame's backend overwrites them.
+		ri.Printf( PRINT_ALL, "backend:%i us swap:%i us submit:%i us draws:%i\n",
+			backEnd.pc.usecBackEnd, backEnd.pc.usecSwap,
+			backEnd.pc.usecBackEnd - backEnd.pc.usecSwap,
+			backEnd.pc.c_drawElements );
 	}
 
 	Com_Memset( &tr.pc, 0, sizeof( tr.pc ) );
