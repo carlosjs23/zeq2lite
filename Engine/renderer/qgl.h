@@ -140,6 +140,11 @@ extern GLvoid (APIENTRYP qglDeleteFramebuffers) (GLsizei n, const GLuint *frameb
 extern GLvoid (APIENTRYP qglBindFramebuffer) (GLenum target, GLuint framebuffer);
 extern GLvoid (APIENTRYP qglFramebufferTexture2D) (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
 extern GLenum (APIENTRYP qglCheckFramebufferStatus) (GLenum target);
+extern GLvoid (APIENTRYP qglGenRenderbuffers) (GLsizei n, GLuint *renderbuffers);
+extern GLvoid (APIENTRYP qglDeleteRenderbuffers) (GLsizei n, const GLuint *renderbuffers);
+extern GLvoid (APIENTRYP qglBindRenderbuffer) (GLenum target, GLuint renderbuffer);
+extern GLvoid (APIENTRYP qglRenderbufferStorage) (GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
+extern GLvoid (APIENTRYP qglFramebufferRenderbuffer) (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
 
 //===========================================================================
 

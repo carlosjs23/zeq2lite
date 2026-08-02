@@ -90,6 +90,14 @@ static struct {
 	GLuint		fbo;
 	qboolean	useFBO;
 	int			targetHeight;	// ortho height of whatever is being rendered into
+	// The scene rendered straight into screen.texture rather than into the
+	// backbuffer, which is what lets the downscale sample it without a copy.
+	struct {
+		GLuint		fbo;
+		GLuint		depth;		// depth+stencil, the scene needs both
+		qboolean	usable;
+		qboolean	active;		// bound right now, still owes the screen a blit
+	} scene;
 	qboolean started;
 } bloom;
 
@@ -187,9 +195,82 @@ static void R_Bloom_InitTextures( void )
 		qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
 	}
 
+	// Somewhere for the scene itself to render, so R_Bloom_BackupScreen's
+	// full-resolution grab of the backbuffer stops being needed at all. It is
+	// the same texture the downscale already samples, at the same size.
+	//
+	// Skipped when multisampling is on, because a plain texture attachment
+	// would silently drop it, and when overdraw is being measured, because
+	// that reads the stencil back off the backbuffer.
+	bloom.scene.usable = qfalse;
+	if( bloom.useFBO && r_bloom_fbo->integer >= 2
+		&& !r_ext_multisample->integer && !r_measureOverdraw->integer ) {
+		qglGenFramebuffers( 1, &bloom.scene.fbo );
+		qglBindFramebuffer( GL_FRAMEBUFFER, bloom.scene.fbo );
+		qglFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bloom.screen.texture->texnum, 0 );
+
+		qglGenRenderbuffers( 1, &bloom.scene.depth );
+		qglBindRenderbuffer( GL_RENDERBUFFER, bloom.scene.depth );
+		qglRenderbufferStorage( GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, bloom.screen.width, bloom.screen.height );
+		qglFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, bloom.scene.depth );
+		qglBindRenderbuffer( GL_RENDERBUFFER, 0 );
+
+		if( qglCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE ) {
+			bloom.scene.usable = qtrue;
+		} else {
+			Com_Printf( S_COLOR_YELLOW"WARNING: 'R_Bloom_InitTextures' scene framebuffer incomplete, keeping the screen grab\n" );
+			qglDeleteRenderbuffers( 1, &bloom.scene.depth );
+			qglDeleteFramebuffers( 1, &bloom.scene.fbo );
+			bloom.scene.depth = 0;
+			bloom.scene.fbo = 0;
+		}
+		qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	}
+
 	bloom.result = bloom.effect.texture;
 	bloom.targetHeight = glConfig.vidHeight;
 	bloom.started = qtrue;
+}
+
+/*
+=================
+R_Bloom_BeginScene
+
+Point the frame's 3D rendering at the offscreen scene texture. Called before the
+first view is drawn; R_BloomScreen puts the result back on the screen.
+=================
+*/
+void R_Bloom_BeginScene( void )
+{
+	if( !r_bloom->integer || bloom.scene.active )
+		return;
+	if( !bloom.started ) {
+		R_Bloom_InitTextures();
+		if( !bloom.started )
+			return;
+	}
+	if( !bloom.scene.usable )
+		return;
+
+	qglBindFramebuffer( GL_FRAMEBUFFER, bloom.scene.fbo );
+	qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
+	bloom.scene.active = qtrue;
+}
+
+/*
+=================
+R_Bloom_DrawScene
+
+Put the offscreen scene on the screen. The backbuffer holds nothing until this
+runs, so it replaces the copy path's restore rather than adding to it.
+=================
+*/
+static void R_Bloom_DrawScene( void )
+{
+	GL_Bind( bloom.screen.texture );
+	GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+	qglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
+	R_Bloom_Quad( glConfig.vidWidth, glConfig.vidHeight, 0, 0, bloom.screen.readW, bloom.screen.readH );
 }
 
 /*
@@ -499,13 +580,23 @@ R_BloomScreen
 */
 void R_BloomScreen( void )
 {
-	if( !r_bloom->integer )
-		return;
 	if ( backEnd.doneBloom )
 		return;
 	if ( !backEnd.doneSurfaces )
 		return;
 	backEnd.doneBloom = qtrue;
+
+	// A bound scene target owes the screen a blit even when the effect itself
+	// is skipped - r_bloom can go off between the view being drawn and this
+	// point - or the 2D that follows would draw into it and never be seen.
+	if( !r_bloom->integer ) {
+		if( bloom.scene.active ) {
+			R_Bloom_RenderToScreen();
+			R_Bloom_DrawScene();
+			bloom.scene.active = qfalse;
+		}
+		return;
+	}
 	if( !bloom.started ) {
 		R_Bloom_InitTextures();
 		if( !bloom.started )
@@ -530,16 +621,23 @@ void R_BloomScreen( void )
 
 	qglColor4f( 1, 1, 1, 1 );
 
-	//Backup the old screen in a texture
-	R_Bloom_BackupScreen();
+	// The scene is already in screen.texture when it rendered offscreen; only
+	// the backbuffer path has to go and fetch it.
+	if( !bloom.scene.active )
+		R_Bloom_BackupScreen();
 	// create the bloom texture using one of a few methods
 	R_Bloom_WarsowEffect ();
 //	R_Bloom_CreateEffect();
 	R_Bloom_RenderToScreen();
-	// Only the copy path scribbled on the screen to get here, and only it has
-	// something to put back.
-	if( !bloom.useFBO )
+	if( bloom.scene.active ) {
+		// Nothing has reached the backbuffer this frame yet.
+		R_Bloom_DrawScene();
+		bloom.scene.active = qfalse;
+	} else if( !bloom.useFBO ) {
+		// Only the copy path scribbled on the screen to get here, and only it
+		// has something to put back.
 		R_Bloom_RestoreScreen();
+	}
 	// Do the final pass using the bloom texture for the final effect
 	R_Bloom_DrawEffect ();
 }
@@ -556,8 +654,9 @@ void R_BloomInit( void ) {
 	r_bloom_sample_size = ri.Cvar_Get( "r_bloom_sample_size", "256", CVAR_ARCHIVE|CVAR_LATCH );
 //	r_bloom_fast_sample = ri.Cvar_Get( "r_bloom_fast_sample", "0", CVAR_ARCHIVE|CVAR_LATCH );
 	r_bloom_debug = ri.Cvar_Get( "r_bloom_debug", "0", 0 );
-	// Off falls back to reading the passes out of the backbuffer, which is
-	// the only way to compare the two against each other.
-	r_bloom_fbo = ri.Cvar_Get( "r_bloom_fbo", "1", CVAR_ARCHIVE|CVAR_LATCH );
+	// 0 reads every pass back out of the backbuffer, 1 renders the effect
+	// passes to a texture, 2 also renders the scene to one so the full-screen
+	// grab is not needed. Lower values exist to A/B against.
+	r_bloom_fbo = ri.Cvar_Get( "r_bloom_fbo", "2", CVAR_ARCHIVE|CVAR_LATCH );
 }
 

@@ -968,6 +968,10 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 	cmd = (const drawSurfsCommand_t *)data;
 
+	// Send the scene offscreen when bloom wants to sample it, before the view
+	// sets its own viewport and clears.
+	R_Bloom_BeginScene();
+
 	backEnd.refdef = cmd->refdef;
 	backEnd.viewParms = cmd->viewParms;
 	backEnd.doneSurfaces = qtrue;

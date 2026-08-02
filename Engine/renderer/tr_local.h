@@ -2138,5 +2138,6 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font);
 //Bloom Stuff
 void R_BloomInit( void );
 void R_BloomScreen( void );
+void R_Bloom_BeginScene( void );
 
 #endif //TR_LOCAL_H
