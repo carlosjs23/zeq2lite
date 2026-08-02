@@ -1,3 +1,6 @@
+/* Generated variant for the zeq2clip.sh A/B loop - see
+   Tools/dev/aura_variants/README.md. The defaults in GameData/glsl are
+   authoritative; b-sway matches them by construction. */
 #version 120
 /*
  * aura_fp.glsl
@@ -61,7 +64,7 @@ varying float v_wraps;
    still carries all four frames so the flipbook variant
    (Tools/dev/aura_variants/c-flipbook.fp.glsl) is a pure shader swap. */
 #define STRIP_FRAMES 4.0
-#define FLICKER_FPS  0.0
+#define FLICKER_FPS  8.0
 /* Rows per frame, for the half-texel inset that keeps bilinear filtering
    from bleeding one frame's tips into the next frame's body. */
 #define FRAME_ROWS   512.0

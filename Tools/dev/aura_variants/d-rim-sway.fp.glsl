@@ -1,3 +1,6 @@
+/* Generated variant for the zeq2clip.sh A/B loop - see
+   Tools/dev/aura_variants/README.md. The defaults in GameData/glsl are
+   authoritative; b-sway matches them by construction. */
 #version 120
 /*
  * aura_fp.glsl

@@ -249,5 +249,28 @@ def main():
           % (args.output, sheet_w, sheet_h, size, len(tiles)))
 
 
+def bake_luminance_alpha(px, w, h):
+    """For art shot on black (flat alpha), fold luminance into the alpha
+    slot - which carries no information in that case - so readers that need
+    brightness use channel 3 while the colour channels stay intact."""
+    for y in range(h):
+        row = px[y]
+        for x in range(w):
+            p = row[x]
+            row[x] = (p[0], p[1], p[2], (p[0] + p[1] + p[2]) / 3.0)
+
+
+def bake_luminance(px, w, h):
+    """For art shot on black (flat alpha), fold luminance into channel 0 so
+    every reader's chan-0 access reads brightness, not red. Greyscale art is
+    untouched by construction: the mean of equal channels is the channel."""
+    for y in range(h):
+        row = px[y]
+        for x in range(w):
+            p = row[x]
+            if p[0] != p[1] or p[1] != p[2]:
+                row[x] = ((p[0] + p[1] + p[2]) / 3.0, p[1], p[2], p[3])
+
+
 if __name__ == "__main__":
     main()

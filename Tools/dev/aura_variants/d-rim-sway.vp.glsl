@@ -1,3 +1,6 @@
+/* Generated variant for the zeq2clip.sh A/B loop - see
+   Tools/dev/aura_variants/README.md. The defaults in GameData/glsl are
+   authoritative; b-sway matches them by construction. */
 #version 120
 /*
  * aura_vp.glsl
@@ -329,7 +332,8 @@ void main(void) {
 	   configured cvar still means "how alive is this aura". */
 	float phase = u_Time * scrollSpeed * OSC_RATE;
 	float u = gl_MultiTexCoord0.x
-	        + OSC_SPAN * (sin(phase) + 0.5 * sin(2.7 * phase));
+	        + OSC_SPAN * (sin(phase) + 0.5 * sin(2.7 * phase))
+	          * gl_MultiTexCoord0.y;
 
 	/* The art is a flat drawing: its field is authored against the screen,
 	   so the strip must interpolate in screen space even across the quads

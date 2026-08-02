@@ -834,6 +834,11 @@ static void CG_Aura_AddPartBounds( const refEntity_t *part, int frame, const vec
 	}
 }
 
+// The tailLength the ring was authored against. Scaling by the ratio rather
+// than the value itself keeps a config carrying the stock 32 rendering exactly
+// as it did before tailLength was consulted here at all.
+#define AURA_TAILLENGTH_REFERENCE	32.0f
+
 static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, auraConfig_t *config ){
 	static qhandle_t	auraMesh;
 	static qhandle_t	auraShader;
@@ -842,6 +847,17 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	vec3_t				mins, maxs;
 	vec3_t				force;
 	float				speed, strength;
+
+	// The same two gates the convex-hull path applies, in the same order. Both
+	// belong to the aura rather than to either technique, and skipping them
+	// here meant a faded aura still cost an entity every frame and a character
+	// configured without one got it anyway.
+	if(!( state->isActive ||(state->modulate > 0.0f))){
+		return;
+	}
+	if(!config->showAura){
+		return;
+	}
 
 	if(!registered){
 		auraMesh = trap_R_RegisterModel("models/effects/aura.iqm");
@@ -882,6 +898,13 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	strength = config->auraScale * state->modulate;
 	strength *= 1.0f + (speed / 1000.0f > 1.0f ? 1.0f : speed / 1000.0f);
 
+	// tailLength is how far down the tail direction the hull path pushes its
+	// tail point. Here it stretches the teardrop by the same proportion. Zero
+	// means the config never set it, which is not a request for no aura.
+	if(config->tailLength > 0.0f){
+		strength *= config->tailLength / AURA_TAILLENGTH_REFERENCE;
+	}
+
 	memset( &ent, 0, sizeof(ent) );
 	ent.reType = RT_MODEL;
 	ent.hModel = auraMesh;
@@ -918,9 +941,18 @@ static void CG_Aura_ScreenSpaceRender( centity_t *player, auraState_t *state, au
 	ent.programParams[12] = config->auraAmplitude;
 	ent.programParams[13] = config->auraWavelength;
 	ent.programParams[14] = config->auraScrollSpeed;
-	ent.programParams[15] = 0.0f;
+	// How much of the flame's motion response to apply, 0 standing to 1 at
+	// full boost. The force direction alone cannot carry this: its screen
+	// projection shrinks toward zero for motion into the screen, which is
+	// exactly when the shape must NOT rotate toward a degenerate direction.
+	ent.programParams[15] = speed / 1000.0f > 1.0f ? 1.0f : speed / 1000.0f;
 
 	trap_R_AddRefEntityToScene( &ent );
+
+	// No separate interior veil: the band hangs from INNER_HUG of the
+	// outline, so the strip itself carries the reference's interior row by
+	// row. A sprite on top would be brightness the measured field never
+	// contained.
 }
 
 void CG_AddAuraToScene( centity_t *player){
@@ -1294,10 +1326,12 @@ void CG_Aura_DrawInnerSpike (vec3_t start, vec3_t end, float width, centity_t *p
 	verts[3].st[0] = 1;
 	verts[3].st[1] = 1;
 	
+	// auraColor is RGB only; alpha is not configurable for the inner spike.
 	for (i = 0;i < 4;i++){
-		for (j = 0;j < 4;j++){
+		for (j = 0;j < 3;j++){
 			verts[i].modulate[j] = 255 * config->auraColor[j];
 		}
+		verts[i].modulate[3] = 255;
 	}
 
 	trap_R_AddPolyToScene( config->auraShader, 4, verts);

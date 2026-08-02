@@ -82,12 +82,9 @@ Aura_ScreenSpace
 {
 	cull none
 	{
-		// A tiling spike strip, not the single-blob auraSpike.png: this
-		// technique wraps one texture around the whole ring and scrolls
-		// it, so it has to repeat seamlessly along U.
-		// clampmapT: S repeats around the ring, T clamps so the
-		// transparent spike tips never blend into the opaque body.
-		clampmapT effects/aura/auraSpikeStrip.png
+		// The strand grain is auragen.c's strip: S repeats around the
+		// ring, T clamps so past-the-tip reads return empty air.
+		clampmapT effects/aura/auraStrip.png
 		program aura
 		vertexProgram glsl/aura_vp.glsl
 		fragmentProgram glsl/aura_fp.glsl

@@ -13,17 +13,24 @@ Python scripts use only the standard library; shell scripts need bash.
 | `zeq2smoke.sh` | **gate**: load every map, assert the game survives joining it |
 | `zeq2audit.sh` | report where the code expects assets the data set never shipped |
 | `zeq2aura.sh` | sweep the aura's tuning and contact-sheet what each value renders as |
+| `zeq2clip.sh` | record a demo once, replay it through shader variants as video clips |
 | `zeq2sanitize.sh` | build + run under ASan/UBSan and group the findings |
 | `zeq2test.sh` | **gate**: static checks, ASan demonstrations, sanitizer-log assertions |
 | `tga2png.py` | convert an ioquake3 TGA screenshot to PNG (+ colour histogram) |
 | `png_sheet.py` | flatten PNGs onto one background so transparent art can be looked at |
 | `make_ui_art.py` | generate the interface images the data set never shipped |
 | `make_aura_mesh.py` | generate the screen-space aura's ring mesh |
+| `auragen.c` | procedurally generate aura reference images (compile: `cc -O2 -o auragen auragen.c -lz`) |
+| `aura_reference_clean.py` | turn any aura art into pipeline form - strips painted checkerboards (**needs numpy+scipy**) |
 | `make_aura_texture.py` | generate the screen-space aura's spike strip |
 | `zeq2env.sh` | shared paths/helpers, sourced by the others (not run directly) |
 
 `zeq2smoke.sh` and `zeq2test.sh` are gates (non-zero exit on failure). The rest
 are reports.
+
+The screen-space aura's whole pipeline - one reference image to the 1:1
+in-game effect, its measurement loop and its animation A/B - is documented in
+`AURA.md`.
 
 ## Regression tests (`zeq2test.sh`)
 
@@ -278,6 +285,26 @@ instead of by eye:
 
 - ~2.5k distinct colours, >90% greyscale → world is not drawing (flat frame)
 - ~40k distinct colours, <10% greyscale → world is drawing
+
+## Judging animation (`zeq2clip.sh`)
+
+A screenshot cannot judge motion, and eyeballing two live windows cannot put
+two shaders on the same motion. A demo can: `--record` scripts a session and
+saves it under `demos/`, and `--play` replays it through the engine's `video`
+capture - so N replays with N different `--vp`/`--fp` overlays differ by
+exactly the shader. `.gif` output needs ffmpeg; without it the engine's
+MJPEG-AVI is kept instead.
+
+The overlays, the tier-config `--set`s and the camera cvars are all restored
+after every run, so a clip session leaves the install as it found it.
+`Tools/dev/aura_variants/` holds the aura's animation candidates as complete
+shader pairs, with the loop that compares them in its README.
+
+Two determinism caveats. A *recording* is only as repeatable as the session
+that made it - spawn points vary per launch - so keep and reuse the recorded
+demo rather than re-recording it, and validation against old clips holds only
+while the demo file does. And `wait` counts client frames, so `--settle` and
+`--frames` scale with the machine's frame rate, not wall time.
 
 ## Sanitizers: ASan and UBSan both work
 
