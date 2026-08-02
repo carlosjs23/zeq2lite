@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // tr_bloom.c: 2D lighting post process effect
 
 #include "tr_local.h"
+#include "tr_bloomsize.h"
 
 
 static cvar_t *r_bloom;
@@ -123,35 +124,27 @@ static void R_Bloom_InitTextures( void )
 {
 	byte	*data;
 
-	// find closer power of 2 to screen size 
-	for (bloom.screen.width = 1;bloom.screen.width< glConfig.vidWidth;bloom.screen.width *= 2);
-	for (bloom.screen.height = 1;bloom.screen.height < glConfig.vidHeight;bloom.screen.height *= 2);
+	// Sizes live in tr_bloomsize.c so they can be tested without a GL context.
+	{
+		bloomSizes_t sizes;
 
-	bloom.screen.readW = glConfig.vidWidth / (float)bloom.screen.width;
-	bloom.screen.readH = glConfig.vidHeight / (float)bloom.screen.height;
+		if( !R_BloomSizes( &sizes, glConfig.vidWidth, glConfig.vidHeight,
+				r_bloom_sample_size->integer, glConfig.maxTextureSize ) ) {
+			ri.Cvar_Set( "r_bloom", "0" );
+			Com_Printf( S_COLOR_YELLOW"WARNING: 'R_InitBloomTextures' too high resolution for light bloom, effect disabled\n" );
+			return;
+		}
 
-	// find closer power of 2 to effect size 
-	bloom.work.width = r_bloom_sample_size->integer;
-	bloom.work.height = bloom.work.width * ( glConfig.vidWidth / glConfig.vidHeight );
-
-	for (bloom.effect.width = 1;bloom.effect.width < bloom.work.width;bloom.effect.width *= 2);
-	for (bloom.effect.height = 1;bloom.effect.height < bloom.work.height;bloom.effect.height *= 2);
-
-	bloom.effect.readW = bloom.work.width / (float)bloom.effect.width;
-	bloom.effect.readH = bloom.work.height / (float)bloom.effect.height;
-
-
-	// disable blooms if we can't handle a texture of that size
-	if( bloom.screen.width > glConfig.maxTextureSize ||
-		bloom.screen.height > glConfig.maxTextureSize ||
-		bloom.effect.width > glConfig.maxTextureSize ||
-		bloom.effect.height > glConfig.maxTextureSize ||
-		bloom.work.width > glConfig.vidWidth ||
-		bloom.work.height > glConfig.vidHeight
-	) {
-		ri.Cvar_Set( "r_bloom", "0" );
-		Com_Printf( S_COLOR_YELLOW"WARNING: 'R_InitBloomTextures' too high resolution for light bloom, effect disabled\n" );
-		return;
+		bloom.screen.width  = sizes.screenWidth;
+		bloom.screen.height = sizes.screenHeight;
+		bloom.screen.readW  = sizes.screenReadW;
+		bloom.screen.readH  = sizes.screenReadH;
+		bloom.effect.width  = sizes.effectWidth;
+		bloom.effect.height = sizes.effectHeight;
+		bloom.effect.readW  = sizes.effectReadW;
+		bloom.effect.readH  = sizes.effectReadH;
+		bloom.work.width    = sizes.workWidth;
+		bloom.work.height   = sizes.workHeight;
 	}
 
 	data = ri.Hunk_AllocateTempMemory( bloom.screen.width * bloom.screen.height * 4 );
@@ -192,7 +185,7 @@ static void R_Bloom_DrawEffect( void )
 	else
 		GL_State( GLS_DEPTHTEST_DISABLE );
 	qglColor4f( r_bloom_alpha->value, r_bloom_alpha->value, r_bloom_alpha->value, 1.0f );
-	R_Bloom_Quad( glConfig.vidWidth, glConfig.vidHeight, 0, 0, bloom.effect.readW, bloom.effect.readW );
+	R_Bloom_Quad( glConfig.vidWidth, glConfig.vidHeight, 0, 0, bloom.effect.readW, bloom.effect.readH );
 }
 
 
