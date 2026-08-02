@@ -1292,12 +1292,21 @@ void R_SetColorMappings( void ) {
 	int		inf;
 	int		shift;
 
-	// Overbright halves every lighting value so that lighting brighter than
-	// identity has somewhere to go, and something has to double it back. The
-	// display ramp does not on this port, and the software route through
-	// s_gammatable - which carries the same shift - does not either: enabling
-	// it halves the frame exactly, so the doubling never reaches the draw.
-	// Until that is understood, do not halve what nothing restores.
+	// Overbright halves every lighting value and expects something to double it
+	// back. It cannot work with this game's art, so r_overBrightBits is inert.
+	//
+	// The premise is that every pixel was divided by identityLight, which only
+	// touches stages asking for rgbGen identity. In stock Quake III that is
+	// nearly all of them; here the sky, the cel-shaded characters and the effect
+	// stages are not, so any multiply lands on pixels that were never halved and
+	// clips them while the halved ones merely return to neutral. Three routes
+	// were built and measured on desert, and all three failed that way:
+	// pre-multiplying textures (8-bit clamping recovered a median 1.52x against
+	// a fixed 0.5x), GL_RGB_SCALE at the combiner (world half lit, characters
+	// blown, 30% of the frame at white), and a full-frame resolve pass standing
+	// in for the old gamma ramp (38% at white with the mean still falling).
+	//
+	// Fixing it means re-authoring content, not choosing a better exponent.
 	tr.overbrightBits = 0;
 
 	// allow 2 overbright bits in 24 bit, but only 1 in 16 bit
