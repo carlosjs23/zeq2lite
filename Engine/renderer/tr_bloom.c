@@ -31,6 +31,7 @@ static cvar_t *r_bloom_darken;
 static cvar_t *r_bloom_intensity;
 static cvar_t *r_bloom_diamond_size;
 static cvar_t *r_bloom_debug;
+static cvar_t *r_bloom_fbo;
 
 /* 
 ============================================================================== 
@@ -167,7 +168,7 @@ static void R_Bloom_InitTextures( void )
 	// the same size and the two alternate. Without it the accumulator is the
 	// backbuffer and one texture is enough.
 	bloom.useFBO = qfalse;
-	if( framebufferObjects ) {
+	if( framebufferObjects && r_bloom_fbo->integer ) {
 		data = ri.Hunk_AllocateTempMemory( bloom.effect.width * bloom.effect.height * 4 );
 		Com_Memset( data, 0, bloom.effect.width * bloom.effect.height * 4 );
 		bloom.work.texture = R_CreateImage( "***bloom work texture***", data, bloom.effect.width, bloom.effect.height, qfalse, qfalse, GL_CLAMP_TO_EDGE);
@@ -555,5 +556,8 @@ void R_BloomInit( void ) {
 	r_bloom_sample_size = ri.Cvar_Get( "r_bloom_sample_size", "256", CVAR_ARCHIVE|CVAR_LATCH );
 //	r_bloom_fast_sample = ri.Cvar_Get( "r_bloom_fast_sample", "0", CVAR_ARCHIVE|CVAR_LATCH );
 	r_bloom_debug = ri.Cvar_Get( "r_bloom_debug", "0", 0 );
+	// Off falls back to reading the passes out of the backbuffer, which is
+	// the only way to compare the two against each other.
+	r_bloom_fbo = ri.Cvar_Get( "r_bloom_fbo", "1", CVAR_ARCHIVE|CVAR_LATCH );
 }
 
