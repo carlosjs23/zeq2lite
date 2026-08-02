@@ -132,6 +132,20 @@ extern GLvoid (APIENTRYP qglGetVertexAttribfvARB) (GLuint index, GLenum pname, G
 extern GLvoid (APIENTRYP qglGetVertexAttribivARB) (GLuint index, GLenum pname, GLint *params);
 extern GLvoid (APIENTRYP qglGetVertexAttribPointervARB) (GLuint index, GLenum pname, GLvoid **pointer);
 
+// GL_ARB_framebuffer_object. Render-to-texture, so a post process can write
+// into a texture directly instead of drawing into a corner of the backbuffer
+// and copying the result out of it.
+extern GLvoid (APIENTRYP qglGenFramebuffers) (GLsizei n, GLuint *framebuffers);
+extern GLvoid (APIENTRYP qglDeleteFramebuffers) (GLsizei n, const GLuint *framebuffers);
+extern GLvoid (APIENTRYP qglBindFramebuffer) (GLenum target, GLuint framebuffer);
+extern GLvoid (APIENTRYP qglFramebufferTexture2D) (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
+extern GLenum (APIENTRYP qglCheckFramebufferStatus) (GLenum target);
+extern GLvoid (APIENTRYP qglGenRenderbuffers) (GLsizei n, GLuint *renderbuffers);
+extern GLvoid (APIENTRYP qglDeleteRenderbuffers) (GLsizei n, const GLuint *renderbuffers);
+extern GLvoid (APIENTRYP qglBindRenderbuffer) (GLenum target, GLuint renderbuffer);
+extern GLvoid (APIENTRYP qglRenderbufferStorage) (GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
+extern GLvoid (APIENTRYP qglFramebufferRenderbuffer) (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
+
 //===========================================================================
 
 #define qglAccum glAccum

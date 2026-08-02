@@ -9,21 +9,29 @@ Python scripts use only the standard library; shell scripts need bash.
 | `zeq2build.sh` | `make`, then stage the game modules where the engine loads them |
 | `zeq2run.sh` | join a map, stay alive N seconds, report how the run ended |
 | `zeq2shot.sh` | join a map, grab an in-engine screenshot, convert it to PNG |
+| `zeq2bench.sh` | time the renderer on a scene that repeats exactly, and A/B a cvar |
 | `zeq2duel.sh` | fight two AI opponents and report what each spent doing it; `--assert` makes it a gate |
 | `zeq2smoke.sh` | **gate**: load every map, assert the game survives joining it |
 | `zeq2audit.sh` | report where the code expects assets the data set never shipped |
 | `zeq2aura.sh` | sweep the aura's tuning and contact-sheet what each value renders as |
+| `zeq2clip.sh` | record a demo once, replay it through shader variants as video clips |
 | `zeq2sanitize.sh` | build + run under ASan/UBSan and group the findings |
 | `zeq2test.sh` | **gate**: static checks, ASan demonstrations, sanitizer-log assertions |
 | `tga2png.py` | convert an ioquake3 TGA screenshot to PNG (+ colour histogram) |
 | `png_sheet.py` | flatten PNGs onto one background so transparent art can be looked at |
 | `make_ui_art.py` | generate the interface images the data set never shipped |
 | `make_aura_mesh.py` | generate the screen-space aura's ring mesh |
+| `auragen.c` | procedurally generate aura reference images (compile: `cc -O2 -o auragen auragen.c -lz`) |
+| `aura_reference_clean.py` | turn any aura art into pipeline form - strips painted checkerboards (**needs numpy+scipy**) |
 | `make_aura_texture.py` | generate the screen-space aura's spike strip |
 | `zeq2env.sh` | shared paths/helpers, sourced by the others (not run directly) |
 
 `zeq2smoke.sh` and `zeq2test.sh` are gates (non-zero exit on failure). The rest
 are reports.
+
+The screen-space aura's whole pipeline - one reference image to the 1:1
+in-game effect, its measurement loop and its animation A/B - is documented in
+`AURA.md`.
 
 ## Regression tests (`zeq2test.sh`)
 
@@ -66,6 +74,104 @@ Tools/dev/zeq2build.sh cgame     # recompile cgame and stage it
 Tools/dev/zeq2shot.sh --stats    # look at a settled in-game frame
 Tools/dev/zeq2smoke.sh           # regression gate over every map
 ```
+
+## Benchmarking the renderer (`zeq2bench.sh`)
+
+```bash
+Tools/dev/zeq2bench.sh                    # 3 runs of the checked-in demo
+Tools/dev/zeq2bench.sh --ab r_bloom 1 0   # A/B one cvar, arms interleaved
+Tools/dev/zeq2bench.sh --record           # record a demo for a new branch
+```
+
+`--ab` is the one to reach for. It prints each run, then:
+
+```
+r_bloom 1: 12.45 ms (80.3 fps) over 4 runs, spread 30.7%
+r_bloom 0: 5.40 ms (185.1 fps) over 4 runs, spread 13.0%
+delta: -7.22 ms (-58.0%) per pair, ratio 0.42x (range 0.38-0.47)
+```
+
+Read the **ratio**, not the absolute milliseconds. This machine wanders by tens
+of percent across a few minutes of sustained fullscreen load, which is the same
+order as the effect most renderer changes have — so two separate invocations of
+the script can easily disagree by more than the thing you are measuring. Two
+runs a minute apart share that wander, so the pairwise ratio holds to a few
+percent while the arms themselves do not. That is the whole reason `--ab`
+interleaves instead of running one arm and then the other. A ratio range as wide
+as the effect means the machine was too busy; run it again on a quiet one.
+
+### Why a demo and not a live scene
+
+Timedemo playback is the only scene in this game that repeats. The engine
+replays recorded server snapshots and advances `cl.serverTime` by a fixed 50ms
+per *rendered* frame, so frame N draws the same thing on any machine at any
+speed, and the run reports the same frame count every time (1139 for the
+checked-in `bench` demo — if that number moves, something ate part of the demo).
+Live play does not repeat: two AI fighters diverge within a second and measure
+±30%, and even an idle player drifts ±5% because the spawn point and view angle
+are whatever the map's spawn logic picked.
+
+`--record` produces a fresh demo. It uses `devmap` and `setviewpos` to pin the
+viewpoint rather than accepting the spawn, so re-recording gives the same scene:
+
+```bash
+Tools/dev/zeq2bench.sh --record --map desert --viewpos "-32400 -23215 -4463 90"
+cp Build/Release-darwin-arm/ZEQ2/demos/bench.dm_71 GameData/demos/
+```
+
+`GameData/` is the tracked overlay `zeq2build.sh` stages into the install, which
+is how the demo reaches a fresh worktree — the install itself is not in the repo.
+
+**A demo belongs to one protocol.** The file extension is the protocol version
+(`Shared/qcommon.h`), so `bench.dm_71` is a master demo and a branch that moves
+`PROTOCOL_VERSION` — `combat-and-ai` is at 72 — needs its own `--record`. A
+build that cannot find a demo for its protocol prints `Not found: demos/…` and
+drops to the main menu.
+
+### Two ways to get a meaningless number
+
+**Windowed runs measure the compositor.** A windowed present goes through the
+macOS compositor, which puts a floor of roughly 4.9ms on the swap. That is a
+third of a frame at the rates here, and it is not in the renderer. This script
+overrides the windowed defaults in `zeq2env.sh` and warns if you force
+`ZEQ2_FULLSCREEN=0`; those numbers are not comparable to fullscreen ones.
+
+**Archived cvars leak between runs.** Nearly every `r_*` cvar is `CVAR_ARCHIVE`,
+so `+set r_bloom 0` for one arm is written into `zeq2config.cfg` at shutdown and
+silently becomes the default for every run after it — the B measurement gets
+repeated under the name of A, and a whole batch of numbers is invalid with
+nothing to show for it. The script restores the config *between* runs, not just
+at the end, and pins every cvar that costs frame time at its shipped default on
+every run, so a config some earlier session already polluted cannot move the
+baseline. Restoring between runs is not only tidiness: leaving run 1's config in
+place made run 2 abort playback with `Com_Error(code=3): Disconnected from
+server`.
+
+### `timedemo`, not `cl_timedemo`
+
+`cl_timedemo` is the C variable; the cvar it holds is named **`timedemo`**
+(`Engine/client/cl_main.c`, `Cvar_Get("timedemo", …)`). `+set cl_timedemo 1`
+therefore creates an unrelated cvar, playback runs at wall-clock speed and
+`CL_DemoCompleted` skips its `%i frames %3.1f seconds %3.1f fps` line entirely.
+
+The other half of the same confusion: **a demo that finishes disconnects to the
+main menu.** That is `CL_DemoCompleted` calling `CL_Disconnect`, i.e. success.
+With a short demo it happens within a second or two of the map appearing, which
+looks exactly like a demo that refused to play. Pass `+set nextdemo quit` so the
+engine exits instead of sitting there.
+
+Two more things that make a run vanish before it renders:
+
+- `Com_ParseCommandLine` keeps only `MAX_CONSOLE_LINES` (32) `+` arguments and
+  drops the rest **silently**. Push past it and the trailing `+demo` disappears,
+  the engine starts, loads nothing and sits at the menu. This is why the pinned
+  cvars go into an exec'd cfg instead of onto the command line.
+- Escape on the connect screen issues `disconnect` (`Game/UI/ui_connect.c`), and
+  `CL_InitCGame` spends several seconds not pumping the event queue, so events
+  from the fullscreen handoff between back-to-back runs can land there. It shows
+  up as `Com_Error(code=3): Disconnected from server` right after
+  `CL_InitCGame`. The script settles between runs and retries a lost one; the
+  scene is deterministic, so a replayed run measures the same frames.
 
 ## Checking Linux (`zeq2linux.sh`)
 
@@ -214,9 +320,10 @@ screenshot pose. Nothing about that points back at a dev script, which is what
 makes it expensive.
 
 `zeq2shot.sh` now backs up `zeq2config.cfg` before launching and restores it on
-exit, so every script that goes through it is safe. **Anything that launches
-the engine directly has to do the same.** Resetting the individual cvars
-afterwards is not good enough - it needs updating every time a caller adds one.
+exit, so every script that goes through it is safe; `zeq2bench.sh` launches
+directly and does the same, between every run. **Anything that launches the
+engine directly has to do the same.** Resetting the individual cvars afterwards
+is not good enough - it needs updating every time a caller adds one.
 
 The cvars the visual harness overrides, and the values the game ships with, so
 a polluted config can be repaired by hand:
@@ -255,6 +362,26 @@ instead of by eye:
 
 - ~2.5k distinct colours, >90% greyscale → world is not drawing (flat frame)
 - ~40k distinct colours, <10% greyscale → world is drawing
+
+## Judging animation (`zeq2clip.sh`)
+
+A screenshot cannot judge motion, and eyeballing two live windows cannot put
+two shaders on the same motion. A demo can: `--record` scripts a session and
+saves it under `demos/`, and `--play` replays it through the engine's `video`
+capture - so N replays with N different `--vp`/`--fp` overlays differ by
+exactly the shader. `.gif` output needs ffmpeg; without it the engine's
+MJPEG-AVI is kept instead.
+
+The overlays, the tier-config `--set`s and the camera cvars are all restored
+after every run, so a clip session leaves the install as it found it.
+`Tools/dev/aura_variants/` holds the aura's animation candidates as complete
+shader pairs, with the loop that compares them in its README.
+
+Two determinism caveats. A *recording* is only as repeatable as the session
+that made it - spawn points vary per launch - so keep and reuse the recorded
+demo rather than re-recording it, and validation against old clips holds only
+while the demo file does. And `wait` counts client frames, so `--settle` and
+`--frames` scale with the machine's frame rate, not wall time.
 
 ## Sanitizers: ASan and UBSan both work
 

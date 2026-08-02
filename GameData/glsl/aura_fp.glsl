@@ -3,131 +3,122 @@
  * aura_fp.glsl
  * screen-space aura fragment program
  *
- * The vertex stage emits the spike texture twice - once scrolling each way -
- * because the texture has to flow toward the tip on both sides of the aura and
- * the direction therefore has to reverse somewhere. Crossfading the two copies
- * across that reversal hides the seam a hard mirror would leave, at the tip
- * where the spikes converge and at the base where nothing else would cover it.
+ * The flame is computed here, not sampled. A texture strip was tried and could
+ * not reach the reference art: a strip is a height field along the band, so a
+ * tongue can never be wider than its base, its interiors arrive semi-opaque
+ * from however the art was filtered, and every level of detail question turns
+ * into a mip question. What the reference actually shows is three separable
+ * things - an opaque white body, a rim broken into bold tongues, and hair-fine
+ * strands leaving the tongue edges - and each of those is cheaper to state as
+ * a function of ring position than to paint.
+ *
+ * The vertex stage still emits the coordinate twice, once scrolling each way,
+ * because the flame has to flow toward the tip on both sides and the direction
+ * must reverse somewhere. Crossfading the two evaluations hides that seam.
  */
 
 uniform sampler2D u_Texture0;
 uniform vec4 u_EntityColor;
+uniform float u_Time;
 
 varying float v_seamBlend;
 varying float v_edge;
-varying float v_texBias;
 varying float v_base;
+/* Wraps of the pattern around the ring, from the vertex stage. The noise
+   lattice is hashed modulo its cell count per ring, and that count is
+   frequency * wraps: without it the lattice does not close where the ring
+   does, and the flame tears open along one radius. */
+varying float v_wraps;
 
-/* Where along the ring the tip tint starts taking over. The dense body has to
-   stay the entity's own colour or the aura stops reading as that character's;
-   only the thinning outer spikes cool off. */
+/* The strand grain comes from the strip texture auragen.c bakes: one field
+   evaluated in the same (u, t) domain this stage works in, with the soft
+   radial-blur quality per-fragment noise cannot afford. The macro tongues
+   live in the mesh - the outline baked from the reference - so the strip's
+   longest strands just touch t = 1 and the geometry stays the silhouette. */
+
+/* Tint constants, unchanged from the sampled version: the tips deepen into
+   the character's own colour, the core runs hotter than the body, and the
+   base carries an extra glow where the ki meets the ground. */
 #define TIP_START 0.35
-
-/* How far the tips deepen. The shift used to be toward a fixed blue, and that
-   is wrong for the material: a Super Saiyan aura is one hue from the body to
-   the ends of its spikes, and the only gradient in it is white core to
-   saturated gold. A fixed target cannot do that, because it is a different
-   hue for every character - plausible on gold, magenta on red, and it turned
-   the whole crown cyan, which is the single thing that most gave the effect
-   away against reference art.
-
-   The tips now deepen into the character's *own* colour instead. That keeps a
-   temperature gradient - the ends read cooler than the core because they are
-   more saturated and less white - without inventing a hue that belongs to
-   nobody. */
 #define TIP_SHIFT 0.85
-
-/* Where the white-hot core has faded back to the entity's own colour. Sits
-   just outside the strip's alpha peak, so the whitest pixels are also the
-   densest ones and the core reads as a single hot band rather than as a pale
-   wash over the whole body. */
-#define CORE_END 0.20
-
-/* How far the core is pushed toward white. Kept low: the animated reference
-   has no white sheath around the body at all - the flame is out at the edges
-   and the space the character occupies is left open, because the character is
-   lit on their own cel rather than by the aura. A strong core reads as the
-   aura being wrapped around them instead of standing behind them. */
+#define CORE_END  0.20
 #define CORE_SHIFT 0.25
-
-/* How far above alpha-over the core is driven, and where it settles back. Only
-   the core glows: pushing the whole aura past unity is just the additive
-   version again, hue and all. */
-#define CORE_GLOW 1.35
+#define CORE_GLOW 1.0
 #define GLOW_END  0.45
+#define BASE_GLOW 0.0
 
-/* Extra glow where the aura gathers under the character. Rides on top of the
-   core term rather than replacing it, so the point under the feet reads as the
-   same white-hot material as the core and not as a second light source. */
-#define BASE_GLOW 1.5
+
+
+/* The strip is a flipbook: STRIP_FRAMES bands stacked vertically, frame 0
+   the reference exactly, the rest lick-jittered variants of it. Hard cuts
+   between them are the anime's own animation - two or three drawings of the
+   same flame alternating - and at time zero frame 0 shows, which is the
+   frame the measurement harness compares against the art. Must match
+   --frames in aura_band_from_reference.py.
+
+   FLICKER_FPS 0 holds frame 0: the shipped animation is the vertex stage's
+   sway alone, which the A/B clips read as the calmer of the two. The strip
+   still carries all four frames so the flipbook variant
+   (Tools/dev/aura_variants/c-flipbook.fp.glsl) is a pure shader swap. */
+#define STRIP_FRAMES 4.0
+#define FLICKER_FPS  0.0
+/* Rows per frame, for the half-texel inset that keeps bilinear filtering
+   from bleeding one frame's tips into the next frame's body. */
+#define FRAME_ROWS   512.0
+
+/* The flame at ring position u (already in strip S units) and band position
+   t (0 at the inner ring, 1 at the reference outline): the art's own colour
+   over black in rgb, coverage in alpha. A greyscale reference bakes rgb
+   equal to its coverage, so colourless art multiplies through the tint
+   exactly as the old white-rgb strip did. */
+vec4 flame( float u, float t ){
+	/* The strip is the reference's own band, unwrapped over exactly one
+	   turn, so it tiles by construction and is sampled straight. */
+	float frame = mod( floor( u_Time * FLICKER_FPS), STRIP_FRAMES);
+	/* Identity in the interior - rescaling by (rows-1)/rows squeezed the
+	   whole field measurably - clamped only within the half texel at each
+	   frame edge that bilinear would blend into the neighbouring frame. */
+	float tIn   = clamp( t, 0.5 / FRAME_ROWS, 1.0 - 0.5 / FRAME_ROWS);
+
+	/* No mist, no boost, and no inner fade on top: the strip already
+	   carries the reference's interior glow and its hot rim - anything
+	   added here is a departure from the art. */
+	return texture2D( u_Texture0, vec2( u, (frame + tIn) / STRIP_FRAMES));
+}
+
+
 
 void main(void) {
-	/* No coordinate fixing up needed here: the stage binds this texture with
-	   clampmapT, so S repeats around the ring while T clamps at the spike
-	   tips. Sampling past the last row therefore returns the tips rather than
-	   wrapping into the opaque body, which is what used to draw a bright
-	   hairline around the aura's outer rim. */
+	/* The vertex stage scales both coordinates by clip w so they interpolate
+	   in screen space across the ground fold, and u additionally by the fan
+	   radius so it fans projectively through each wedge instead of kinking
+	   at quad boundaries. Dividing by each set's own q restores them. */
+	float uu = gl_TexCoord[0].s / max( gl_TexCoord[0].q, 0.0001);
+	float tt = gl_TexCoord[1].t / max( gl_TexCoord[1].q, 0.0001);
 
-	/* The bias is what stops a distant aura crawling: the vertex stage has
-	   already dropped as many wraps of the strip as it can, and this takes the
-	   sampler down the mip chain for whatever undersampling is left. */
-	vec4 forward  = texture2D(u_Texture0, gl_TexCoord[0].st, v_texBias);
-	vec4 mirrored = texture2D(u_Texture0, gl_TexCoord[1].st, v_texBias);
+	vec4  strand = flame( uu, tt);
+	float alpha  = strand.a * u_EntityColor.a;
 
-	vec4 spikes = mix(mirrored, forward, v_seamBlend);
+	/* The tint pipeline is unchanged from the sampled version. The tips run
+	   cool by deepening into the character's own colour; a fixed target is a
+	   different hue for every character. */
+	float level = max( max( u_EntityColor.r, u_EntityColor.g), u_EntityColor.b);
+	vec3  deep  = u_EntityColor.rgb * u_EntityColor.rgb / max( level, 0.0001);
+	vec3  cool  = mix( u_EntityColor.rgb, deep, TIP_SHIFT);
+	vec3  tint  = mix( u_EntityColor.rgb, cool, smoothstep( TIP_START, 1.0, v_edge));
 
-	/* The aura art keeps its silhouette in alpha and leaves RGB solid white, so
-	   everything below shapes the tint and the alpha carries the silhouette. */
+	vec3  hot   = mix( u_EntityColor.rgb, vec3(level), CORE_SHIFT);
+	tint = mix( hot, tint, smoothstep( 0.0, CORE_END, v_edge));
 
-	/* The tips run cool while the body stays the entity's colour. The blue is
-	   derived from u_EntityColor rather than delivered as its own uniform:
-	   every programParams slot is spoken for, and scaling the target by the
-	   entity colour's brightest channel keeps a dim or a saturated aura from
-	   either blowing out or going black at the ends. */
-	float level = max(max(u_EntityColor.r, u_EntityColor.g), u_EntityColor.b);
+	/* Premultiplied output against GL_ONE / GL_ONE_MINUS_SRC_ALPHA: at unity
+	   this is alpha-over and the flame holds its colour against any sky;
+	   pushed past unity the excess adds, so the core glows into the scene. */
+	float boost = mix( CORE_GLOW, 1.0, smoothstep( 0.0, GLOW_END, v_edge));
+	boost += BASE_GLOW * v_base * (1.0 - smoothstep( 0.0, 0.7, v_edge));
 
-	/* Squaring and renormalising against the brightest channel pushes the
-	   colour away from grey while pinning that channel where it was, so the
-	   result is the same hue carrying more of it: gold deepens to amber,
-	   white stays white because it has no hue to deepen, and a colour that is
-	   already saturated is left alone. Scaling the channels down instead just
-	   darkens, which reads as the aura running out rather than concentrating. */
-	vec3  deep  = u_EntityColor.rgb * u_EntityColor.rgb / max(level, 0.0001);
-	vec3  cool  = mix(u_EntityColor.rgb, deep, TIP_SHIFT);
-	vec3  tint  = mix(u_EntityColor.rgb, cool, smoothstep(TIP_START, 1.0, v_edge));
-
-	/* Inside that, the core runs hotter than the body: ki is drawn brightest
-	   where it is densest, and without this the aura is one flat hue with a
-	   cool fringe - it has a colour but no temperature. Desaturating toward
-	   `level` rather than toward vec3(1.0) keeps a dim aura's core dim, so a
-	   character whose colour is deliberately muted does not get a white core
-	   as bright as everyone else's. */
-	vec3  hot   = mix(u_EntityColor.rgb, vec3(level), CORE_SHIFT);
-	tint = mix(hot, tint, smoothstep(0.0, CORE_END, v_edge));
-
-	float alpha = spikes.a * u_EntityColor.a;
-
-	/* Premultiplied output against GL_ONE / GL_ONE_MINUS_SRC_ALPHA, which is
-	   the reason one stage can be both things at once.
-
-	   That blend computes src.rgb + dst * (1 - src.a). Feed it rgb = tint *
-	   alpha and it is exactly alpha-over: the aura holds its own colour no
-	   matter how bright the scene behind it, which straight addition cannot do
-	   - gold over a lit sky sums past 1 and comes back white with the sky's
-	   own hue in it. Push rgb past tint * alpha and the excess is added rather
-	   than blended, so it glows into the scene the way the additive version
-	   did.
-
-	   So the core is driven well above unity and burns out into the world,
-	   while the body and spikes sit at unity and stay the character's colour.
-	   Which is what the reference art shows: a white-hot centre that clearly
-	   emits, surrounded by flame that is solidly, unmistakably gold. */
-	float boost = mix(CORE_GLOW, 1.0, smoothstep(0.0, GLOW_END, v_edge));
-
-	/* Weighted toward the inner rows as well as toward the base, so the hot
-	   spot sits where the flame leaves the ground rather than smearing along
-	   the whole length of the licks that spring from it. */
-	boost += BASE_GLOW * v_base * (1.0 - smoothstep(0.0, 0.7, v_edge));
-
-	gl_FragColor = vec4(spikes.rgb * tint * alpha * boost, alpha);
+	/* The strip's rgb is the art over black - premultiplied by its own
+	   coverage - so it takes the place white-times-alpha held: colourless
+	   strips reproduce the old output exactly, coloured strips carry the
+	   art's own gradient, and the entity tint multiplies either. */
+	gl_FragColor = vec4( strand.rgb * u_EntityColor.a * tint * boost, alpha);
 }

@@ -215,7 +215,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	// Off by default: the screen-space aura needs the GLSL pipeline, which is
 	// itself behind r_ext_vertex_shader and off by default.
-	{ &cg_auraScreenSpace, "cg_auraScreenSpace", "0", CVAR_ARCHIVE },
+	{ &cg_auraScreenSpace, "cg_auraScreenSpace", "1", CVAR_ARCHIVE },
 	{ &cg_gibs, "cg_gibs", "1", CVAR_ARCHIVE  },
 	{ &cg_scripted2D, "cg_scripted2D", "1", CVAR_ARCHIVE  },
 	{ &cg_scriptedCamera, "cg_scriptedCamera", "1", CVAR_ARCHIVE  },

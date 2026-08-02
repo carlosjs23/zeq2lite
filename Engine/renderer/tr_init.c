@@ -31,6 +31,7 @@ float       displayAspect = 0.0f;
 int         displayWidth = 0;
 int         displayHeight = 0;
 qboolean    vertexShaders = qfalse;
+qboolean    framebufferObjects = qfalse;
 
 glstate_t	glState;
 
@@ -944,6 +945,7 @@ void GfxInfo_f( void )
 	ri.Printf( PRINT_ALL, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
 	ri.Printf( PRINT_ALL, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
 	ri.Printf( PRINT_ALL, "glsl programs: %s\n", enablestrings[vertexShaders] );
+	ri.Printf( PRINT_ALL, "framebuffer objects: %s\n", enablestrings[framebufferObjects] );
 	if ( r_vertexLight->integer || glConfig.hardwareType == GLHW_PERMEDIA2 )
 	{
 		ri.Printf( PRINT_ALL, "HACK: using vertex lightmap approximation\n" );
