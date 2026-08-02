@@ -77,6 +77,18 @@ void (APIENTRYP qglMultiTexCoord2fARB) (GLenum target, GLfloat s, GLfloat t);
 void (APIENTRYP qglLockArraysEXT) (GLint first, GLsizei count);
 void (APIENTRYP qglUnlockArraysEXT) (void);
 
+// GL_ARB_framebuffer_object
+GLvoid (APIENTRYP qglGenFramebuffers) (GLsizei n, GLuint *framebuffers);
+GLvoid (APIENTRYP qglDeleteFramebuffers) (GLsizei n, const GLuint *framebuffers);
+GLvoid (APIENTRYP qglBindFramebuffer) (GLenum target, GLuint framebuffer);
+GLvoid (APIENTRYP qglFramebufferTexture2D) (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
+GLenum (APIENTRYP qglCheckFramebufferStatus) (GLenum target);
+GLvoid (APIENTRYP qglGenRenderbuffers) (GLsizei n, GLuint *renderbuffers);
+GLvoid (APIENTRYP qglDeleteRenderbuffers) (GLsizei n, const GLuint *renderbuffers);
+GLvoid (APIENTRYP qglBindRenderbuffer) (GLenum target, GLuint renderbuffer);
+GLvoid (APIENTRYP qglRenderbufferStorage) (GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
+GLvoid (APIENTRYP qglFramebufferRenderbuffer) (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
+
 // GL_ARB_shader_objects
 GLvoid (APIENTRYP qglDeleteObjectARB) (GLhandleARB obj);
 GLhandleARB (APIENTRYP qglGetHandleARB) (GLenum pname);
@@ -1060,6 +1072,38 @@ static void GLimp_InitExtensions( void )
 	else
 	{
 		ri.Printf( PRINT_ALL, "...GL_ARB_vertex_shader not found\n" );
+	}
+
+	framebufferObjects = qfalse;
+	if ( GLimp_HaveExtension( "GL_ARB_framebuffer_object" ) )
+	{
+		qglGenFramebuffers = (GLvoid (APIENTRYP)(GLsizei, GLuint *)) SDL_GL_GetProcAddress("glGenFramebuffers");
+		qglDeleteFramebuffers = (GLvoid (APIENTRYP)(GLsizei, const GLuint *)) SDL_GL_GetProcAddress("glDeleteFramebuffers");
+		qglBindFramebuffer = (GLvoid (APIENTRYP)(GLenum, GLuint)) SDL_GL_GetProcAddress("glBindFramebuffer");
+		qglFramebufferTexture2D = (GLvoid (APIENTRYP)(GLenum, GLenum, GLenum, GLuint, GLint)) SDL_GL_GetProcAddress("glFramebufferTexture2D");
+		qglCheckFramebufferStatus = (GLenum (APIENTRYP)(GLenum)) SDL_GL_GetProcAddress("glCheckFramebufferStatus");
+		qglGenRenderbuffers = (GLvoid (APIENTRYP)(GLsizei, GLuint *)) SDL_GL_GetProcAddress("glGenRenderbuffers");
+		qglDeleteRenderbuffers = (GLvoid (APIENTRYP)(GLsizei, const GLuint *)) SDL_GL_GetProcAddress("glDeleteRenderbuffers");
+		qglBindRenderbuffer = (GLvoid (APIENTRYP)(GLenum, GLuint)) SDL_GL_GetProcAddress("glBindRenderbuffer");
+		qglRenderbufferStorage = (GLvoid (APIENTRYP)(GLenum, GLenum, GLsizei, GLsizei)) SDL_GL_GetProcAddress("glRenderbufferStorage");
+		qglFramebufferRenderbuffer = (GLvoid (APIENTRYP)(GLenum, GLenum, GLenum, GLuint)) SDL_GL_GetProcAddress("glFramebufferRenderbuffer");
+
+		if ( qglGenFramebuffers && qglDeleteFramebuffers && qglBindFramebuffer
+			&& qglFramebufferTexture2D && qglCheckFramebufferStatus
+			&& qglGenRenderbuffers && qglDeleteRenderbuffers && qglBindRenderbuffer
+			&& qglRenderbufferStorage && qglFramebufferRenderbuffer )
+		{
+			framebufferObjects = qtrue;
+			ri.Printf( PRINT_ALL, "...using GL_ARB_framebuffer_object\n" );
+		}
+		else
+		{
+			ri.Printf( PRINT_ALL, "...GL_ARB_framebuffer_object advertised but incomplete\n" );
+		}
+	}
+	else
+	{
+		ri.Printf( PRINT_ALL, "...GL_ARB_framebuffer_object not found\n" );
 	}
 }
 
