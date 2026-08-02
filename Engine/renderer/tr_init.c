@@ -238,9 +238,6 @@ static void InitOpenGL( void )
 	// init command buffers and SMP
 	R_InitCommandBuffers();
 
-	// print info
-	GfxInfo_f();
-
 	// set default state
 	GL_SetDefaultState();
 }
@@ -1234,6 +1231,12 @@ void R_Init( void ) {
 	InitOpenGL();
 
 	R_InitImages();
+
+	// After R_InitImages, because R_SetColorMappings runs from there and settles
+	// the gamma and overbright figures this reports. Called from InitOpenGL it
+	// printed tr.overbrightBits while it was still zeroed global memory, so the
+	// line never once described the frame that followed it.
+	GfxInfo_f();
 
 	R_GLSL_Init();
 

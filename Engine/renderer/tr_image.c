@@ -1292,13 +1292,21 @@ void R_SetColorMappings( void ) {
 	int		inf;
 	int		shift;
 
-	// Overbright halves every lighting value and expects a display gamma ramp to
-	// double it back at scan-out. Nothing here does that: measured on the static
-	// menu, fullscreen came out at 67.5 mean against 87.9 windowed, and 87.9
-	// again once overbright was off. Whatever ramp macOS accepts, it is not
-	// compensating, so the halving is all the player sees - a flat, lightless
-	// world. r_overBrightBits is inert as a result. It used to be gated on
-	// isFullscreen, back when that meant "has a gamma ramp of its own".
+	// Overbright halves every lighting value and expects something to double it
+	// back. It cannot work with this game's art, so r_overBrightBits is inert.
+	//
+	// The premise is that every pixel was divided by identityLight, which only
+	// touches stages asking for rgbGen identity. In stock Quake III that is
+	// nearly all of them; here the sky, the cel-shaded characters and the effect
+	// stages are not, so any multiply lands on pixels that were never halved and
+	// clips them while the halved ones merely return to neutral. Three routes
+	// were built and measured on desert, and all three failed that way:
+	// pre-multiplying textures (8-bit clamping recovered a median 1.52x against
+	// a fixed 0.5x), GL_RGB_SCALE at the combiner (world half lit, characters
+	// blown, 30% of the frame at white), and a full-frame resolve pass standing
+	// in for the old gamma ramp (38% at white with the mean still falling).
+	//
+	// Fixing it means re-authoring content, not choosing a better exponent.
 	tr.overbrightBits = 0;
 
 	// allow 2 overbright bits in 24 bit, but only 1 in 16 bit
