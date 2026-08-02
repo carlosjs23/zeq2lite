@@ -1122,6 +1122,7 @@ extern glstate_t	glState;		// outside of TR since it shouldn't be cleared during
 extern qboolean  textureFilterAnisotropic;
 extern int       maxAnisotropy;
 extern qboolean  vertexShaders;
+extern qboolean  framebufferObjects;
 extern float     displayAspect;
 extern int       displayWidth;
 extern int       displayHeight;
