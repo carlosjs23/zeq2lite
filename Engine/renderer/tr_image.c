@@ -1292,13 +1292,12 @@ void R_SetColorMappings( void ) {
 	int		inf;
 	int		shift;
 
-	// Overbright halves every lighting value and expects a display gamma ramp to
-	// double it back at scan-out. Nothing here does that: measured on the static
-	// menu, fullscreen came out at 67.5 mean against 87.9 windowed, and 87.9
-	// again once overbright was off. Whatever ramp macOS accepts, it is not
-	// compensating, so the halving is all the player sees - a flat, lightless
-	// world. r_overBrightBits is inert as a result. It used to be gated on
-	// isFullscreen, back when that meant "has a gamma ramp of its own".
+	// Overbright halves every lighting value so that lighting brighter than
+	// identity has somewhere to go, and something has to double it back. The
+	// display ramp does not on this port, and the software route through
+	// s_gammatable - which carries the same shift - does not either: enabling
+	// it halves the frame exactly, so the doubling never reaches the draw.
+	// Until that is understood, do not halve what nothing restores.
 	tr.overbrightBits = 0;
 
 	// allow 2 overbright bits in 24 bit, but only 1 in 16 bit
