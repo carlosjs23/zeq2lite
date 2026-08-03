@@ -660,92 +660,139 @@ void CG_DrawScoreboard(){
 	}
 }
 /*================
-CG_HUD
+CG_PowerLevelString
+
+The number beside a gauge, scaled by the tier's hudMultiplier and abbreviated
+once it runs past what the column can hold.
 ================*/
-void CG_DrawHUD(playerState_t *ps,int clientNum,int x,int y,qboolean flipped){
-	const char	*powerLevelString;
-	int 		powerLevelOffset;
-	long	 	powerLevelDisplay;
-	float		multiplier;
-	cg_userWeapon_t	*skill;
-	int			chargePercent;
-	int			chargeReady;
-	qboolean charging = ps->weaponstate == WEAPON_CHARGING || ps->weaponstate == WEAPON_ALTCHARGING ? qtrue : qfalse;
-	vec4_t	powerColor = {0.0f,0.588f,1.0f,1.0f};
-	vec4_t	dullColor = {0.188f,0.278f,0.345f,1.0f};
-	vec4_t	limitColor = {1.0f,0.1f,0.0f,1.0f};
-	vec4_t	beyondFatigueColor = {0.9f,0.5f,0.0f,1.0f};
-	vec4_t	beyondHealthColor = {0.8f,0.2f,0.2f,1.0f};
-	vec4_t	healthFatigueColor = {1.0f,0.4f,0.2f,1.0f};
-	vec4_t	plFatigueHealthColor = {0.5f,0.16f,0.16f,1.0f};
-	vec4_t	plFatigueColor = {0.4f,0.4f,0.5f,1.0f};
-	vec4_t	readyColor = {0.588f,1.0f,0.0,1.0f};
+static const char *CG_PowerLevelString(int clientNum,int powerLevel){
+	float	multiplier;
+	long	display;
+	multiplier = cgs.clientinfo[clientNum].tierConfig[cgs.clientinfo[clientNum].tierCurrent].hudMultiplier;
+	if(multiplier <= 0){multiplier = 1.0;}
+	display = (float)powerLevel * multiplier;
+	return display >= 1000000 ? va("%.1f ^3mil",(float)display / 1000000.0) : va("%i",display);
+}
+/*================
+CG_DrawHudRow
+
+One value, one gauge: a label column, a bar, a number column. The capsule's
+window sits HUD_GAUGE_INSET inside its frame, and the fill goes there first with
+the frame over it - the order every gauge on this HUD is drawn in, and where the
+bars get their gloss. The label is a word rather than a code or a glyph: two of
+these four values are this game's own inventions, so there is no icon a player
+already reads as "power level" or "limit break reserve", and an abbreviation
+short enough for a narrow column only moves the guessing somewhere else. It is
+tinted to the bar's colour so the row reads as one object.
+================*/
+static void CG_DrawHudRow(int x,int y,int height,const char *label,int value,int maxValue,vec4_t color,qhandle_t frame,const char *number){
+	vec4_t	trackColor = {0.110f,0.157f,0.204f,1.0f};
 	vec4_t	clearColor = {0.0f,0.0f,0.0f,0.0f};
-	vec4_t	*chargeColor;
-	vec3_t	angles;
-	if(!charging){
-		CG_DrawHorGauge(x+60,y+41,200,16,powerColor,dullColor,ps->powerLevel[plCurrent],ps->powerLevel[plMaximum],qfalse);
-		CG_DrawRightGauge(x+60,y+41,200,16,plFatigueColor,plFatigueColor,ps->powerLevel[plFatigue],ps->powerLevel[plMaximum]);
-		CG_DrawRightGauge(x+60,y+41,200,16,limitColor,limitColor,ps->powerLevel[plHealth],ps->powerLevel[plMaximum]);
-		CG_DrawDiffGauge(x+60,y+41,200,16,beyondFatigueColor,beyondFatigueColor,ps->powerLevel[plCurrent],ps->powerLevel[plFatigue],ps->powerLevel[plMaximum],1);
-		CG_DrawDiffGauge(x+60,y+41,200,16,plFatigueHealthColor,plFatigueHealthColor,ps->powerLevel[plFatigue],ps->powerLevel[plHealth],ps->powerLevel[plMaximum],1);
-		CG_DrawDiffGauge(x+60,y+41,200,16,beyondHealthColor,beyondHealthColor,ps->powerLevel[plCurrent],ps->powerLevel[plHealth],ps->powerLevel[plMaximum],1);
-		if((ps->powerLevel[plCurrent] > ps->powerLevel[plFatigue]) && (ps->powerLevel[plFatigue] > ps->powerLevel[plHealth])){
-			CG_DrawDiffGauge(x+60,y+41,200,16,healthFatigueColor,healthFatigueColor,ps->powerLevel[plCurrent],ps->powerLevel[plFatigue],ps->powerLevel[plMaximum],1);
+	int		textY;
+	textY = y + HUD_GAUGE_INSET + height / 2 - SMALLCHAR_HEIGHT / 4;
+	CG_DrawStringExt(-1,x+HUD_LABEL_X,textY,label,color,qfalse,qtrue,SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT/2,0);
+	CG_DrawHorGauge(x+HUD_BAR_X,y+HUD_GAUGE_INSET,HUD_BAR_WIDTH,height,trackColor,trackColor,1,1,qfalse);
+	if(maxValue > 0){
+		// CG_DrawHorGauge sizes the empty segment before it clamps the bar, so an
+		// over-full value has to be caught here rather than there.
+		if(value > maxValue){value = maxValue;}
+		if(value > 0){
+			CG_DrawHorGauge(x+HUD_BAR_X,y+HUD_GAUGE_INSET,HUD_BAR_WIDTH,height,color,clearColor,value,maxValue,qfalse);
 		}
 	}
+	CG_DrawPic(qfalse,x+HUD_BAR_X-HUD_GAUGE_INSET,y,HUD_BAR_WIDTH+2*HUD_GAUGE_INSET,height+2*HUD_GAUGE_INSET,frame);
+	if(number){
+		CG_DrawSmallStringHalfHeight(x+HUD_NUMBER_RIGHT-Q_PrintStrlen(number)*SMALLCHAR_WIDTH,textY,number,1.0F);
+	}
+}
+/*================
+CG_DrawHUD
+
+Four readouts in one plate. plHealth and plFatigue used to be painted into the
+power bar as coloured regions, which is what made it seven colours deep; they
+are quantities on the same scale as plCurrent, so each gets its own gauge and
+the power bar goes back to being a single fill.
+
+`remote` marks the locked-on target's copy of the panel, where only the three
+values carried in lockonData are known - the rest would be drawn as zero, which
+reads as a real reading rather than as an absent one.
+================*/
+void CG_DrawHUD(playerState_t *ps,int clientNum,int x,int y,qboolean remote){
+	cg_userWeapon_t	*skill;
+	int			chargePercent,chargeReady;
+	int			reserve,reserveFull;
+	float		flash;
+	qboolean	charging = ps->weaponstate == WEAPON_CHARGING || ps->weaponstate == WEAPON_ALTCHARGING ? qtrue : qfalse;
+	vec4_t	powerColor = {0.118f,0.588f,1.0f,1.0f};
+	vec4_t	healthColor = {0.851f,0.251f,0.251f,1.0f};
+	vec4_t	staminaColor = {0.922f,0.659f,0.200f,1.0f};
+	vec4_t	reserveColor = {0.400f,0.722f,0.380f,1.0f};
+	vec4_t	readyColor = {0.588f,1.0f,0.0f,1.0f};
+	vec4_t	chargingColor = {0.9f,0.5f,0.0f,1.0f};
+	vec4_t	ruleColor = {0.275f,0.431f,0.588f,0.55f};
+	vec4_t	flashColor = {1.0f,1.0f,1.0f,1.0f};
+	vec4_t	clearColor = {0.0f,0.0f,0.0f,0.0f};
+	vec3_t	angles;
+	CG_DrawPic(qfalse,x,y,HUD_PANEL_WIDTH,HUD_PANEL_HEIGHT,cgs.media.hudPlateShader);
+	if(charging){
+		skill = CG_FindUserWeaponGraphics(cg.snap->ps.clientNum,cg.weaponSelect);
+		CG_DrawPic(qfalse,x+HUD_PAD,y+HUD_PAD,HUD_PORTRAIT,HUD_PORTRAIT,skill->weaponIcon);
+	}
 	else{
+		CG_DrawHead(x+HUD_PAD,y+HUD_PAD,HUD_PORTRAIT,HUD_PORTRAIT,clientNum,angles);
+	}
+	// The primary row carries the charge while an attack is winding up, which is
+	// what the single bar always did.
+	if(charging){
 		if(ps->weaponstate == WEAPON_CHARGING){
 			chargePercent = ps->stats[stChargePercentPrimary];
 			chargeReady = ps->currentSkill[WPSTAT_CHRGREADY];
-			chargeColor = chargePercent >= chargeReady ? &readyColor : &beyondFatigueColor;
-			powerLevelDisplay = ps->attackPower;
 		}
 		else{
 			chargePercent = ps->stats[stChargePercentSecondary];
 			chargeReady = ps->currentSkill[WPSTAT_ALT_CHRGREADY];
-			chargeColor = chargePercent >= chargeReady ? &readyColor : &beyondFatigueColor;
-			powerLevelDisplay = ps->attackPower;
 		}
-		CG_DrawHorGauge(x+60,y+41,200,16,*chargeColor,dullColor,chargePercent,100,qfalse);
-	}
-	CG_DrawPic(qfalse,x,y,288,72,cgs.media.hudShader);
-	if(!charging){
-		CG_DrawHead(x+6,y+22,50,50,clientNum,angles);
-		if(ps->powerLevel[plCurrent] == ps->powerLevel[plMaximum] && ps->bitFlags & usingAlter){
-			CG_DrawPic(qfalse,x+243,y+25,40,44,cgs.media.breakLimitShader);
-		}
-		if(ps->powerLevel[plCurrent] == 9001){
-			powerLevelString = "Over ^3NINE-THOUSAND!!!";
-		}
-		multiplier = cgs.clientinfo[clientNum].tierConfig[cgs.clientinfo[clientNum].tierCurrent].hudMultiplier;
-		if(multiplier <= 0){
-			multiplier = 1.0;
-		}
-		if(ps->powerLevel[plCurrent] < 9001){
-			powerLevelDisplay = (float)ps->powerLevel[plCurrent] * multiplier;
-			powerLevelString = powerLevelDisplay >= 1000000 ? va("%.1f ^3mil",(float)powerLevelDisplay / 1000000.0) : va("%i",powerLevelDisplay);
-			powerLevelOffset = (Q_PrintStrlen(powerLevelString)-2)*8;
-		}
-		if(ps->powerLevel[plCurrent] > 9001){
-			powerLevelDisplay = (float)ps->powerLevel[plCurrent] * multiplier;
-			powerLevelString = powerLevelDisplay >= 1000000 ? va("%.1f ^3mil",(float)powerLevelDisplay / 1000000.0) : va("%i",powerLevelDisplay);
-			powerLevelOffset = (Q_PrintStrlen(powerLevelString)-2)*8;
-		}
-		powerLevelDisplay = (float)ps->powerLevel[plCurrent] * multiplier;
-		//powerLevelString = powerLevelDisplay >= 1000000 ? va("%.1f ^3mil",(float)powerLevelDisplay / 1000000.0) : va("%i",powerLevelDisplay);
-		powerLevelOffset = (Q_PrintStrlen(powerLevelString)-2)*8;
-	}
-	else{
-		skill = CG_FindUserWeaponGraphics(cg.snap->ps.clientNum,cg.weaponSelect);
-		CG_DrawPic(qfalse,x+6,y+22,50,50,skill->weaponIcon);
-		powerLevelString = powerLevelDisplay >= 1000000 ? va("%.1f ^3mil",(float)powerLevelDisplay / 1000000.0) : va("%i",powerLevelDisplay);
-		powerLevelOffset = (Q_PrintStrlen(powerLevelString)-2)*8;
+		CG_DrawHudRow(x,y+HUD_ROW_PL_Y,HUD_ROW_PRIMARY,"CHRG",chargePercent,100,
+			chargePercent >= chargeReady ? readyColor : chargingColor,
+			cgs.media.gaugePrimaryShader,CG_PowerLevelString(clientNum,ps->attackPower));
 		if(chargeReady){
-			CG_DrawPic(qfalse,x+(int)(198*(chargeReady/100.0))+55,y+25,13,38,cgs.media.markerAscendShader);
+			CG_DrawPic(qfalse,x+HUD_BAR_X+(int)((HUD_BAR_WIDTH-HUD_PIN_WIDTH)*(chargeReady/100.0)),
+				y+HUD_ROW_PL_Y-HUD_GAUGE_INSET-10,HUD_PIN_WIDTH,HUD_PIN_HEIGHT,cgs.media.markerAscendShader);
+		}
+		return;
+	}
+	CG_DrawHudRow(x,y+HUD_ROW_PL_Y,HUD_ROW_PRIMARY,"POWER",ps->powerLevel[plCurrent],ps->powerLevel[plMaximum],
+		powerColor,cgs.media.gaugePrimaryShader,CG_PowerLevelString(clientNum,ps->powerLevel[plCurrent]));
+	CG_DrawHudRow(x,y+HUD_ROW_HP_Y,HUD_ROW_SECONDARY,"LIFE",ps->powerLevel[plHealth],ps->powerLevel[plMaximum],
+		healthColor,cgs.media.gaugeSecondaryShader,CG_PowerLevelString(clientNum,ps->powerLevel[plHealth]));
+	if(remote){return;}
+	CG_DrawHudRow(x,y+HUD_ROW_ST_Y,HUD_ROW_SECONDARY,"STAM",ps->powerLevel[plFatigue],ps->powerLevel[plMaximum],
+		staminaColor,cgs.media.gaugeSecondaryShader,CG_PowerLevelString(clientNum,ps->powerLevel[plFatigue]));
+	// The vitals are what the body is doing; the reserve is what a limit break
+	// has left to spend. The rule is what says they are different questions.
+	CG_DrawHorGauge(x+HUD_LABEL_X,y+HUD_RULE_Y,HUD_NUMBER_RIGHT-HUD_LABEL_X,1,ruleColor,ruleColor,1,1,qfalse);
+	if(!(ps->options & canBreakLimit)){return;}
+	reserveFull = BREAKLIMIT_RESERVE_FULL(ps->powerLevel[plMaximum]);
+	if(reserveFull < 1){return;}
+	reserve = ps->powerLevel[plMaximumPool];
+	if(reserve > reserveFull){reserve = reserveFull;}
+	// While the limit is actually breaking, the animated icon takes the label
+	// slot: the row it labels is the one being spent.
+	CG_DrawHudRow(x,y+HUD_ROW_BL_Y,HUD_ROW_MINOR,"BURST",reserve,reserveFull,reserveColor,
+		cgs.media.gaugeMinorShader,va("%i%%",(int)(100.0f * reserve / reserveFull)));
+	// The limit break's own animated mark, badged on the portrait: the label
+	// column says what the row is, not what it is doing right now.
+	if(ps->bitFlags & isBreakingLimit){
+		CG_DrawPic(qfalse,x+HUD_PAD+HUD_PORTRAIT-20,y+HUD_PAD+HUD_PORTRAIT-20,18,18,cgs.media.breakLimitShader);
+	}
+	if(cg.breakLimitReadyTime){
+		flash = 1.0f - (float)(cg.time - cg.breakLimitReadyTime) / BREAKLIMIT_FLASH_TIME;
+		if(flash > 0 && flash <= 1.0f){
+			flashColor[3] = flash;
+			CG_DrawHorGauge(x+HUD_BAR_X,y+HUD_ROW_BL_Y+HUD_GAUGE_INSET,HUD_BAR_WIDTH,HUD_ROW_MINOR,flashColor,clearColor,1,1,qfalse);
+			CG_DrawPic(qfalse,x+HUD_BAR_X-HUD_GAUGE_INSET,y+HUD_ROW_BL_Y,HUD_BAR_WIDTH+2*HUD_GAUGE_INSET,HUD_ROW_MINOR+2*HUD_GAUGE_INSET,cgs.media.gaugeMinorShader);
 		}
 	}
-	CG_DrawSmallStringHalfHeight(x+239-powerLevelOffset,y+44,powerLevelString,1.0F);
 }
 static void CG_DrawStatusBar( void ) {
 	centity_t		*cent;
@@ -772,6 +819,10 @@ static void CG_DrawStatusBar( void ) {
 	CG_DrawScreenEffects();
 	if(ps->lockedTarget > 0 && cgs.clientinfo[ps->lockedTarget-1].infoValid){
 		playerState_t lockedTargetPS;
+		// Only the fields below arrive over the lockon data, and the HUD reads
+		// bitFlags and options as well; leaving them as stack garbage decides
+		// at random what the target's HUD draws.
+		memset(&lockedTargetPS,0,sizeof(lockedTargetPS));
 		lockedTargetPS.clientNum = ps->lockedTarget-1;
 		lockedTargetPS.powerLevel[plCurrent] = ps->lockonData[lkPowerCurrent];
 		lockedTargetPS.powerLevel[plHealth] = ps->lockonData[lkPowerHealth];
@@ -782,7 +833,7 @@ static void CG_DrawStatusBar( void ) {
 		CG_DrawHUD(&lockedTargetPS,lockedTargetPS.clientNum,320,0,qtrue);
 	}
 	else{
-		CG_DrawHUD(ps,ps->clientNum,0,408,qfalse);
+		CG_DrawHUD(ps,ps->clientNum,0,HUD_PANEL_Y,qfalse);
 		if(charging){return;}
 		if(tier){
 			activeTier = &ci->tierConfig[ci->tierCurrent];
@@ -793,7 +844,7 @@ static void CG_DrawStatusBar( void ) {
 			if(activeTier->sustainMaximum && activeTier->sustainMaximum < tierLast){tierLast = (float)activeTier->sustainMaximum;}
 			if(tierLast < 32767){
 				tierLast = tierLast / (float)ps->powerLevel[plMaximum];
-				CG_DrawPic(qfalse,(187*tierLast)+60,428,13,38,cgs.media.markerDescendShader);
+				CG_DrawPic(qfalse,HUD_BAR_X+(HUD_BAR_WIDTH-HUD_PIN_WIDTH)*tierLast,HUD_PANEL_Y+HUD_ROW_PL_Y-HUD_GAUGE_INSET-10,HUD_PIN_WIDTH,HUD_PIN_HEIGHT,cgs.media.markerDescendShader);
 			}
 		}
 		if(tier < ps->powerLevel[plTierTotal]){
@@ -806,7 +857,7 @@ static void CG_DrawStatusBar( void ) {
 			if(tierNext){
 				tierNext = tierNext / (float)ps->powerLevel[plMaximum];
 				if(tierNext < 1.0){
-					CG_DrawPic(qfalse,(187*tierNext)+60,428,13,38,cgs.media.markerAscendShader);
+					CG_DrawPic(qfalse,HUD_BAR_X+(HUD_BAR_WIDTH-HUD_PIN_WIDTH)*tierNext,HUD_PANEL_Y+HUD_ROW_PL_Y-HUD_GAUGE_INSET-10,HUD_PIN_WIDTH,HUD_PIN_HEIGHT,cgs.media.markerAscendShader);
 				}
 			}
 		}

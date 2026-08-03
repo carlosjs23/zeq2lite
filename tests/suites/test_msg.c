@@ -23,6 +23,7 @@ a negative `bits` means a signed field of |bits| bits. MSG_WriteBits rejects
 
 #include "q_shared.h"
 #include "qcommon.h"
+#include "bg_public.h"
 
 static byte  buffer[8192];
 static msg_t msg;
@@ -230,4 +231,39 @@ Test(msg, entitystate_attackpower_survives_values_beyond_16_bits) {
 	cr_assert_eq(out.number, 5);
 	cr_assert_eq(out.attackPowerTotal, 100000000);
 	cr_assert_eq(out.attackPowerCurrent, 99999999);
+}
+
+/* ------------------------------------------------- playerState delta fields */
+
+/*
+The limit break accumulator lives in playerState_t's buffers[] rather than in a
+function static, and that only works if it reaches the client: prediction
+re-runs pmove from the last snapshot every frame, so an accumulator the snapshot
+does not carry restarts from whatever the delta baseline happened to hold.
+
+This also pins the reason the move needed no protocol change. buffers[] is
+delta-coded behind a mask a fixed MAX_RBUFFERS bits wide, so a second entry in
+the enum costs nothing on the wire - but only while the entry is inside
+MAX_RBUFFERS, which is what the bounds assertion below is for.
+*/
+Test(msg, buffers_survive_a_playerstate_delta) {
+	playerState_t from, to, out;
+
+	cr_assert_lt(bfBreakLimit, MAX_RBUFFERS,
+		"the limit break pool must be inside the mask buffers[] is coded behind");
+
+	memset(&from, 0, sizeof(from));
+	memset(&to, 0, sizeof(to));
+	memset(&out, 0, sizeof(out));
+	to.buffers[bfBreakLimit] = 0.375f;
+	to.buffers[bfZanzokenCost] = 0.5f;
+
+	MSG_WriteDeltaPlayerstate(&msg, &from, &to);
+	MSG_BeginReading(&msg);
+	MSG_ReadDeltaPlayerstate(&msg, &from, &out);
+
+	cr_assert_float_eq(out.buffers[bfBreakLimit], 0.375f, 1e-6,
+		"the limit break pool did not survive the wire");
+	cr_assert_float_eq(out.buffers[bfZanzokenCost], 0.5f, 1e-6,
+		"the neighbouring buffer entry was disturbed");
 }

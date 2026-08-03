@@ -58,6 +58,39 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	PAIN_TWITCH_TIME	200
 #define	WEAPON_SELECT_TIME	1400
 #define	ITEM_SCALEUP_TIME	1000
+// A spawn is handed a maximum-power reserve of plMaximum/4, so scaling the
+// gauge to plMaximum/3 leaves it three quarters full before the first fight.
+#define	BREAKLIMIT_RESERVE_FULL(maximum)	((maximum) / 3)
+#define	BREAKLIMIT_FLASH_TIME	400
+
+// The HUD panel. One value per gauge, so every bar shares a left edge, a width
+// and a right edge and only its height says which outranks which.
+// Tools/dev/make_hud_gauge.py draws the plate, the portrait frame and the
+// capsules at these sizes - change them together or the frames land off their
+// windows.
+#define	HUD_PANEL_WIDTH		288
+#define	HUD_PANEL_HEIGHT	86
+#define	HUD_PANEL_Y			(SCREEN_HEIGHT-HUD_PANEL_HEIGHT)
+#define	HUD_PAD				8
+#define	HUD_PORTRAIT		70
+#define	HUD_LABEL_X			80
+#define	HUD_BAR_X			130
+#define	HUD_BAR_WIDTH		76
+#define	HUD_NUMBER_RIGHT	280
+#define	HUD_ROW_PRIMARY		12
+#define	HUD_ROW_SECONDARY	8
+#define	HUD_ROW_MINOR		6
+// Border plus glow: how far a capsule's window sits inside its frame.
+#define	HUD_GAUGE_INSET		3
+#define	HUD_ROW_PL_Y		8
+#define	HUD_ROW_HP_Y		30
+#define	HUD_ROW_ST_Y		46
+#define	HUD_RULE_Y			62
+#define	HUD_ROW_BL_Y		66
+// The tier pins ride the primary gauge, so they are sized to it rather than to
+// the 13x38 the old full-height bar took.
+#define	HUD_PIN_WIDTH		10
+#define	HUD_PIN_HEIGHT		24
 #define	ZOOM_TIME			150
 #define	ITEM_BLOB_TIME		200
 #define	MUZZLE_FLASH_TIME	80 //20
@@ -765,6 +798,7 @@ typedef struct {
 
 	// ADDING FOR ZEQ2
 	int			PLBar_foldPct;	// Need to know how far we've folded in or out already
+	int			breakLimitReadyTime;	// when the limit break reserve last topped up
 	// END ADDING
 
 	// blend blobs
@@ -817,6 +851,10 @@ typedef struct {
 	qhandle_t	markerAscendShader;
 	qhandle_t	markerDescendShader;
 	qhandle_t	breakLimitShader;
+	qhandle_t	hudPlateShader;
+	qhandle_t	gaugePrimaryShader;
+	qhandle_t	gaugeSecondaryShader;
+	qhandle_t	gaugeMinorShader;
 
 	qhandle_t	RadarBlipShader;
 	qhandle_t	RadarBlipTeamShader;

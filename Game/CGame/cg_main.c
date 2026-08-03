@@ -1383,6 +1383,10 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.markerAscendShader = trap_R_RegisterShaderNoMip( "interface/hud/markerAscend.png" );
 	cgs.media.markerDescendShader = trap_R_RegisterShaderNoMip( "interface/hud/markerDescend.png" );
 	cgs.media.breakLimitShader = trap_R_RegisterShaderNoMip( "breakLimit" );
+	cgs.media.hudPlateShader = trap_R_RegisterShaderNoMip( "interface/hud/hudPlate.png" );
+	cgs.media.gaugePrimaryShader = trap_R_RegisterShaderNoMip( "interface/hud/gaugePrimary.png" );
+	cgs.media.gaugeSecondaryShader = trap_R_RegisterShaderNoMip( "interface/hud/gaugeSecondary.png" );
+	cgs.media.gaugeMinorShader = trap_R_RegisterShaderNoMip( "interface/hud/gaugeMinor.png" );
 	cgs.media.RadarBlipShader = trap_R_RegisterShaderNoMip( "interface/sense/blip.png" );
 	cgs.media.RadarBlipTeamShader = trap_R_RegisterShaderNoMip( "interface/sense/blipteam.png" );
 	cgs.media.RadarBurstShader = trap_R_RegisterShaderNoMip( "interface/sense/burst.png" );
