@@ -272,6 +272,177 @@ void IN_CenterView (void) {
 }
 
 
+/*
+===============================================================================
+
+SCRIPTED INPUT
+
+`testinput <spec> <ms>` holds inputs for a duration, so a run driven from a
+script can do the things only a held key could do before: stay airborne for 45
+seconds, hold the lock-on button next to a target, charge an alt-attack.
+
+It lives here rather than in a console script because a usercmd is built from
+key state, not from console text - a `+attack` issued as a script line has no
+key behind it to release, and nothing downstream of CL_CreateCmd can tell a
+held button from one pressed for a single frame. Folding the hold into the
+usercmd at the point every other input reaches it means prediction, networking
+and pmove all see exactly what a human press produces.
+
+Cheat gated on cl_connectedToCheatServer, which is the flag the client already
+uses to decide whether CVAR_CHEAT cvars may keep their values (cl_cgame.c), or
+on com_developer for a run that never connects to a cheat server. There is no
+client-side equivalent of the game module's `g_cheats.integer` test, so this is
+the nearest idiom the engine already has.
+
+===============================================================================
+*/
+
+typedef struct {
+	char		*name;
+	int			button;			// button bit to hold, or 0 for a move
+	signed char	forward, side, up;
+} testInputName_t;
+
+// The button bits are the ones default.cfg binds: SPACE is +button14
+// (BUTTON_JUMP), MOUSE2 is +button10 (BUTTON_ALT_ATTACK), g is +button3
+// (BUTTON_GESTURE, the melee lock-on toggle).
+static testInputName_t	cl_testInputNames[] = {
+	{ "jump",		BUTTON_JUMP,		0,  0,  0 },
+	{ "attack",		BUTTON_ATTACK,		0,  0,  0 },
+	{ "altattack",	BUTTON_ALT_ATTACK,	0,  0,  0 },
+	{ "lock",		BUTTON_GESTURE,		0,  0,  0 },
+	{ "block",		BUTTON_BLOCK,		0,  0,  0 },
+	{ "boost",		BUTTON_BOOST,		0,  0,  0 },
+	{ "powerup",	BUTTON_POWERLEVEL,	0,  0,  0 },
+	{ "up",			0,					0,  0,  1 },
+	{ "down",		0,					0,  0, -1 },
+	{ "forward",	0,					1,  0,  0 },
+	{ "back",		0,				   -1,  0,  0 },
+	{ "left",		0,					0, -1,  0 },
+	{ "right",		0,					0,  1,  0 }
+};
+
+static int		cl_testInputUntil;		// cls.realtime the hold expires; 0 is inactive
+static int		cl_testInputButtons;
+static int		cl_testInputForward, cl_testInputSide, cl_testInputUp;
+
+static void CL_TestInputClear( void ) {
+	cl_testInputUntil = 0;
+	cl_testInputButtons = 0;
+	cl_testInputForward = cl_testInputSide = cl_testInputUp = 0;
+}
+
+/*
+===============
+CL_TestInputApply
+
+Only called while a hold is live, so an idle client pays one integer test per
+frame and the usercmd is byte for byte what it was before.
+===============
+*/
+static void CL_TestInputApply( usercmd_t *cmd ) {
+	if ( cls.realtime >= cl_testInputUntil ) {
+		CL_TestInputClear();
+		return;
+	}
+
+	cmd->buttons |= cl_testInputButtons;
+	// 127 is the full-speed value CL_KeyMove uses when not walking; adding to
+	// the existing move keeps a scripted hold and a real key additive rather
+	// than one overriding the other.
+	if ( cl_testInputForward ) {
+		cmd->forwardmove = ClampChar( cmd->forwardmove + cl_testInputForward * 127 );
+	}
+	if ( cl_testInputSide ) {
+		cmd->rightmove = ClampChar( cmd->rightmove + cl_testInputSide * 127 );
+	}
+	if ( cl_testInputUp ) {
+		cmd->upmove = ClampChar( cmd->upmove + cl_testInputUp * 127 );
+	}
+	if ( cl_testInputForward || cl_testInputSide || cl_testInputUp ) {
+		cmd->buttons &= ~BUTTON_WALKING;
+	}
+}
+
+/*
+===============
+CL_TestInput_f
+
+	testinput <name>[,<name>...] <ms>
+	testinput clear
+===============
+*/
+static void CL_TestInput_f( void ) {
+	char	spec[MAX_TOKEN_CHARS];
+	char	*name, *next;
+	int		i, msec, buttons, forward, side, up;
+
+	if ( !cl_connectedToCheatServer && !com_developer->integer ) {
+		Com_Printf( "testinput needs a cheat-enabled server or com_developer 1\n" );
+		return;
+	}
+
+	if ( Cmd_Argc() == 2 && !Q_stricmp( Cmd_Argv( 1 ), "clear" ) ) {
+		CL_TestInputClear();
+		Com_Printf( "testinput: cleared\n" );
+		return;
+	}
+
+	if ( Cmd_Argc() != 3 ) {
+		Com_Printf( "usage: testinput <name>[,<name>...] <ms>\n" );
+		Com_Printf( "       testinput clear\n" );
+		Com_Printf( "names:" );
+		for ( i = 0 ; i < ARRAY_LEN( cl_testInputNames ) ; i++ ) {
+			Com_Printf( " %s", cl_testInputNames[i].name );
+		}
+		Com_Printf( "\n" );
+		return;
+	}
+
+	msec = atoi( Cmd_Argv( 2 ) );
+	if ( msec <= 0 ) {
+		Com_Printf( "testinput: duration must be positive\n" );
+		return;
+	}
+
+	// The separator is a comma and not a plus because Com_ParseCommandLine
+	// breaks the command line on every '+', so `+testinput lock+altattack`
+	// would arrive as two console lines.
+	Q_strncpyz( spec, Cmd_Argv( 1 ), sizeof( spec ) );
+	buttons = 0;
+	forward = side = up = 0;
+	for ( name = spec ; name ; name = next ) {
+		next = strchr( name, ',' );
+		if ( next ) {
+			*next = 0;
+			next++;
+		}
+		for ( i = 0 ; i < ARRAY_LEN( cl_testInputNames ) ; i++ ) {
+			if ( !Q_stricmp( name, cl_testInputNames[i].name ) ) {
+				break;
+			}
+		}
+		if ( i == ARRAY_LEN( cl_testInputNames ) ) {
+			Com_Printf( "testinput: unknown input '%s'\n", name );
+			return;
+		}
+		buttons |= cl_testInputNames[i].button;
+		forward += cl_testInputNames[i].forward;
+		side += cl_testInputNames[i].side;
+		up += cl_testInputNames[i].up;
+	}
+
+	// A second invocation replaces the first outright, so a script never has to
+	// reason about what is still held from the step before it.
+	cl_testInputButtons = buttons;
+	cl_testInputForward = forward;
+	cl_testInputSide = side;
+	cl_testInputUp = up;
+	cl_testInputUntil = cls.realtime + msec;
+	Com_Printf( "testinput: holding '%s' for %i ms\n", Cmd_Argv( 1 ), msec );
+}
+
+
 //==========================================================================
 
 cvar_t	*cl_yawspeed;
@@ -593,6 +764,11 @@ usercmd_t CL_CreateCmd( void ) {
 
 	// get basic movement from joystick
 	CL_JoystickMove( &cmd );
+
+	// scripted holds, after every real input source so they are additive
+	if ( cl_testInputUntil ) {
+		CL_TestInputApply( &cmd );
+	}
 
 	// check to make sure the angles haven't wrapped
 	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
@@ -982,6 +1158,7 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-button14", IN_Button14Up);
 	Cmd_AddCommand ("+mlook", IN_MLookDown);
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
+	Cmd_AddCommand ("testinput", CL_TestInput_f);
 
 #ifdef USE_VOIP
 	Cmd_AddCommand ("+voiprecord", IN_VoipRecordDown);
@@ -1059,6 +1236,7 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-button14");
 	Cmd_RemoveCommand("+mlook");
 	Cmd_RemoveCommand("-mlook");
+	Cmd_RemoveCommand("testinput");
 
 #ifdef USE_VOIP
 	Cmd_RemoveCommand("+voiprecord");
