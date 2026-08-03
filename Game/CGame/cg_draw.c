@@ -794,6 +794,113 @@ void CG_DrawHUD(playerState_t *ps,int clientNum,int x,int y,qboolean remote){
 		}
 	}
 }
+/*================
+CG_MeleeReadoutState
+
+What the locked target is doing, in one word, and the colour that says whether
+it is a threat or an opening. Grouped rather than enumerated: the melee has
+eighteen states and a player reacting inside a 550ms window needs to know which
+of three answers applies, not which state index is up.
+
+A knockback outranks the state because it is the one that lasts and the one an
+attack is free against; a bare freeze is last, since every state above already
+implies its own recovery.
+================*/
+static const char *CG_MeleeReadoutState(int state,int status,vec4_t color){
+	vec4_t	threatColor = {1.0f,0.35f,0.2f,1.0f};
+	vec4_t	guardColor = {0.4f,0.72f,1.0f,1.0f};
+	vec4_t	openColor = {0.588f,1.0f,0.0f,1.0f};
+	Vector4Copy(threatColor,color);
+	if(status & LKSTATUS_KNOCKBACK){
+		Vector4Copy(openColor,color);
+		return "KNOCKED";
+	}
+	switch(state){
+	case stMeleeUsingStun:
+		Vector4Copy(openColor,color);
+		return "STUNNED";
+	case stMeleeUsingBlock:
+		Vector4Copy(guardColor,color);
+		return "BLOCKING";
+	case stMeleeUsingEvade:
+		Vector4Copy(guardColor,color);
+		return "EVADING";
+	case stMeleeChargingPower:
+	case stMeleeChargingStun:
+		return "CHARGING";
+	case stMeleeUsingSpeedBreaker:
+	case stMeleeUsingChargeBreaker:
+		return "BREAKER";
+	case stMeleeUsingSpeed:
+		return "ATTACKING";
+	case stMeleeStartPower:
+	case stMeleeUsingPower:
+		return "HEAVY";
+	case stMeleeStartHit:
+		Vector4Copy(openColor,color);
+		return "HIT";
+	}
+	if(status & LKSTATUS_FROZEN){
+		Vector4Copy(openColor,color);
+		return "RECOVERING";
+	}
+	return NULL;
+}
+/*================
+CG_DrawMeleeReadout
+
+The melee charge and the target's state, drawn on the target. Both are why the
+melee plays shallower than it is: the charge decides whether a windup becomes
+the attack or the breaker, and the target's state decides which of them wins,
+and neither was on screen anywhere.
+
+Deliberately not a fifth row of the status panel. The panel is a plate of fixed
+art in the corner and these windows are sub-second and happen at the target, so
+a corner reading would be technically present and practically still unreadable.
+
+Aspect-correct, like the panel it borrows its bar from: mixing the two mappings
+inside one HUD makes the pieces drift apart as the display aspect changes.
+================*/
+static void CG_DrawMeleeReadout(void){
+	const playerState_t	*ps;
+	const centity_t		*foe;
+	const char			*label;
+	vec3_t				anchor;
+	vec4_t				labelColor;
+	vec4_t				chargingColor = {0.9f,0.5f,0.0f,1.0f};
+	vec4_t				readyColor = {0.588f,1.0f,0.0f,1.0f};
+	vec4_t				emptyColor = {0.0f,0.0f,0.0f,0.5f};
+	float				x,y;
+	int					charge,cap,width;
+
+	if(!cg_drawMeleeState.integer){return;}
+	ps = &cg.predictedPlayerState;
+	if(ps->lockedTarget <= 0 || ps->lockedTarget > MAX_CLIENTS){return;}
+	foe = &cg_entities[ps->lockedTarget-1];
+	if(!foe->currentValid){return;}
+	VectorCopy(foe->lerpOrigin,anchor);
+	anchor[2] += MELEE_READOUT_LIFT;
+	if(!CG_WorldCoordToScreenCoordFloat(anchor,&x,&y)){return;}
+	// The charge is the local fighter's own and is predicted, so the meter
+	// tracks the button rather than the last snapshot.
+	charge = ps->timers[tmMeleeCharge];
+	cap = 0;
+	if(ps->stats[stMeleeState] == stMeleeChargingPower){cap = MELEE_POWER_CHARGE;}
+	else if(ps->stats[stMeleeState] == stMeleeChargingStun){cap = MELEE_STUN_CHARGE;}
+	if(cap){
+		if(charge > cap){charge = cap;}
+		CG_DrawHorGauge(x-MELEE_READOUT_WIDTH/2,y,MELEE_READOUT_WIDTH,MELEE_READOUT_HEIGHT,
+			charge >= cap ? readyColor : chargingColor,emptyColor,charge,cap,qfalse);
+		CG_DrawPic(qfalse,x-MELEE_READOUT_WIDTH/2-HUD_GAUGE_INSET,y-HUD_GAUGE_INSET,
+			MELEE_READOUT_WIDTH+2*HUD_GAUGE_INSET,MELEE_READOUT_HEIGHT+2*HUD_GAUGE_INSET,
+			cgs.media.gaugeMinorShader);
+	}
+	label = CG_MeleeReadoutState(ps->lockonData[lkMeleeState],ps->lockonData[lkMeleeStatus],labelColor);
+	if(!label){return;}
+	width = CG_DrawStrlen(label) * SMALLCHAR_WIDTH;
+	CG_DrawStringExt(-1,(int)x-width/2,(int)y-SMALLCHAR_HEIGHT-MELEE_READOUT_GAP,label,labelColor,
+		qtrue,qtrue,SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,0);
+}
 static void CG_DrawStatusBar( void ) {
 	centity_t		*cent;
 	playerState_t	*ps;
@@ -1489,6 +1596,7 @@ static void CG_Draw2D( void ) {
 			CG_DrawStatusBar();
 			CG_DrawCrosshair();
 			CG_DrawCrosshairNames();
+			CG_DrawMeleeReadout();
 			CG_DrawRadar();
 			if(!(cg.snap->ps.bitFlags & usingMelee)){
 				CG_DrawWeaponSelect();

@@ -91,6 +91,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // the 13x38 the old full-height bar took.
 #define	HUD_PIN_WIDTH		10
 #define	HUD_PIN_HEIGHT		24
+
+// The melee readout, drawn on the locked target rather than in the panel. Its
+// windows are sub-second and they happen where the player is looking, so a
+// corner readout would be present and still unreadable. Borrows the panel's
+// bar width and inset so the two read as one vocabulary; it deliberately does
+// not borrow the row heights, which are cut to fit a fixed plate this has none
+// of. World-space lift is units, everything else is 640x480 virtual pixels.
+#define	MELEE_READOUT_LIFT	48
+#define	MELEE_READOUT_WIDTH	HUD_BAR_WIDTH
+#define	MELEE_READOUT_HEIGHT	5
+#define	MELEE_READOUT_GAP	4
 #define	ZOOM_TIME			150
 #define	ITEM_BLOB_TIME		200
 #define	MUZZLE_FLASH_TIME	80 //20
@@ -1129,6 +1140,7 @@ extern	vmCvar_t		cg_crosshairBars;
 extern	vmCvar_t		cg_scripted2D;
 extern	vmCvar_t		cg_scriptedCamera;
 extern	vmCvar_t		cg_drawStatus;
+extern	vmCvar_t		cg_drawMeleeState;
 extern	vmCvar_t		cg_draw2D;
 extern	vmCvar_t		cg_animSpeed;
 extern	vmCvar_t		cg_debugAnim;

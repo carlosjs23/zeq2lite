@@ -2819,8 +2819,8 @@ void PM_Melee(void){
 		}
 		// Power Melee / Charge Breaker
 		else if(state == stMeleeChargingPower || state == stMeleeStartPower || pm->cmd.buttons & BUTTON_ALT_ATTACK){
-			if((state == stMeleeChargingPower || state == stMeleeStartPower) && (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) || meleeCharge >= 550)){
-				if(meleeCharge >= 550){
+			if((state == stMeleeChargingPower || state == stMeleeStartPower) && (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) || meleeCharge >= MELEE_POWER_CHARGE)){
+				if(meleeCharge >= MELEE_POWER_CHARGE){
 					damage = 0;
 					PM_EndDrift();
 					pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
@@ -2890,18 +2890,18 @@ void PM_Melee(void){
 				pm->ps->lockedPlayer->knockBackDirection = direction;
 				state = stMeleeChargingPower;
 				meleeCharge += pml.msec;
-				if(meleeCharge >= 550){meleeCharge = 550;}
+				if(meleeCharge >= MELEE_POWER_CHARGE){meleeCharge = MELEE_POWER_CHARGE;}
 			}
 		}
 		// Stun Melee / Speed Breaker
 		else if(state == stMeleeChargingStun || pm->cmd.buttons & BUTTON_ATTACK){
-			if(state == stMeleeChargingStun && (!(pm->cmd.buttons & BUTTON_ATTACK) ||  meleeCharge >= 1000)){
+			if(state == stMeleeChargingStun && (!(pm->cmd.buttons & BUTTON_ATTACK) ||  meleeCharge >= MELEE_STUN_CHARGE)){
 				// A full charge is the stun; anything released short of it stays
 				// the speed breaker. The two prices are the same shape as the
 				// power melee's: the swing costs 5% of the ceiling whatever
 				// happens, and a read - the enemy winding up, or sidestepping -
 				// turns the whole second of charging into the loss.
-				if(meleeCharge >= 1000){
+				if(meleeCharge >= MELEE_STUN_CHARGE){
 					meleeCharge = 0;
 					PM_EndDrift();
 					pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
@@ -2952,7 +2952,7 @@ void PM_Melee(void){
 			else{
 				state = stMeleeChargingStun;
 				meleeCharge += pml.msec;
-				if(meleeCharge >= 1000){meleeCharge = 1000;}
+				if(meleeCharge >= MELEE_STUN_CHARGE){meleeCharge = MELEE_STUN_CHARGE;}
 			}
 		}
 		// Start / Speed Melee / Evade
@@ -3568,6 +3568,10 @@ void PM_StopLockon(void){
 	pm->ps->lockedTarget = 0;
 	pm->ps->timers[tmLockon] = 0;
 	pm->ps->lockonData[lkLastLockedPlayer] = -1;
+	// Cleared with the lock, or the next one opens showing what the last target
+	// was doing until the first update overwrites it.
+	pm->ps->lockonData[lkMeleeState] = 0;
+	pm->ps->lockonData[lkMeleeStatus] = 0;
 	pm->ps->lockedPlayer = NULL;
 }
 int PM_VerifyTrace(int lockBoxSize){
@@ -3627,6 +3631,14 @@ void PM_CheckLockon(void){
 			pm->ps->lockonData[lkPowerCurrent] = pm->ps->lockedPlayer->powerLevel[plCurrent];
 			pm->ps->lockonData[lkPowerHealth] = pm->ps->lockedPlayer->powerLevel[plHealth];
 			pm->ps->lockonData[lkPowerMaximum] = pm->ps->lockedPlayer->powerLevel[plMaximum];
+			// What the target is doing, so the client can say it. The melee is a
+			// rock-paper-scissors whose whole decision is the other fighter's
+			// state, and none of it was ever sent - the client knew the target's
+			// three power levels and nothing about the exchange it was in.
+			pm->ps->lockonData[lkMeleeState] = pm->ps->lockedPlayer->stats[stMeleeState];
+			pm->ps->lockonData[lkMeleeStatus] = 0;
+			if(pm->ps->lockedPlayer->timers[tmKnockback] > 0){pm->ps->lockonData[lkMeleeStatus] |= LKSTATUS_KNOCKBACK;}
+			if(pm->ps->lockedPlayer->timers[tmFreeze] > 0){pm->ps->lockonData[lkMeleeStatus] |= LKSTATUS_FROZEN;}
 			pm->ps->lockedPlayer->bitFlags |= isTargeted;
 		}
 	}

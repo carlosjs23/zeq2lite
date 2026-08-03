@@ -307,8 +307,19 @@ typedef enum{
 	lkPowerHealth,
 	lkPowerMaximum,
 	lkAttackPower,
-	lkLastLockedPlayer
+	lkLastLockedPlayer,
+	// What the locked target is doing, for the readout drawn on it. The array
+	// travels as a change mask plus the entries that moved, so a slot nothing
+	// writes costs one bit; MAX_LOCKED_STATS is the cap and these are the sixth
+	// and seventh of eight. Entries are 16-bit on the wire - a state index and
+	// a bitfield fit, a power level or a timestamp would truncate silently.
+	lkMeleeState,
+	lkMeleeStatus
 }lockedStat_t;
+// Bits for lkMeleeStatus. Booleans rather than the timers behind them: a timer
+// changes every frame and would put the whole array on the wire at 20Hz.
+#define	LKSTATUS_KNOCKBACK	1
+#define	LKSTATUS_FROZEN		2
 typedef enum{
 	tmUpdateTier,
 	tmUpdateMelee,
@@ -479,6 +490,11 @@ typedef enum {
 	stMeleeChargingPower,
 	stMeleeChargingStun
 } melee_t;
+// How long each windup has to be held before it becomes the attack rather than
+// the breaker. Shared with cgame, which draws the meter against them: a meter
+// scaled to a number the pmove no longer uses is worse than no meter at all.
+#define	MELEE_POWER_CHARGE	550
+#define	MELEE_STUN_CHARGE	1000
 
 
 // player_state->persistant[] indexes

@@ -105,6 +105,7 @@ vmCvar_t	cg_scripted2D;
 vmCvar_t	cg_scriptedCamera;
 vmCvar_t	cg_draw2D;
 vmCvar_t	cg_drawStatus;
+vmCvar_t	cg_drawMeleeState;
 vmCvar_t	cg_animSpeed;
 vmCvar_t	cg_debugAnim;
 vmCvar_t	cg_debugPosition;
@@ -221,6 +222,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_scriptedCamera, "cg_scriptedCamera", "1", CVAR_ARCHIVE  },
 	{ &cg_draw2D, "cg_draw2D", "1", CVAR_ARCHIVE  },
 	{ &cg_drawStatus, "cg_drawStatus", "1", CVAR_ARCHIVE  },
+	{ &cg_drawMeleeState, "cg_drawMeleeState", "1", CVAR_ARCHIVE  },
 	{ &cg_drawTimer, "cg_drawTimer", "0", CVAR_ARCHIVE  },
 	{ &cg_drawFPS, "cg_drawFPS", "0", CVAR_ARCHIVE  },
 	// Not archived: a debug overlay left on by a stale config is a support
