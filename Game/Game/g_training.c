@@ -122,6 +122,11 @@ void G_TrainingInit(void){
 // so a line parses by splitting on whitespace and the only quoted field is the
 // last one:
 //
+//   Training: <clientNum> <key> grant <tagName>
+//   Training: <clientNum> <key> remove <tagName>
+//   Training: <clientNum> <key> unlock-tier <tier>
+//   Training: <clientNum> <key> objective-assigned <id> <trackFact> <goal> "<text>"
+//   Training: <clientNum> <key> objective-complete <id>
 //   Training: <clientNum> <key> progress-load <tags> <tier> <dropped>
 //   Training: <clientNum> <key> progress-drop <tagName>
 //   Training: <clientNum> <key> progress-save <tags> <tier>
@@ -303,6 +308,7 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 		}
 		G_TagSet(&client->pers.tags,action->tag);
 		client->pers.progressDirty = qtrue;
+		trainingEvent(clientNum,va("grant %s",G_TagName(action->tag)));
 		break;
 	case acRemove:
 		if(!Q_strncmp(G_TagName(action->tag),TRAINING_WORLD_PREFIX,(int)strlen(TRAINING_WORLD_PREFIX))){
@@ -311,6 +317,7 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 		}
 		G_TagClear(&client->pers.tags,action->tag);
 		client->pers.progressDirty = qtrue;
+		trainingEvent(clientNum,va("remove %s",G_TagName(action->tag)));
 		break;
 	case acSay:
 		// One delivery. This also went out as a console print while the HUD had
@@ -326,6 +333,8 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 		client->pers.objectiveComplete = qfalse;
 		trap_SendServerCommand(clientNum,va("trobj \"%s\" %i %i %i",action->text,
 			client->pers.objectiveId,action->track,action->value));
+		trainingEvent(clientNum,va("objective-assigned %i %i %i \"%s\"",
+			client->pers.objectiveId,action->track,action->value,action->text));
 		break;
 	case acSetGravity:
 		// gravity[0] is the per-client base pmove falls back to; gravity[2] is
@@ -336,6 +345,7 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 		if(action->value > client->pers.unlockedTier){
 			client->pers.unlockedTier = action->value;
 			client->pers.progressDirty = qtrue;
+			trainingEvent(clientNum,va("unlock-tier %i",action->value));
 		}
 		break;
 	}
@@ -383,6 +393,7 @@ static void publishState(gentity_t *ent){
 		client->pers.objectiveComplete = qtrue;
 		trap_SendServerCommand(ent - g_entities,va("trdone \"%s\" %i",
 			client->pers.objectiveText,client->pers.objectiveId));
+		trainingEvent(ent - g_entities,va("objective-complete %i",client->pers.objectiveId));
 	}
 }
 
