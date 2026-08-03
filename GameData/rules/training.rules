@@ -1,0 +1,183 @@
+// Phase 1 training content.
+//
+// No rule here keys on masterNear: master triggers arrive in Phase 2, so a rule
+// that needed one could not be exercised yet. Everything below is built from
+// facts that exist now - airborneTime, auraTime, fatigue, tierCurrent, gravity.
+//
+// Rules are a chain: each step requires the tag the step before it granted, and
+// forbids the tag it grants itself so it fires exactly once. That chaining is
+// also what keeps rules of equal specificity mutually exclusive, which the
+// loader insists on.
+
+rule idle_nudge {
+	forbids  training.begun
+
+	say  "Training starts in the air. Get off the ground."
+}
+
+rule training_intro {
+	when  airborneTime  atLeast  1s
+
+	forbids  training.begun
+
+	grant      training.begun
+	say        "Off the ground. Now stay there."
+	objective  "Hover for ten seconds"  track  airborneTime  goal  10s
+}
+
+rule flight_hover_pass {
+	when  airborneTime  atLeast  10s
+
+	requires  training.begun
+	forbids   trained.flight.hover
+
+	grant      trained.flight.hover
+	say        "Ten seconds. A start."
+	objective  "Stay airborne for forty-five seconds"  track  airborneTime  goal  45s
+}
+
+rule flight_endurance_pass {
+	when  airborneTime  atLeast  45s
+	when  fatigue       above    0pl
+
+	requires  training.begun  trained.flight.hover
+	forbids   trained.flight.endurance
+
+	grant   trained.flight.endurance
+	say     "Endurance. Now you can fight up here."
+	unlock  tier 2
+}
+
+rule flight_endurance_fail {
+	when  airborneTime  atLeast  45s
+	when  fatigue       is       0pl
+
+	requires  training.begun  trained.flight.hover
+	forbids   trained.flight.endurance
+
+	say  "Exhausted. Ki keeps you up there, not stubbornness."
+}
+
+// World facts take part in matching exactly like client facts, and this is the
+// only rule in Phase 1 that reads one.
+rule round_warmup_notice {
+	when  world roundState  is       waiting
+	when  auraTime          atLeast  1s
+
+	requires  training.begun
+	forbids   trained.flight.hover
+
+	say  "Warm up while the round waits."
+}
+
+rule aura_sustain_pass {
+	when  auraTime  atLeast  20s
+
+	requires  training.begun  trained.flight.hover  trained.flight.endurance
+	forbids   trained.aura.sustain
+
+	grant  trained.aura.sustain
+	say    "Your aura holds without you thinking about it."
+}
+
+rule gravity_chamber_pass {
+	when  gravity   atLeast  10g
+	when  auraTime  atLeast  5s
+
+	requires  trained.flight.hover  trained.flight.endurance  trained.aura.sustain
+	forbids   trained.gravity.tier1
+
+	grant      trained.gravity.tier1
+	say        "Ten times gravity, and still standing."
+	setGravity 10g
+	unlock     tier 3
+}
+
+rule seen_first_ascension {
+	when  tierCurrent  atLeast  2
+
+	requires  training.begun  trained.flight.hover  trained.flight.endurance  trained.aura.sustain
+	forbids   seen.firstAscension
+
+	grant  seen.firstAscension
+	say    "So that is what it feels like."
+}
+
+// ------------------------------------------------------------------- vectors
+
+test "an untrained player gets the fallback nudge" {
+	expect  idle_nudge
+}
+
+// The specific rule beating the general one is what buys free fallbacks: both
+// idle_nudge and training_intro match here, and the one with more criteria wins.
+test "one second airborne starts the arc and beats the nudge" {
+	given   airborneTime  1s
+	expect  training_intro
+}
+
+test "the intro is self-terminating: it forbids the tag it grants" {
+	given   airborneTime  30s
+	given   tags          training.begun
+	expect  flight_hover_pass
+}
+
+test "fatigued out gets the failure line, not the pass" {
+	given   airborneTime  46s
+	given   fatigue       0pl
+	given   tags          training.begun  trained.flight.hover
+	expect  flight_endurance_fail
+}
+
+test "endurance with ki left passes" {
+	given   airborneTime  46s
+	given   fatigue       500pl
+	given   tags          training.begun  trained.flight.hover
+	expect  flight_endurance_pass
+}
+
+test "endurance stays out of reach until the hover tag is held" {
+	given   airborneTime  46s
+	given   fatigue       500pl
+	given   tags          training.begun
+	expect  flight_hover_pass
+}
+
+test "the aura lesson waits for the endurance tag" {
+	given   auraTime  25s
+	given   tags      training.begun  trained.flight.hover
+	expect  none
+}
+
+test "the aura lesson fires once the chain is complete" {
+	given   auraTime  25s
+	given   tags      training.begun  trained.flight.hover  trained.flight.endurance
+	expect  aura_sustain_pass
+}
+
+test "the gravity chamber needs the aura lesson first" {
+	given   gravity   10g
+	given   auraTime  6s
+	given   tags      training.begun  trained.flight.hover  trained.flight.endurance  trained.aura.sustain
+	expect  gravity_chamber_pass
+}
+
+test "a world fact gates the warmup line" {
+	given   world roundState  waiting
+	given   auraTime          2s
+	given   tags              training.begun
+	expect  round_warmup_notice
+}
+
+test "the warmup line is silent once the round is running" {
+	given   world roundState  inProgress
+	given   auraTime          2s
+	given   tags              training.begun
+	expect  none
+}
+
+test "the first ascension is noticed once" {
+	given   tierCurrent  2
+	given   tags         training.begun  trained.flight.hover  trained.flight.endurance  trained.aura.sustain
+	expect  seen_first_ascension
+}

@@ -1,0 +1,18 @@
+// Tag vocabulary. Every tag a rule mentions must appear here, because an
+// undeclared tag is the silent no-op this language exists to prevent.
+//
+// Bits are handed out by prefix at declaration time, so all of trained.flight.*
+// lands on one contiguous run and a wildcard clause compiles to a single mask.
+// A prefix group is reserved whole, which makes the group size a per-prefix
+// content limit as well as the global one.
+
+tag  training.begun
+
+tag  trained.flight.hover
+tag  trained.flight.endurance
+
+tag  trained.aura.sustain
+
+tag  trained.gravity.tier1
+
+tag  seen.firstAscension
