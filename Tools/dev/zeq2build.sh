@@ -128,4 +128,11 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 	python3 "$ZEQ2_ROOT/Tools/dev/make_ui_art.py" \
 		"$ZEQ2_BUILD/$ZEQ2_GAME/interface/art" >/dev/null
 	echo "ok: maps_selected.png and unknownmap.png generated"
+
+	# The limit break reserve gauge's frame. The HUD's own capsule is baked into
+	# interface/hud/main.png with no room below it, so the second gauge brings
+	# its own art in the same shape.
+	python3 "$ZEQ2_ROOT/Tools/dev/make_hud_gauge.py" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME/interface/hud" >/dev/null
+	echo "ok: reserveGauge.png generated"
 fi

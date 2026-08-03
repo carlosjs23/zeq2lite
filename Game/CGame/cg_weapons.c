@@ -764,7 +764,9 @@ static void CG_DrawWeaponSelectHorCenterBar( void ) {
 	}
 
 	x = 164 - count * 15;
-	y = 418;
+	// Clear of the HUD panel: the selection ring reaches 4 above each icon, and
+	// the plate starts at HUD_PANEL_Y.
+	y = HUD_PANEL_Y - 38;
 
 	for ( i = 1 ; i < 16 ; i++ ) {
 		qboolean usable;
