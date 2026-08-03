@@ -791,6 +791,16 @@ static void IN_ProcessEvents( void )
 					Com_QueueEvent( 0, SE_CHAR, CTRL('h'), 0, 0, NULL );
 				else if( keys[K_CTRL].down && key >= 'a' && key <= 'z' )
 					Com_QueueEvent( 0, SE_CHAR, CTRL(key), 0, 0, NULL );
+#ifdef MACOS_X
+				// Command is the clipboard modifier every other macOS app uses,
+				// and SDL reports no text input for it, so cmd-c/v/x arrive as
+				// the same control characters the field editor already knows.
+				// Only those three are folded in: mapping every cmd-letter
+				// would turn cmd-q and cmd-w into console edits.
+				else if( keys[K_COMMAND].down &&
+					( key == 'c' || key == 'v' || key == 'x' ) )
+					Com_QueueEvent( 0, SE_CHAR, CTRL(key), 0, 0, NULL );
+#endif
 
 				lastKeyDown = key;
 				break;

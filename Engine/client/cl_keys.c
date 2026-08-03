@@ -462,6 +462,23 @@ void Field_Paste( field_t *edit ) {
 }
 
 /*
+================
+Field_Copy
+
+The field editor has no selection, so the whole line is the only sensible
+granularity: a copy that took part of a line would need a selection model the
+rest of the editor does not have.
+================
+*/
+void Field_Copy( field_t *edit ) {
+	if ( !edit->buffer[0] ) {
+		return;
+	}
+
+	Sys_SetClipboardData( edit->buffer );
+}
+
+/*
 =================
 Field_KeyDownEvent
 
@@ -540,7 +557,15 @@ void Field_CharEvent( field_t *edit, int ch ) {
 		return;
 	}
 
-	if ( ch == 'c' - 'a' + 1 ) {	// ctrl-c clears the field
+	// ctrl-c used to clear the field, which is what ctrl-x now does after
+	// copying: nothing else in the engine offers a way to get a line out.
+	if ( ch == 'c' - 'a' + 1 ) {	// ctrl-c is copy
+		Field_Copy( edit );
+		return;
+	}
+
+	if ( ch == 'x' - 'a' + 1 ) {	// ctrl-x is cut
+		Field_Copy( edit );
 		Field_Clear( edit );
 		return;
 	}
@@ -1149,12 +1174,68 @@ static void Key_CompleteBind( char *args, int argNum )
 }
 
 /*
+===============
+CL_TestKey_f
+
+	testkey text <string>
+	testkey char <code>
+	testkey key <keynum> <0|1>
+
+Queues input events as if they had come from the keyboard, so a scripted run
+can drive the console the way only a human could before - typing a line and
+pressing ctrl-c is the only way to observe copy end to end.
+
+The events go in through Com_QueueEvent rather than calling Field_CharEvent
+directly, so they take the same path as SDL's: key catcher, console, binds.
+
+Gated like `testinput` in cl_input.c: a cheat-enabled server, or com_developer
+for a run that never connects to one.
+===============
+*/
+static void CL_TestKey_f( void ) {
+	const char	*what;
+	const char	*text;
+	int			i;
+
+	if ( !cl_connectedToCheatServer && !com_developer->integer ) {
+		Com_Printf( "testkey needs a cheat-enabled server or com_developer 1\n" );
+		return;
+	}
+
+	what = Cmd_Argv( 1 );
+
+	if ( Cmd_Argc() == 3 && !Q_stricmp( what, "text" ) ) {
+		text = Cmd_Argv( 2 );
+		for ( i = 0 ; text[i] ; i++ ) {
+			Com_QueueEvent( 0, SE_CHAR, (unsigned char)text[i], 0, 0, NULL );
+		}
+		return;
+	}
+
+	if ( Cmd_Argc() == 3 && !Q_stricmp( what, "char" ) ) {
+		Com_QueueEvent( 0, SE_CHAR, atoi( Cmd_Argv( 2 ) ), 0, 0, NULL );
+		return;
+	}
+
+	if ( Cmd_Argc() == 4 && !Q_stricmp( what, "key" ) ) {
+		Com_QueueEvent( 0, SE_KEY, atoi( Cmd_Argv( 2 ) ),
+			atoi( Cmd_Argv( 3 ) ) ? qtrue : qfalse, 0, NULL );
+		return;
+	}
+
+	Com_Printf( "usage: testkey text <string>\n" );
+	Com_Printf( "       testkey char <code>\n" );
+	Com_Printf( "       testkey key <keynum> <0|1>\n" );
+}
+
+/*
 ===================
 CL_InitKeyCommands
 ===================
 */
 void CL_InitKeyCommands( void ) {
 	// register our functions
+	Cmd_AddCommand ("testkey",CL_TestKey_f);
 	Cmd_AddCommand ("bind",Key_Bind_f);
 	Cmd_SetCommandCompletionFunc( "bind", Key_CompleteBind );
 	Cmd_AddCommand ("unbind",Key_Unbind_f);

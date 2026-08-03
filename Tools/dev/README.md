@@ -331,9 +331,39 @@ Read the result out of `ruledump` (objective, PERS progress, tags), `games.log`
 (`Training: … objective-complete <id>`) or `g_debugFight` (`lock`, `buttons`,
 `charge`).
 
-Still not scriptable: **Escape**. It is handled in engine key handling
-(`CL_KeyEvent` and the key catcher) rather than in the usercmd, so menus and the
-journal page still need a person or a `bind`-driven command.
+Still not scriptable through `testinput`: **Escape**. It is handled in engine
+key handling (`CL_KeyEvent` and the key catcher) rather than in the usercmd, so
+menus and the journal page still need a person, a `bind`-driven command, or
+`testkey` below.
+
+## Typing from a script (`testkey`)
+
+`testinput` reaches the usercmd; `testkey` reaches the *key catcher*, which is
+where the console, the chat line and the menus read input. It queues events
+through `Com_QueueEvent` exactly as `sdl_input.c` does, so they take the same
+path a real press takes.
+
+```
+testkey text <string>          # one SE_CHAR per byte, no spaces (argv splits)
+testkey char <code>            # one SE_CHAR - 22 is ctrl-v, 3 ctrl-c, 24 ctrl-x
+testkey key <keynum> <0|1>     # SE_KEY down/up, keynums from keycodes.h
+```
+
+Gated like `testinput`. This is what makes the clipboard testable end to end:
+
+```bash
+# paste - the console edit line should show what pbcopy put there
+printf 'testpaste123' | pbcopy
+zeq2shot.sh --after toggleconsole --after "testkey char 22" --out /tmp/p.png
+
+# copy - assert from the shell, no screenshot needed
+zeq2shot.sh --after toggleconsole --after "testkey text hello" \
+            --after "testkey char 3" --out /tmp/c.png
+pbpaste          # -> hello
+```
+
+What it cannot reach is the SDL layer itself: `testkey` starts *after*
+translation, so the cmd-c/v/x folding in `sdl_input.c` has to be tried by hand.
 
 ## Practising the Budokai against a bot
 
