@@ -1061,6 +1061,129 @@ static void arenaPlace_f(gentity_t *ent){
 		origin[0],origin[1],origin[2],radius,origin[2] - RING_PLACE_FLOOR_DROP));
 }
 
+// ------------------------------------------------------------- arenascan
+//
+// Where a ring FITS, as against where the author happens to be standing.
+//
+// The drawn ring is draped on the ground it covers - cg_arena.c traces every
+// floor vertex - so a placement reads correctly exactly when that ground is
+// flat, and the relief under the footprint is the number that decides it. The
+// eye is a poor judge of that from inside the ring: of the four placements
+// authored by eye, one spanned a fall of 355 units and two hung part of the
+// floor over open air, and all four looked level from the middle.
+//
+// So this measures instead. A grid of candidate centres around the author, the
+// relief of the ring's own footprint at each, and the flattest few printed with
+// the setviewpos that walks to them. Ground that is not there at all disqualifies
+// a candidate outright: a ring over a drop is worse than a ring on a slope,
+// because the drape has nothing to follow and falls back to the flat height.
+//
+// One command is thousands of traces, which is why it is authoring-only.
+
+// The footprint is sampled at least as finely as cg_arena.c drapes it, or the
+// scan reports flat ground the drape then finds a hole in: a coarser grid steps
+// straight over a gap narrower than its own spacing, and the candidate that
+// scored best is the one the ring hangs off.
+#define ARENASCAN_GRID		9	// candidate centres a side
+#define ARENASCAN_RINGS		6	// footprint sampled as this many rings...
+#define ARENASCAN_SPOKES	24	// ...of this many points, plus the centre
+#define ARENASCAN_KEEP		5
+#define ARENASCAN_UP		1024.0f
+#define ARENASCAN_DOWN		2048.0f
+
+/*================
+arenaScanRelief
+
+The spread of ground heights under one candidate ring. Negative means there was
+no ground to measure - every sample missed - which is a different answer from
+flat and must not be allowed to score as zero.
+================*/
+static float arenaScanRelief(const vec3_t center,float radius,float *floorOut,int *airOut){
+	trace_t	tr;
+	vec3_t	start,end;
+	float	lo,hi,a,r,z;
+	int		ring,spoke,air,n;
+
+	lo = hi = 0;
+	air = n = 0;
+	*floorOut = center[2];
+	for(ring=0;ring<=ARENASCAN_RINGS;ring++){
+		r = radius * ring / (float)ARENASCAN_RINGS;
+		for(spoke=0;spoke<ARENASCAN_SPOKES;spoke++){
+			// The middle is one point, not sixteen stacked on each other.
+			if(!ring && spoke){break;}
+			a = spoke * 2.0f * M_PI / ARENASCAN_SPOKES;
+			start[0] = end[0] = center[0] + r*cos(a);
+			start[1] = end[1] = center[1] + r*sin(a);
+			start[2] = center[2] + ARENASCAN_UP;
+			end[2] = center[2] - ARENASCAN_DOWN;
+			trap_Trace(&tr,start,NULL,NULL,end,ENTITYNUM_NONE,MASK_SOLID);
+			if(tr.fraction >= 1.0f || tr.startsolid){air++;continue;}
+			z = tr.endpos[2];
+			if(!n || z < lo){lo = z;}
+			if(!n || z > hi){hi = z;}
+			if(!ring){*floorOut = z;}
+			n++;
+		}
+	}
+	*airOut = air;
+	if(!n){return -1;}
+	return hi - lo;
+}
+
+static void arenaScan_f(gentity_t *ent){
+	char	arg[MAX_TOKEN_CHARS];
+	vec3_t	center,keep[ARENASCAN_KEEP];
+	float	radius,reach,relief,step;
+	float	keepRelief[ARENASCAN_KEEP],keepFloor[ARENASCAN_KEEP],floor;
+	int		keepAir[ARENASCAN_KEEP],air,i,j,gx,gy,found;
+
+	trap_Argv(1,arg,sizeof(arg));
+	radius = arg[0] ? atof(arg) : (G_RingDefined() ? G_RingGet()->radius : RING_DEFAULT_RADIUS);
+	trap_Argv(2,arg,sizeof(arg));
+	reach = arg[0] ? atof(arg) : radius * 4.0f;
+	if(radius <= 0){radius = RING_DEFAULT_RADIUS;}
+
+	found = 0;
+	step = (ARENASCAN_GRID > 1) ? (reach * 2.0f / (ARENASCAN_GRID - 1)) : 0;
+	for(gy=0;gy<ARENASCAN_GRID;gy++){
+		for(gx=0;gx<ARENASCAN_GRID;gx++){
+			center[0] = ent->client->ps.origin[0] - reach + gx*step;
+			center[1] = ent->client->ps.origin[1] - reach + gy*step;
+			center[2] = ent->client->ps.origin[2];
+			relief = arenaScanRelief(center,radius,&floor,&air);
+			// No ground under any of it, or holes in what there is.
+			if(relief < 0 || air){continue;}
+			for(i=0;i<found;i++){
+				if(relief < keepRelief[i]){break;}
+			}
+			if(i >= ARENASCAN_KEEP){continue;}
+			for(j=(found < ARENASCAN_KEEP ? found : ARENASCAN_KEEP-1);j>i;j--){
+				VectorCopy(keep[j-1],keep[j]);
+				keepRelief[j] = keepRelief[j-1];
+				keepFloor[j] = keepFloor[j-1];
+				keepAir[j] = keepAir[j-1];
+			}
+			VectorCopy(center,keep[i]);
+			keepRelief[i] = relief;
+			keepFloor[i] = floor;
+			keepAir[i] = air;
+			if(found < ARENASCAN_KEEP){found++;}
+		}
+	}
+	trap_SendServerCommand(ent-g_entities,va("print \"arenascan: radius %.0f, %d candidates within %.0f\n\"",
+		radius,ARENASCAN_GRID*ARENASCAN_GRID,reach));
+	if(!found){
+		trap_SendServerCommand(ent-g_entities,"print \"  nothing here has solid ground under a whole ring - fly somewhere else\n\"");
+		return;
+	}
+	for(i=0;i<found;i++){
+		trap_SendServerCommand(ent-g_entities,va("print \"  relief %4.0f  setviewpos %.0f %.0f %.0f\n\"",
+			keepRelief[i],keep[i][0],keep[i][1],keepFloor[i] + RING_PLACE_FLOOR_DROP));
+	}
+	trap_SendServerCommand(ent-g_entities,"print \"  stand on the best one and arenaplace, then arenasave\n\"");
+}
+
 static void arenaSave_f(gentity_t *ent){
 	if(!G_RingWrite(arenaFile(),trainingMapName)){
 		trap_SendServerCommand(ent-g_entities,va("print \"arenasave: %s\n\"",G_RingError()));
@@ -1100,7 +1223,8 @@ qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
 		return qtrue;
 	}
 	if(Q_stricmp(cmd,"masterplace") && Q_stricmp(cmd,"mastersave") && Q_stricmp(cmd,"masterlist") &&
-		Q_stricmp(cmd,"arenaplace") && Q_stricmp(cmd,"arenasave") && Q_stricmp(cmd,"arenalist")){
+		Q_stricmp(cmd,"arenaplace") && Q_stricmp(cmd,"arenasave") && Q_stricmp(cmd,"arenalist") &&
+		Q_stricmp(cmd,"arenascan")){
 		return qfalse;
 	}
 	if(!g_cheats.integer){
@@ -1125,6 +1249,10 @@ qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
 	}
 	if(!Q_stricmp(cmd,"arenasave")){
 		arenaSave_f(ent);
+		return qtrue;
+	}
+	if(!Q_stricmp(cmd,"arenascan")){
+		arenaScan_f(ent);
 		return qtrue;
 	}
 	arenaList_f(ent);

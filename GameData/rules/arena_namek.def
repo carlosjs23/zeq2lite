@@ -4,4 +4,4 @@
 // of the ring floor. A fighter who touches down past the radius loses the
 // round; flying out over the edge is legal.
 
-ring  7104 864 320  192  296
+ring  6912 288 229  192  205
