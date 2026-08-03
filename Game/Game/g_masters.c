@@ -261,7 +261,10 @@ qboolean G_MastersParsePlacements(char *text,const char *file){
 
 // ----------------------------------------------------------------- loading
 
-static int loadFile(const char *path){
+// q3asm has one flat symbol space for the whole module, so a file-static name
+// that is unique per translation unit in C is not unique in the QVM: this and
+// g_rules.c's reader collided as "Multiple definitions for loadFile".
+static int mastersLoadFile(const char *path){
 	fileHandle_t f;
 	int length;
 	length = trap_FS_FOpenFile(path,&f,FS_READ);
@@ -279,7 +282,7 @@ static int loadFile(const char *path){
 qboolean G_MastersLoadDef(const char *path){
 	int length;
 
-	length = loadFile(path);
+	length = mastersLoadFile(path);
 	if(length == -1){
 		Com_sprintf(masterError,sizeof(masterError),"%s: master vocabulary not found",path);
 		G_Printf("%s\n",masterError);
@@ -296,7 +299,7 @@ qboolean G_MastersLoadDef(const char *path){
 qboolean G_MastersLoadPlacements(const char *path){
 	int length;
 
-	length = loadFile(path);
+	length = mastersLoadFile(path);
 	// A map with no placement file has no masters on it, which is a fact about
 	// the map rather than a fault in the content.
 	if(length == -1){return qtrue;}
