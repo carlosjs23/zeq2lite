@@ -403,6 +403,8 @@ extern struct gclient_s {
 	int			aiStunRollAt;
 	qboolean	aiWillStun;
 	int			aiStunnedAt;
+	int			aiPowerRollAt;
+	int			aiPowerUntil;
 	int			aiPlantWeapon;
 	// g_ai.c: what this opponent keeps doing, counted when a perceived fact is
 	// newly adopted and halved as the reads age

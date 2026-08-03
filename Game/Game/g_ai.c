@@ -130,6 +130,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	AI_SAW_BLOCKING		4
 #define	AI_SAW_MELEE		8
 #define	AI_SAW_STUNNED		16
+// A wind-up already running, which is a narrower read than AI_SAW_MELEE: those
+// are the states an exchange passes through, this is the one the other fighter
+// is holding a button down for and can still be met in kind.
+#define	AI_SAW_MELEE_CHARGE	32
 // Fastest it turns, in degrees a second. Flight sweeps the bearing to a close
 // opponent quickly, so this sits well above a hand on a mouse to hold a lock at
 // all - but it is a rate, so coming about still costs time an opponent can use.
@@ -160,6 +164,23 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // again inside the same exchange rather than standing behind a bar it is paying
 // for by the frame.
 #define	AI_GUARD_REACT		600
+// How often the fighter is allowed to reach for a power melee nobody prompted,
+// and how long it holds the button once it does. The period is counted in melee
+// contact rather than wall time, and contact is the scarce thing in this fight -
+// two fighters spend most of a duel at beam range and only seconds of it inside
+// AI_MELEE_RANGE - so a period measured against the round would never come up at
+// all. Against contact it is about one window an exchange, and the roll inside
+// it is the usual one, so a sharp fighter takes most of those windows and a dull
+// one lets them past.
+#define	AI_POWER_PERIOD		1500
+// A shade over MELEE_POWER_CHARGE, so an unprompted wind-up reaches the swing
+// rather than releasing into a breaker every time. The rest of the hold is spent
+// inside the freeze the swing applies, where the melee logic is gated off.
+#define	AI_POWER_HOLD		700
+// Charge held past this is finished whatever the reason for it has done since -
+// the wind-up is already paid for. Under it the button is released as soon as
+// the read that raised it goes, which is what a charge breaker is.
+#define	AI_POWER_COMMIT		250
 // How long a perceived charge has to hold before the shot counts as coming. The
 // plant itself is the punish branch's business - that is an opening to take -
 // and this is the moment later at which leaving the line stops being early and
@@ -359,6 +380,31 @@ static qboolean G_AIRollStun( gclient_t *client, qboolean guarded, float noise )
 	}
 
 	return client->aiWillStun;
+}
+
+/*
+=================
+G_AIRollPower
+
+Whether to reach for a power melee nobody prompted, opening a window long enough
+to finish one. Called only while the fighter is in an exchange, so the period is
+melee contact and not wall time.
+
+The window rather than a held verdict is the point: the wind-up ends in a swing
+that freezes the fighter for a second, so a willingness that stood for the length
+of a roll would come straight back as a second charge and the fighter would do
+nothing else. One roll opens one wind-up.
+=================
+*/
+static void G_AIRollPower( gclient_t *client, float noise ) {
+	if ( level.time < client->aiPowerRollAt ) {
+		return;
+	}
+
+	client->aiPowerRollAt = level.time + AI_POWER_PERIOD;
+	if ( random() >= noise ) {
+		client->aiPowerUntil = level.time + AI_POWER_HOLD;
+	}
 }
 
 /*
@@ -708,6 +754,15 @@ static int G_AIPerceive( gclient_t *client, gentity_t *target, int reactionTime 
 		}
 		if ( G_AIMeleeThreat( ps ) ) {
 			facts |= AI_SAW_MELEE;
+		}
+		// The wind-up itself, which is the one melee read that has an answer of
+		// its own: a charge met by a charge is the clash, and a charge met by
+		// the short release is the breaker that either wins or backfires. Off
+		// stMeleeState like every other melee read, so it is the same fact the
+		// lock readout puts on the player's screen through lkMeleeState.
+		if ( ps->stats[stMeleeState] == stMeleeChargingPower
+			|| ps->stats[stMeleeState] == stMeleeChargingStun ) {
+			facts |= AI_SAW_MELEE_CHARGE;
 		}
 		if ( ps->stats[stMeleeState] == stMeleeUsingStun && ps->timers[tmFreeze] > 0 ) {
 			facts |= AI_SAW_STUNNED;
@@ -1254,6 +1309,47 @@ void G_AIThink( gentity_t *ent ) {
 	// in the loop able to notice, which is a stuck fight rather than a close
 	// one.
 	G_AIAvoid( ent, cmd, distance > AI_MELEE_RANGE ? AI_AVOID_LOOKAHEAD : AI_AVOID_CONTACT );
+
+	// The heavy half of the melee, which is the only half a held alt-attack
+	// reaches. Two reasons to hold it and they are the same button:
+	//
+	// A charge met in kind is the exchange the melee is built around. Both
+	// wind-ups full is the clash; one released short against the other's charge
+	// is the breaker, which wins against a speed swing and backfires against a
+	// charge - so answering a wind-up with a wind-up is what makes those
+	// outcomes reachable at all, rather than something only two players could
+	// produce. Rolled unprompted as well, or a fighter that never charges first
+	// leaves the opponent nothing to answer.
+	//
+	// Committed past AI_POWER_COMMIT, for the reason the stun charge is: the
+	// second is already spent, and letting go part-way is a breaker thrown for
+	// no read. Below it the button follows the read, which is the release that
+	// makes a breaker a decision.
+	//
+	// Guarded like every other melee verb: inside an exchange, not while knocked
+	// back, and not inside a freeze. The stun branch below owns being stunned -
+	// it returns - and the recovery branch owns a bar too thin to swing on.
+	//
+	// Both terms are load-bearing. PM_Weapon defers to the melee only while
+	// usingMelee is up, so the same held button outside an exchange is an
+	// alt-fire that winds the ki attack up - and PM_Melee refuses to run at all
+	// against a charging weapon, which leaves the fighter charging a beam it
+	// never fires instead of the melee it reached for. And PM_Melee reads no
+	// button while tmFreeze runs, so a window opened inside the second of it
+	// every exchange starts with is a whole wind-up spent on frames that cannot
+	// charge.
+	if ( ( ps->bitFlags & usingMelee )
+		&& !ps->timers[tmKnockback] && !ps->timers[tmFreeze] ) {
+		G_AIRollPower( client, skill.noise );
+
+		if ( ( perceived & AI_SAW_MELEE_CHARGE )
+			|| level.time < client->aiPowerUntil
+			|| ( ps->stats[stMeleeState] == stMeleeChargingPower
+				&& ps->timers[tmMeleeCharge] > AI_POWER_COMMIT ) ) {
+			cmd->buttons |= BUTTON_ALT_ATTACK;
+			return;
+		}
+	}
 
 	// A raised guard inside a melee is what the stun charge is for. Skills
 	// cannot charge in contact - PM_Weapon releases them while usingMelee - so
