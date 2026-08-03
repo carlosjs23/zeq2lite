@@ -1702,6 +1702,11 @@ void		CG_ArenaMapName( char *out, int size );
 qboolean	CG_ArenaRing( vec3_t center, float *radius, float *floor );
 
 //
+// cg_master.c
+//
+void		CG_AddMasters( void );
+
+//
 // cg_localents.c
 //
 void	CG_InitLocalEntities( void );
