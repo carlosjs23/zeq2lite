@@ -599,6 +599,42 @@ as `=== fatal signal, exiting ===` with no diagnostic — set
 termination signals — `SIGTERM`, `SIGINT`, `SIGHUP` — stay handled with it set,
 so the orderly shutdown is still under test.
 
+## The masters' heads (`md3.py`, `make_headgear.py`, `make_master_faces.py`)
+
+Not part of `zeq2build.sh`. These need Pillow and numpy, and `zeq2build.sh`
+runs the generators under bare `python3`, which has neither — so they are run
+by hand against an install, from a venv:
+
+```bash
+python3 Tools/dev/make_headgear.py     Build/Release-darwin-arm/ZEQ2/players \
+                                       Build/Release-darwin-arm/ZEQ2/scripts
+python3 Tools/dev/make_master_faces.py Build/Release-darwin-arm/ZEQ2/players
+```
+
+Both are idempotent and re-runnable: the head is rebuilt from the donor every
+time and the skins are re-keyed rather than appended to, so running twice is
+the same as running once. Every file they replace is kept beside it —
+`head.md3.predonor`, `*.skin.preheadgear`.
+
+Two things they exist to stop happening again:
+
+**A repaint done on the flat sheet is a repaint done blind.** The donor heads
+unwrap radially, so the top of the sheet is the crown; a "headband" painted as
+a horizontal stripe lands on the top of the skull and wraps as a cap. Paint in
+head coordinates instead — `make_master_faces.py` rasterises the UV triangles
+into a position map and places every mark by where it is on the head — and use
+`uv_report.py` to see the layout before touching a sheet.
+
+**A donor head only fits a body whose `tag_head` was authored for it.**
+`CG_PositionRotatedEntityOnTag` hands the head that tag's axes. nappa's body
+hands (0,1,0) as forward and krillin-derived bodies hand (-0.46,0,-0.89), so
+nappa's head on those bodies is on backwards, and because the tags are
+per-frame there is no single rotation that fixes it. Check a donor against the
+body before kitbashing, and prefer the donor the body already agrees with.
+
+`md3_preview.py` renders a model and sheet offline, which is how to iterate on
+either of these without a map load per attempt.
+
 ## Environment overrides
 
 `ZEQ2_ROOT`, `ZEQ2_ARCH`, `ZEQ2_BUILD`, `ZEQ2_GAME` all have sensible defaults;
