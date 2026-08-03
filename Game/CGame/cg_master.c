@@ -246,13 +246,51 @@ frustum-culled: the renderer will reject a master behind the view anyway, and
 the distance test is what keeps a map with a full roster from paying for
 masters on the far side of it.
 ================*/
-void CG_AddMasters(void){
+/*================
+CG_MastersEnsure
+
+The placement file is read on first use rather than at cgame init, because the
+map it belongs to is not known until one is running. Every reader goes through
+here so the radar and the render list cannot disagree about the roster.
+================*/
+static void CG_MastersEnsure(void){
 	char	mapname[MAX_QPATH];
-	vec3_t	delta;
-	int		i;
 
 	CG_ArenaMapName(mapname,sizeof(mapname));
 	if(!cgMastersLoaded || Q_stricmp(cgMasterMap,mapname)){CG_MastersLoad();}
+}
+
+/*================
+CG_MasterCount / CG_MasterName / CG_MasterOrigin
+
+The roster as the 2D layer needs it. A master with no model is still in it: a
+mark on the radar is a place to fly to, and it stays true whether or not the
+character standing there could be registered.
+================*/
+int CG_MasterCount(void){
+	CG_MastersEnsure();
+	return cgMasterCount;
+}
+
+const char *CG_MasterName(int index){
+	CG_MastersEnsure();
+	if(index < 0 || index >= cgMasterCount){return "";}
+	return cgMasters[index].name;
+}
+
+const float *CG_MasterOrigin(int index){
+	static vec3_t none = {0,0,0};
+
+	CG_MastersEnsure();
+	if(index < 0 || index >= cgMasterCount){return none;}
+	return cgMasters[index].origin;
+}
+
+void CG_AddMasters(void){
+	vec3_t	delta;
+	int		i;
+
+	CG_MastersEnsure();
 	for(i=0;i<cgMasterCount;i++){
 		if(!cgMasters[i].drawable){continue;}
 		VectorSubtract(cgMasters[i].origin,cg.refdef.vieworg,delta);

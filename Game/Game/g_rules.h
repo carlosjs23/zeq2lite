@@ -82,6 +82,10 @@ typedef struct {
 	char	*text;		// acSay, acObjective: pooled at load
 	int	track;		// acObjective: fact key
 	int	value;		// acObjective goal, acSetGravity, acUnlockTier
+	// acObjective: the master this objective sends the player to, as an
+	// `at <name>` clause. 0 when the objective is not a journey. The radar
+	// marks him as the destination; nothing else reads it.
+	int	master;
 } action_t;
 
 typedef struct {

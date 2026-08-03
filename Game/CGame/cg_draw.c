@@ -1019,8 +1019,10 @@ CG_TrainingObjective
 trobj carries what a snapshot cannot: the text, and the fact and goal it is
 measured against. The percent it fills to arrives in persistant[] afterwards.
 ================*/
-void CG_TrainingObjective(const char *text,int objectiveId,int trackFact,int goal){
+void CG_TrainingObjective(const char *text,int objectiveId,int trackFact,int goal,
+	const char *destination){
 	Q_strncpyz(cg.trainingObjective,text,sizeof(cg.trainingObjective));
+	Q_strncpyz(cg.trainingDestination,destination,sizeof(cg.trainingDestination));
 	cg.trainingObjectiveId = objectiveId;
 	cg.trainingTrackFact = trackFact;
 	cg.trainingGoal = goal;
@@ -1038,6 +1040,9 @@ for its own moment whether or not the tracker was cleared a frame earlier.
 ================*/
 void CG_TrainingComplete(const char *text,int objectiveId){
 	Q_strncpyz(cg.trainingObjective,text,sizeof(cg.trainingObjective));
+	// Arriving is what completed it, so the destination mark has done its job
+	// and drops back to the quiet one. The next objective states its own.
+	cg.trainingDestination[0] = 0;
 	cg.trainingObjectiveId = objectiveId;
 	cg.trainingDoneTime = cg.time ? cg.time : 1;
 	CG_TrainingToast(text,qtrue);

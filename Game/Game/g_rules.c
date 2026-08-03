@@ -796,6 +796,27 @@ static qboolean parseAction(rulesParse_t *p,rule_t *rule,const char *keyword){
 		}
 		Q_strncpyz(poolText,token,sizeof(poolText));
 		token = rulesToken(p,qtrue);
+		// The optional destination. Read here rather than after 'goal' because
+		// the token that follows the text has to be read to be compared with
+		// 'track' anyway, so the clause costs no lookahead and no pushback.
+		if(!Q_stricmp(token,"at")){
+			token = rulesToken(p,qtrue);
+			if(!token[0]){
+				rulesError_f(p->file,p->tokenLine,"'at' with no master");
+				return qfalse;
+			}
+			// Resolved through the masterNear vocabulary rather than through
+			// g_masters directly, so `at rhogan` and `masterNear is rhogan`
+			// cannot disagree about what the name means or about which file is
+			// blamed when it is wrong.
+			if(!parseFactValue(p,&factDefs[fMasterNear],token,&value)){return qfalse;}
+			if(value <= 0){
+				rulesError_f(p->file,p->tokenLine,"'at' needs a master, got '%s'",token);
+				return qfalse;
+			}
+			action->master = value;
+			token = rulesToken(p,qtrue);
+		}
 		if(Q_stricmp(token,"track")){
 			rulesError_f(p->file,p->tokenLine,"'objective' needs 'track', got '%s'",token);
 			return qfalse;

@@ -4,6 +4,16 @@
 #define RADAR_BLIPSIZE	  24
 #define RADAR_MIDSIZE	  16
 
+// The waypoint marks. Bigger than a blip and a different shape, because a
+// master is a landmark rather than a fighter and the two must not be read as
+// the same kind of thing at a glance.
+#define RADAR_MARKSIZE		18
+#define RADAR_QUESTSIZE		26
+// A mark clamped to the edge sits this far inside it, so the whole icon stays
+// on the radar rather than half of it hanging off the corner.
+#define RADAR_EDGE_INSET	 3.0f
+#define RADAR_QUEST_PERIOD	1100.0f
+
 radar_t				cg_playerOrigins[MAX_CLIENTS];
 static qboolean		cg_radarWarningAlready;
 
@@ -145,10 +155,100 @@ static void CG_DrawRadarBlips( float x, float y, float w, float h ) {
 
 }
 
+/*================
+CG_DrawRadarMasters
+
+The masters, on the same radar and in the same units as the ki-sense blips.
+
+Two marks, and the difference between them is the whole feature. Every placed
+master gets the quiet lozenge, so a map reads as a place with people on it. The
+one the active objective names gets the bright pulsing mark, its distance under
+the radar, and - this is the part a player notices - it is never culled. A
+destination beyond RADAR_RANGE is clamped to the radar's edge on its true
+bearing, because an objective whose marker disappears the moment you are far
+enough from it to need it is worse than no marker at all.
+
+Distances are in map units, which is what setviewpos, masterlist and every
+other number a player sees in this game are in.
+================*/
+static void CG_DrawRadarMasters( float x, float y, float w, float h ) {
+	playerState_t	*ps;
+	vec3_t			projection, temp;
+	vec3_t			up = { 0.0f, 0.0f, 1.0f };
+	vec4_t			mark_color;
+	float			center_x, center_y, limit, reach;
+	float			mark_x, mark_y, size, pulse, distance;
+	qboolean		destination;
+	int				i;
+
+	ps = &cg.predictedPlayerState;
+	center_x = x + 0.5f * w;
+	center_y = y + 0.5f * h;
+	limit = 0.5f * ( w < h ? w : h ) - RADAR_EDGE_INSET;
+
+	for ( i = 0; i < CG_MasterCount(); i++ ) {
+		destination = ( cg.trainingDestination[0] &&
+			!Q_stricmp( cg.trainingDestination, CG_MasterName( i ) ) ) ? qtrue : qfalse;
+
+		VectorSubtract( CG_MasterOrigin( i ), ps->origin, projection );
+		distance = VectorLength( projection );
+		if ( distance > RADAR_RANGE && !destination ) {
+			continue;
+		}
+
+		// Same rotation the blips use: radar north is the direction faced.
+		RotatePointAroundVector( temp, up, projection, 90 - ps->viewangles[YAW] );
+		VectorCopy( temp, projection );
+
+		mark_x = ( projection[0] / RADAR_RANGE ) * 0.5f * w;
+		mark_y = (-projection[1] / RADAR_RANGE ) * 0.5f * h;
+
+		// Clamp to the edge along the bearing rather than per axis, which would
+		// slide the mark around the rim and point at the wrong place.
+		reach = sqrt( mark_x * mark_x + mark_y * mark_y );
+		if ( reach > limit ) {
+			if ( reach <= 0.0f ) {
+				continue;
+			}
+			mark_x *= limit / reach;
+			mark_y *= limit / reach;
+		}
+		mark_x += center_x;
+		mark_y += center_y;
+
+		if ( destination ) {
+			pulse = 0.72f + 0.28f * sin( cg.time * 2.0f * M_PI / RADAR_QUEST_PERIOD );
+			MAKERGBA( mark_color, 1.0f, 0.82f, 0.24f, pulse );
+			size = RADAR_QUESTSIZE;
+		} else {
+			MAKERGBA( mark_color, 0.35f, 0.64f, 0.89f, 0.55f );
+			size = RADAR_MARKSIZE;
+		}
+
+		trap_R_SetColor( mark_color );
+		CG_DrawPic( qfalse, mark_x - 0.5f * size, mark_y - 0.5f * size, size, size,
+			destination ? cgs.media.RadarQuestShader : cgs.media.RadarMasterShader );
+		trap_R_SetColor( NULL );
+
+		// Who and how far, under the radar, for the destination alone. Two of
+		// these would be a list rather than a heading.
+		if ( destination && CG_TextValid( TEXTFACE_BODY ) ) {
+			vec4_t	label = { 1.0f, 0.82f, 0.24f, 0.92f };
+
+			CG_TextDraw( TEXTFACE_BODY, center_x, y + h + 2, 12,
+				label, va( "%s  %.0f", CG_MasterName( i ), distance ), 0,
+				TEXTF_CENTER | TEXTF_SHADOW );
+		}
+	}
+}
+
 void CG_DrawRadar () {
 	playerState_t	*ps;
 	ps = &cg.predictedPlayerState;
 	if(!(ps->lockedTarget>0)){
 		CG_DrawRadarBlips( 512, 0, 128, 128 );
+		if(cg_drawMasterMarks.integer){
+			CG_DrawRadarMasters( 512, 0, 128, 128 );
+		}
 	}
 }

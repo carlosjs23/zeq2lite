@@ -131,6 +131,61 @@ Test(g_rules, objective_action_carries_its_tracked_fact_and_goal) {
 	cr_assert_eq(rule->actions[0].value, 10000);
 }
 
+/* `at <master>` is what puts a destination on the radar, and it is optional, so
+   both spellings of the action have to keep compiling. The name resolves through
+   the masterNear vocabulary rather than through g_masters, which is why this can
+   be asserted with a vocabulary installed by hand. */
+Test(g_rules, an_objective_can_name_the_master_it_sends_the_player_to) {
+	static const char *const vocabulary[] = { "none", "rhogan", "oberak" };
+	const rule_t *rule;
+
+	G_RulesSetMasterVocabulary(vocabulary, 3);
+	cr_assert(loadOk(kTags,
+		"rule j {\n"
+		"    objective \"Find Rhogan\" at rhogan track masterNear goal rhogan\n"
+		"}\n"), "%s", G_RulesError());
+
+	rule = G_RulesFind("j");
+	cr_assert_eq(rule->actions[0].type, acObjective);
+	cr_assert_eq(rule->actions[0].master, 1);
+	cr_assert_eq(rule->actions[0].track, fMasterNear);
+	cr_assert_eq(rule->actions[0].value, 1);
+}
+
+Test(g_rules, an_objective_without_a_destination_leaves_the_master_unset) {
+	const rule_t *rule;
+
+	cr_assert(loadOk(kTags,
+		"rule o {\n"
+		"    objective \"Hover\" track airborneTime goal 10s\n"
+		"}\n"), "%s", G_RulesError());
+
+	rule = G_RulesFind("o");
+	cr_assert_eq(rule->actions[0].master, 0);
+}
+
+/* A destination nobody declared would be a marker that never draws - the silent
+   no-op the whole language exists to convert into a load error. */
+Test(g_rules, an_objective_sent_to_an_undeclared_master_is_a_load_error) {
+	static const char *const vocabulary[] = { "none", "rhogan" };
+
+	G_RulesSetMasterVocabulary(vocabulary, 2);
+	cr_assert(!loadOk(kTags,
+		"rule j {\n"
+		"    objective \"Find him\" at nobody track airborneTime goal 10s\n"
+		"}\n"));
+}
+
+Test(g_rules, an_objective_cannot_be_sent_to_nobody_in_particular) {
+	static const char *const vocabulary[] = { "none", "rhogan" };
+
+	G_RulesSetMasterVocabulary(vocabulary, 2);
+	cr_assert(!loadOk(kTags,
+		"rule j {\n"
+		"    objective \"Find him\" at none track airborneTime goal 10s\n"
+		"}\n"));
+}
+
 Test(g_rules, world_facts_parse_into_their_own_key_space) {
 	const rule_t *rule;
 

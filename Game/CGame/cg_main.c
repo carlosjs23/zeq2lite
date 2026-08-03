@@ -107,6 +107,7 @@ vmCvar_t	cg_draw2D;
 vmCvar_t	cg_drawStatus;
 vmCvar_t	cg_drawMeleeState;
 vmCvar_t	cg_drawTraining;
+vmCvar_t	cg_drawMasterMarks;
 vmCvar_t	cg_animSpeed;
 vmCvar_t	cg_debugAnim;
 vmCvar_t	cg_debugPosition;
@@ -225,6 +226,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_drawStatus, "cg_drawStatus", "1", CVAR_ARCHIVE  },
 	{ &cg_drawMeleeState, "cg_drawMeleeState", "1", CVAR_ARCHIVE  },
 	{ &cg_drawTraining, "cg_drawTraining", "1", CVAR_ARCHIVE  },
+	{ &cg_drawMasterMarks, "cg_drawMasterMarks", "1", CVAR_ARCHIVE  },
 	{ &cg_drawTimer, "cg_drawTimer", "0", CVAR_ARCHIVE  },
 	{ &cg_drawFPS, "cg_drawFPS", "0", CVAR_ARCHIVE  },
 	// Not archived: a debug overlay left on by a stale config is a support
@@ -1416,6 +1418,8 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.RadarBurstShader = trap_R_RegisterShaderNoMip( "interface/sense/burst.png" );
 	cgs.media.RadarWarningShader = trap_R_RegisterShaderNoMip( "interface/sense/warning.png" );
 	cgs.media.RadarMidpointShader = trap_R_RegisterShaderNoMip( "interface/sense/midpoint.png" );
+	cgs.media.RadarMasterShader = trap_R_RegisterShaderNoMip( "interface/training/radarMaster.png" );
+	cgs.media.RadarQuestShader = trap_R_RegisterShaderNoMip( "interface/training/radarQuest.png" );
 	// END ADDING
 
 	// register the inline models

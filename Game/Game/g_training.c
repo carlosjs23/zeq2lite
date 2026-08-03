@@ -418,8 +418,12 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 		client->pers.objectiveGoal = action->value;
 		client->pers.objectiveId = G_RulesIndexOf(rule) + 1;
 		client->pers.objectiveComplete = qfalse;
-		trap_SendServerCommand(clientNum,va("trobj \"%s\" %i %i %i",action->text,
-			client->pers.objectiveId,action->track,action->value));
+		// The destination goes as a NAME rather than as the id persistant[]
+		// carries, because the client identifies masters by name: cg_master.c
+		// reads the same placement file and has never needed the vocabulary.
+		trap_SendServerCommand(clientNum,va("trobj \"%s\" %i %i %i \"%s\"",action->text,
+			client->pers.objectiveId,action->track,action->value,
+			action->master ? G_MastersName(action->master) : ""));
 		trainingEvent(clientNum,va("objective-assigned %i %i %i \"%s\"",
 			client->pers.objectiveId,action->track,action->value,action->text));
 		break;

@@ -988,7 +988,7 @@ static void CG_ServerCommand( void ) {
 	// a snapshot cannot, and only on the frame it changes.
 	//
 	//   trtoast "<text>"
-	//   trobj   "<text>" <objectiveId> <trackFactKey> <goal>
+	//   trobj   "<text>" <objectiveId> <trackFactKey> <goal> "<destinationMaster>"
 	//   trdone  "<text>" <objectiveId>
 	//
 	// They are the only delivery: the chat copy the rule engine used to send
@@ -1004,13 +1004,18 @@ static void CG_ServerCommand( void ) {
 	// printf prints the last one four times.
 	if ( !strcmp( cmd, "trobj" ) ) {
 		char objective[MAX_SAY_TEXT];
+		char destination[MAX_QPATH];
 		int id, track, goal;
 
 		Q_strncpyz( objective, CG_Argv(1), sizeof( objective ) );
 		id = atoi( CG_Argv(2) );
 		track = atoi( CG_Argv(3) );
 		goal = atoi( CG_Argv(4) );
-		CG_TrainingObjective( objective, id, track, goal );
+		// Absent on an objective that is not a journey, and CG_Argv answers ""
+		// for an argument the command does not carry, so no version test is
+		// needed for a server sending the shorter form.
+		Q_strncpyz( destination, CG_Argv(5), sizeof( destination ) );
+		CG_TrainingObjective( objective, id, track, goal, destination );
 		return;
 	}
 
