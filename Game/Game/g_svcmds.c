@@ -502,6 +502,10 @@ qboolean	ConsoleCommand( void ) {
 		return qtrue;
 	}
 
+	if ( G_TrainingConsoleCommand( cmd ) ) {
+		return qtrue;
+	}
+
 	if (g_dedicated.integer) {
 		if (Q_stricmp (cmd, "say") == 0) {
 			trap_SendServerCommand( -1, va("print \"server: %s\"", ConcatArgs(1) ) );
