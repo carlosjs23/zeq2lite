@@ -757,6 +757,10 @@ static void CG_DrawStatusBar( void ) {
 	CG_DrawScreenEffects();
 	if(ps->lockedTarget > 0 && cgs.clientinfo[ps->lockedTarget-1].infoValid){
 		playerState_t lockedTargetPS;
+		// Only the fields below arrive over the lockon data, and the HUD reads
+		// bitFlags and options as well; leaving them as stack garbage decides
+		// at random what the target's HUD draws.
+		memset(&lockedTargetPS,0,sizeof(lockedTargetPS));
 		lockedTargetPS.clientNum = ps->lockedTarget-1;
 		lockedTargetPS.powerLevel[plCurrent] = ps->lockonData[lkPowerCurrent];
 		lockedTargetPS.powerLevel[plHealth] = ps->lockonData[lkPowerHealth];
