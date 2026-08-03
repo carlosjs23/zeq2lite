@@ -160,7 +160,7 @@ rule rhogan_flight_fail {
 	say  "Empty. Ki holds you up there, not willpower. Land and try again."
 }
 
-rule kingkai_greeting {
+rule oberak_greeting {
 	when  masterNear    is      oberak
 	when  airborneTime  atMost  2s
 	when  fatigue       above   0pl
@@ -174,7 +174,7 @@ rule kingkai_greeting {
 	objective   "Hold your aura for twenty seconds under ten times gravity"  track  auraTime  goal  20s
 }
 
-rule kingkai_gravity_pass {
+rule oberak_gravity_pass {
 	when  masterNear  is       oberak
 	when  gravity     atLeast  10g
 	when  auraTime    atLeast  20s
@@ -189,7 +189,7 @@ rule kingkai_gravity_pass {
 
 // One criterion more than the pass, so an exhausted player gets this line
 // instead and the pass stays out of reach until there is ki to hold an aura up.
-rule kingkai_gravity_fail {
+rule oberak_gravity_fail {
 	when  masterNear  is       oberak
 	when  gravity     atLeast  10g
 	when  auraTime    atLeast  20s
@@ -339,7 +339,7 @@ test "oberak greets a player rhogan has passed" {
 	given   masterNear  oberak
 	given   fatigue     1000pl
 	given   tags        trained.rhogan.greeting  trained.rhogan.flight
-	expect  kingkai_greeting
+	expect  oberak_greeting
 }
 
 test "the aura holds under ten times gravity" {
@@ -348,7 +348,7 @@ test "the aura holds under ten times gravity" {
 	given   auraTime    21s
 	given   fatigue     300pl
 	given   tags        trained.rhogan.flight  trained.oberak.greeting
-	expect  kingkai_gravity_pass
+	expect  oberak_gravity_pass
 }
 
 test "nothing left to hold the aura with fails the gravity lesson" {
@@ -357,5 +357,5 @@ test "nothing left to hold the aura with fails the gravity lesson" {
 	given   auraTime    21s
 	given   fatigue     0pl
 	given   tags        trained.rhogan.flight  trained.oberak.greeting
-	expect  kingkai_gravity_fail
+	expect  oberak_gravity_fail
 }
