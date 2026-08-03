@@ -1398,6 +1398,16 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.gaugePrimaryShader = trap_R_RegisterShaderNoMip( "interface/hud/gaugePrimary.png" );
 	cgs.media.gaugeSecondaryShader = trap_R_RegisterShaderNoMip( "interface/hud/gaugeSecondary.png" );
 	cgs.media.gaugeMinorShader = trap_R_RegisterShaderNoMip( "interface/hud/gaugeMinor.png" );
+	cgs.media.trainingCapShader = trap_R_RegisterShaderNoMip( "interface/training/shearCap.png" );
+	cgs.media.trainingPlateShader = trap_R_RegisterShaderNoMip( "interface/training/plate.png" );
+	cgs.media.trainingSashShader = trap_R_RegisterShaderNoMip( "interface/training/sash.png" );
+	cgs.media.trainingSashDoneShader = trap_R_RegisterShaderNoMip( "interface/training/sashDone.png" );
+	cgs.media.trainingBarTrackShader = trap_R_RegisterShaderNoMip( "interface/training/barTrack.png" );
+	cgs.media.trainingBarFillShader = trap_R_RegisterShaderNoMip( "trainingBarFill" );
+	cgs.media.trainingBarTipShader = trap_R_RegisterShaderNoMip( "trainingBarTip" );
+	cgs.media.trainingSegmentShader = trap_R_RegisterShaderNoMip( "trainingSegmentLit" );
+	// The glyph atlases register themselves, from the metrics that name them.
+	CG_TextInit();
 	cgs.media.RadarBlipShader = trap_R_RegisterShaderNoMip( "interface/sense/blip.png" );
 	cgs.media.RadarBlipTeamShader = trap_R_RegisterShaderNoMip( "interface/sense/blipteam.png" );
 	cgs.media.RadarBurstShader = trap_R_RegisterShaderNoMip( "interface/sense/burst.png" );
