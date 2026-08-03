@@ -593,6 +593,10 @@ static consoleCommand_t	commands[] = {
 	{ "draw2dTween", CG_Draw2DTween_f },
 	{ "cameraTween", CG_Camera_f },
 	{ "queue", CG_Queue_f },*/
+	// The journal page. Handled here rather than forwarded: the toggle and the
+	// key catcher are client state, and the batch it asks the server for is
+	// requested by the page itself when it opens.
+	{ "journal", CG_JournalToggle },
 	{ "loaddeferred", CG_LoadDeferredPlayers }
 };
 

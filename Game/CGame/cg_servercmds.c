@@ -1024,6 +1024,40 @@ static void CG_ServerCommand( void ) {
 		return;
 	}
 
+	// The journal batch, sent only in reply to this client's own `journal`
+	// request. Format and the reason it is batched: the trjournal banner in
+	// Game/Game/g_training.c.
+	//
+	//   trjournal <tierCeiling> <earnedTags> <lessonCount>
+	//   trjsec    <masterId> "<masterName>" "<lesson>|<lesson>|..."
+	//   trjend
+	if ( !strcmp( cmd, "trjournal" ) ) {
+		int ceiling, tags, total;
+
+		ceiling = atoi( CG_Argv(1) );
+		tags = atoi( CG_Argv(2) );
+		total = atoi( CG_Argv(3) );
+		CG_JournalBegin( ceiling, tags, total );
+		return;
+	}
+
+	if ( !strcmp( cmd, "trjsec" ) ) {
+		char name[JOURNAL_NAME_CHARS];
+		char packed[MAX_STRING_CHARS];
+		int masterId;
+
+		masterId = atoi( CG_Argv(1) );
+		Q_strncpyz( name, CG_Argv(2), sizeof( name ) );
+		Q_strncpyz( packed, CG_Argv(3), sizeof( packed ) );
+		CG_JournalSection( masterId, name, packed );
+		return;
+	}
+
+	if ( !strcmp( cmd, "trjend" ) ) {
+		CG_JournalEnd();
+		return;
+	}
+
 	if ( !strcmp( cmd, "scores" ) ) {
 		CG_ParseScores();
 		return;

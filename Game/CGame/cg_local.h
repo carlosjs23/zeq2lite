@@ -133,6 +133,23 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // A toast is one line: long text is clamped rather than wrapped, since the
 // column it sits in is the width of the screen minus the two margins.
 #define	TRAINING_TOAST_CHARS	76
+// The journal page. The backdrop is the one training element drawn stretched -
+// it has to cover every pixel - and everything on top of it is aspect-correct
+// like the rest of the HUD.
+#define	JOURNAL_LEFT		56
+#define	JOURNAL_RIGHT		(SCREEN_WIDTH-JOURNAL_LEFT)
+#define	JOURNAL_TITLE_Y		30
+#define	JOURNAL_HEAD_Y		56
+#define	JOURNAL_LIVE_Y		72
+#define	JOURNAL_BODY_Y		98
+#define	JOURNAL_BODY_BOTTOM	442
+#define	JOURNAL_ROW		14
+#define	JOURNAL_INDENT		18
+#define	JOURNAL_ROWS		((JOURNAL_BODY_BOTTOM-JOURNAL_BODY_Y)/JOURNAL_ROW)
+// The batch is small and lands within a frame or two on a listen server; this is
+// how long the page waits before asking again, which only matters on a real
+// connection that dropped the request.
+#define	JOURNAL_RETRY_TIME	5000
 #define	ZOOM_TIME			150
 #define	ITEM_BLOB_TIME		200
 #define	MUZZLE_FLASH_TIME	80 //20
@@ -679,6 +696,49 @@ typedef struct {
 	qboolean	completion;		// a trdone, which gets its own colour
 } trainingToast_t;
 
+// The journal page, as it arrives over trjournal/trjsec/trjend - see the banner
+// in Game/Game/g_training.c for the wire format. Everything here is a SNAPSHOT
+// taken when the page was opened: the server is the authority and it is not
+// going to push updates at a page nobody has asked for again. The two live
+// numbers on the screen - the active objective and its progress - come out of
+// cg.snap instead, every frame.
+#define	MAX_JOURNAL_LESSONS		64
+// The master vocabulary is capped at 15 ids and the solo arc is a section too.
+#define	MAX_JOURNAL_SECTIONS	16
+#define	JOURNAL_LABEL_CHARS		64
+#define	JOURNAL_NAME_CHARS		32
+
+typedef enum {
+	jrLocked, jrAvailable, jrDone
+} journalRowStatus_t;
+
+typedef struct {
+	char		label[JOURNAL_LABEL_CHARS];
+	int			status;
+} journalLesson_t;
+
+typedef struct {
+	int			masterId;		// 0 is the solo arc
+	char		name[JOURNAL_NAME_CHARS];
+	int			first;			// index into lessons[]
+	int			count;
+} journalSection_t;
+
+typedef struct {
+	qboolean	open;
+	qboolean	receiving;		// between the trjournal and its trjend
+	qboolean	valid;			// a whole batch has landed at least once
+	int			requestTime;	// when the last request went out, 0 = never
+	int			tierCeiling;
+	int			earnedTags;
+	int			lessonTotal;	// what the server said it was sending
+	int			scroll;			// first visible row
+	int			numSections;
+	int			numLessons;
+	journalSection_t	sections[MAX_JOURNAL_SECTIONS];
+	journalLesson_t		lessons[MAX_JOURNAL_LESSONS];
+} journal_t;
+
 typedef struct {
 	int			clientFrame;		// incremented each frame
 
@@ -861,6 +921,7 @@ typedef struct {
 	float		trainingProgress;		// interpolated toward the quantized percent
 	int			trainingDoneTime;		// when the active objective was completed
 	trainingToast_t	trainingToasts[TRAINING_TOAST_SLOTS];
+	journal_t	journal;
 	// END ADDING
 
 	// blend blobs
@@ -1395,6 +1456,17 @@ void CG_CenterPrint( const char *str, int y, int charWidth );
 void CG_TrainingToast( const char *text, qboolean completion );
 void CG_TrainingObjective( const char *text, int objectiveId, int trackFact, int goal );
 void CG_TrainingComplete( const char *text, int objectiveId );
+
+//
+// cg_journal.c
+//
+void CG_JournalToggle( void );
+void CG_JournalClose( void );
+void CG_JournalKey( int key );
+void CG_JournalBegin( int tierCeiling, int earnedTags, int lessonTotal );
+void CG_JournalSection( int masterId, const char *name, const char *packed );
+void CG_JournalEnd( void );
+void CG_DrawJournal( void );
 void CG_DrawHead( float x, float y, float w, float h, int clientNum, vec3_t headAngles );
 void CG_DrawActive( stereoFrame_t stereoView );
 void CG_DrawFlagModel( float x, float y, float w, float h, int team, qboolean force2D );

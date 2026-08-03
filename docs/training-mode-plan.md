@@ -333,6 +333,13 @@ Four surfaces, all in cgame:
    `CG_KEY_EVENT`, `CG_MOUSE_EVENT`, `CG_EVENT_HANDLING` are dispatched at
    `vmMain` in `cg_main.c`.
 
+   **It ships as the console command `journal` and no bind.** The 47 default
+   binds live in `default.cfg`, which is game data rather than a tracked file —
+   it is gitignored install content and it is CRLF — so a bind added there
+   would not ship with the repository at all. Anyone who wants a key can
+   `bind j journal`; the command is registered with `trap_AddCommand`, so tab
+   completion knows it.
+
 **Trap:** all 2D is authored in a 640x480 virtual space with two mappings. The
 HUD is aspect-correct; a new element must use the same mapping as its
 neighbours or it drifts as the display aspect changes. Stretch is only for

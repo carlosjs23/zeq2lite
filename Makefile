@@ -1886,6 +1886,7 @@ CGOBJ_ = \
   $(B)/Base/CGame/cg_ents.o \
   $(B)/Base/CGame/cg_event.o \
   $(B)/Base/CGame/cg_info.o \
+  $(B)/Base/CGame/cg_journal.o \
   $(B)/Base/CGame/cg_localents.o \
   $(B)/Base/CGame/cg_marks.o \
   $(B)/Base/CGame/cg_players.o \

@@ -1880,6 +1880,9 @@ static void CG_Draw2D( void ) {
 		}
 	}
 	CG_DrawTraining();
+	// Over the HUD and under nothing: the journal is a full-screen page, and
+	// while it is up the tracker behind it is what its live line is quoting.
+	CG_DrawJournal();
 	CG_DrawVote();
 	CG_DrawTeamVote();
 	CG_DrawUpperRight();

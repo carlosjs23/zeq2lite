@@ -1636,21 +1636,37 @@ void CG_Shutdown( void ) {
 /*
 ==================
 CG_EventHandling
-==================
+
  type 0 - no event handling
       1 - team menu
       2 - hud editor
 
+Only reached while the client holds KEYCATCH_CGAME, which the journal is the
+only thing here that takes. CGAME_EVENT_NONE is the engine saying it has already
+dropped the catcher - CL_KeyDownEvent handles Escape itself and then calls in
+here - so the page closes from this callback rather than from a K_ESCAPE case
+that would never be reached.
+==================
 */
 #ifndef MISSIONPACK
 void CG_EventHandling(int type) {
+	if ( type == CGAME_EVENT_NONE ) {
+		CG_JournalClose();
+	}
 }
 
 
-
+// Key-ups are dispatched here too and the page has nothing to do with them:
+// acting on both halves of a press would scroll twice per key.
 void CG_KeyEvent(int key, qboolean down) {
+	if ( !down ) {
+		return;
+	}
+	CG_JournalKey( key );
 }
 
+// The journal is a page rather than a menu - no widgets, nothing to point at -
+// so mouse motion is swallowed instead of moving a cursor that does not exist.
 void CG_MouseEvent(int x, int y) {
 }
 #endif
