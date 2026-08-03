@@ -20,6 +20,7 @@ Python scripts use only the standard library; shell scripts need bash.
 | `tga2png.py` | convert an ioquake3 TGA screenshot to PNG (+ colour histogram) |
 | `png_sheet.py` | flatten PNGs onto one background so transparent art can be looked at |
 | `make_ui_art.py` | generate the interface images the data set never shipped |
+| `make_ring_art.py` | generate the tournament ring's floor, kerb, posts and ki wall |
 | `make_aura_mesh.py` | generate the screen-space aura's ring mesh |
 | `auragen.c` | procedurally generate aura reference images (compile: `cc -O2 -o auragen auragen.c -lz`) |
 | `aura_reference_clean.py` | turn any aura art into pipeline form - strips painted checkerboards (**needs numpy+scipy**) |

@@ -145,4 +145,13 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 	python3 "$ZEQ2_ROOT/Tools/dev/make_training_art.py" \
 		"$ZEQ2_BUILD/$ZEQ2_GAME" >/dev/null
 	echo "ok: training atlases, support art and interfaceTraining.shader generated"
+
+	# The tournament ring's floor, kerb, posts and ki wall. The generator emits
+	# all five treatments it was authored with; the shipped ring draws the
+	# budokai floor and the ki wall, and the other blocks cost a few kilobytes
+	# and keep the alternatives one shader name away.
+	mkdir -p "$ZEQ2_BUILD/$ZEQ2_GAME/textures/ring"
+	python3 "$ZEQ2_ROOT/Tools/dev/make_ring_art.py" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME" >/dev/null
+	echo "ok: ring art and ringTournament.shader generated"
 fi
