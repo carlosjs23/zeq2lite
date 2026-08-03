@@ -9,6 +9,7 @@
 #   ZEQ2_FULLSCREEN  r_fullscreen for a run (default: 0, windowed)
 #   ZEQ2_MODE        r_mode for a run (default: 3; -2 is the desktop resolution)
 #   ZEQ2_HUNKMEGS    com_hunkMegs for a run (default: 256)
+#   ZEQ2_LOG         g_log for a run (default: games.log; "" turns logging off)
 
 set -euo pipefail
 
@@ -27,12 +28,19 @@ ZEQ2_DEV="$ZEQ2_ROOT/Tools/dev"
 # these defaults quietly decide what you are timing. Override per run -
 # ZEQ2_FULLSCREEN=1 ZEQ2_MODE=-2 zeq2run.sh ... - rather than passing a second
 # +set and relying on the later one winning.
+#
+# g_log is here because the shipped default.cfg sets it to "" and the cvar is
+# CVAR_ARCHIVE, so a run that does not state it inherits whatever the saved
+# config last held and writes that back - a scripted run then logs or does not
+# log depending on which script ran before it. Stating it on every launch is
+# what makes games.log a thing a gate can read. See Tools/dev/README.md.
 zeq2_base_args() {
 	printf '%s\n' \
 		+set fs_game "$ZEQ2_GAME" \
 		+set r_fullscreen "${ZEQ2_FULLSCREEN:-0}" \
 		+set r_mode "${ZEQ2_MODE:-3}" \
-		+set com_hunkMegs "${ZEQ2_HUNKMEGS:-256}"
+		+set com_hunkMegs "${ZEQ2_HUNKMEGS:-256}" \
+		+set g_log "${ZEQ2_LOG:-games.log}"
 }
 
 # Drop the pid file a killed run left behind.

@@ -334,6 +334,39 @@ Still not scriptable: **Escape**. It is handled in engine key handling
 (`CL_KeyEvent` and the key catcher) rather than in the usercmd, so menus and the
 journal page still need a person or a `bind`-driven command.
 
+## Practising the Budokai against a bot
+
+An `ai` fighter is a full tournament participant: it takes a place on the fight
+line, `CalculateRanks` counts it, and losing puts it at the back of the queue
+the way losing puts a human there. Two things about the setup are not obvious:
+
+- **`g_warmup 1` starts the round without a `map_restart`.** `CheckTournament`
+  sets `warmupTime` straight to zero when `g_warmup` is not above one, which is
+  what lets a whole run be scripted from the startup command buffer — a queued
+  `map_restart` cannot execute until that buffer drains, so anything after a
+  `wait` would otherwise run in the wrong level.
+- **Both fighters spawn in the ring**, not at the map's spawn points, which on
+  every shipped map are nowhere near the authored arena. Without that a round
+  ends by ring-out on its first frame.
+
+```bash
+Tools/dev/zeq2shot.sh --map desert --frames 700 \
+  --after "ai goku 300" --after "wait 900" \
+  --after "setviewpos -39730 4681 1500 180" --after "wait 2000" \
+  -- +set g_gametype 1 +set g_training 1 +set g_warmup 1
+```
+
+That coordinate is a hundred units past the desert ring's edge and a thousand
+above the terrain there, so the second `wait` is the fall: ring-out needs the
+loser to *touch down*, and flying out over the edge is legal. To see the next
+round as well, launch the engine directly and let the buffer drain instead —
+the `map_restart` the round end queues cannot run while a `wait` is holding it.
+
+Read the round out of `games.log`: `Budokai: roundState 2` is a round being
+fought, `Budokai: ringout <loser> winner <winner>` and `Exit: Ring out.` are how
+one ends, and the `InitGame` block after it is the next round with both fighters
+back.
+
 ## `setviewpos` and the "set" prefix
 
 `+setviewpos x y z yaw` on the command line used to do nothing at all, silently:
@@ -441,6 +474,44 @@ alone, because a concurrent session writes the same file.
 paths. If the object files were produced in a different checkout (a clone, a
 worktree), make believes they are current and will not rebuild. Pass a module
 name — `zeq2build.sh cgame` — to drop its objects first.
+
+## Where games.log actually lives, and why it goes quiet
+
+There is exactly one `games.log`, at **`$ZEQ2_BUILD/$ZEQ2_GAME/games.log`** —
+`Build/Release-darwin-arm/ZEQ2/games.log` on this machine. There is no second
+copy under the home path to go looking for: this fork gives `fs_homepath` the
+same default as `fs_basepath` (`Sys_DefaultInstallPath()`, `Shared/files.c`), so
+`trap_FS_FOpenFileByMode( …, FS_APPEND )` resolves to the install directory and
+`FS_Startup` prints a single search path to prove it.
+
+What makes the file look like it went stale is `g_log`, and it is worth reading
+the mechanism once because nothing about the symptom points at it:
+
+- The shipped `ZEQ2/default.cfg` contains `seta g_log ""`, and `ZEQ2_server.cfg`
+  repeats it. That exec runs long before the game module loads.
+- `trap_Cvar_Register( … "g_log", "games.log", CVAR_ARCHIVE )` reaches
+  `Cvar_Get`, which for a cvar that already exists **keeps the existing value**
+  and only adopts `"games.log"` as the *reset* string. So `g_log` stays empty.
+- `G_InitGame` therefore never opens the file. It says so —
+  `Not logging to disk: g_log is ""` — but that is one line in a very long
+  startup log.
+- `g_log` is `CVAR_ARCHIVE`, so whichever value a session ends with is written
+  into `zeq2config.cfg` and inherited by the next one. A run launched with
+  `+set g_log games.log` leaves `seta g_log "games.log"` behind and every later
+  run logs; a script that backs up `zeq2config.cfg` before that run and restores
+  it afterwards — which `zeq2shot.sh`, `zeq2duel.sh`, `zeq2clip.sh` and
+  `zeq2bench.sh` all correctly do — puts the empty value back, and the log stops
+  without a word. That is the "it worked this morning" case exactly.
+
+`zeq2_base_args` now states `+set g_log games.log` on every launch, so no
+scripted run depends on what the saved config happens to hold. Override with
+`ZEQ2_LOG=""` to turn logging off for a run. A run launched by hand still needs
+the `+set`, or it inherits the empty value from the config.
+
+Two consecutive script-launched runs must therefore *append* to the same file:
+the mtime and the line count both advance, and each run adds one `InitGame`
+block per level load — plus one more for every `map_restart`, which in
+`GT_TOURNAMENT` is once per round.
 
 ## Reading a frame without a screen
 

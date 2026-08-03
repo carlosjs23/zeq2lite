@@ -451,7 +451,11 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 			G_LogPrintf("InitGame: %s\n", serverinfo );
 		}
 	} else {
-		G_Printf( "Not logging to disk.\n" );
+		// Named, because an empty g_log is how the shipped default.cfg leaves
+		// it and the cvar is CVAR_ARCHIVE, so a session that never says
+		// otherwise writes the empty value straight back into zeq2config.cfg.
+		// "Not logging" then looks like the log going stale on its own.
+		G_Printf( "Not logging to disk: g_log is \"%s\".\n", g_logfile.string );
 	}
 
 	G_InitWorldSession();
