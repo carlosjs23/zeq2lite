@@ -1958,6 +1958,7 @@ GOBJ_ = \
   $(B)/Base/Game/g_tiers.o \
   $(B)/Base/Game/g_rules.o \
   $(B)/Base/Game/g_masters.o \
+  $(B)/Base/Game/g_ring.o \
   $(B)/Base/Game/g_journal.o \
   $(B)/Base/Game/g_training.o \
   $(B)/Base/Game/g_progress.o \

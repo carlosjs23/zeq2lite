@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_tiers.h"
 #include "g_rules.h"
 #include "g_masters.h"
+#include "g_ring.h"
 #include "g_progress.h"
 #include "g_journal.h"
 // END ADDING
@@ -650,6 +651,7 @@ gentity_t *SelectSpawnPoint (vec3_t avoidPoint, vec3_t origin, vec3_t angles );
 void CopyToBodyQue( gentity_t *ent );
 void ClientRespawn(gentity_t *ent);
 void BeginIntermission (void);
+void LogExit( const char *string );
 void InitClientPersistant (gclient_t *client);
 void InitClientResp (gclient_t *client);
 void InitBodyQue (void);
@@ -812,6 +814,10 @@ void		G_TrainingClientConnect( int clientNum, const char *userinfo );
 void		G_TrainingClientBegin( int clientNum );
 void		G_TrainingClientDisconnect( int clientNum );
 void		G_TrainingEndFrame( gentity_t *ent );
+void		G_TrainingWorldFrame( void );
+qboolean	G_TrainingMayFight( gclient_t *client );
+void		G_TrainingEntryRefused( int clientNum );
+qboolean	G_TrainingSpectatorSpawn( vec3_t origin, vec3_t angles );
 qboolean	G_TrainingTierUnlocked( gclient_t *client, int tier );
 qboolean	G_TrainingConsoleCommand( const char *cmd );
 qboolean	G_TrainingClientCommand( gentity_t *ent, const char *cmd );

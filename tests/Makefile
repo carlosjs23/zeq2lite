@@ -26,7 +26,7 @@ BUILD             := bin
 # Adding a suite: create suites/test_<name>.c, add <name> here, and give it an
 # SRC_<name> line listing the engine translation units it needs. Keep that list
 # minimal - a short list is a sign the unit under test is well isolated.
-SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers g_rules g_masters g_progress g_journal
+SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers g_rules g_masters g_ring g_progress g_journal
 
 SHARED_CORE := $(ROOT)/Shared/q_shared.c $(ROOT)/Shared/q_math.c
 SUPPORT     := support/engine_stubs.c
@@ -72,6 +72,11 @@ SRC_g_rules  := $(ROOT)/Game/Game/g_rules.c $(ROOT)/Game/Game/g_masters.c \
 # g_masters.c is the same shape of leaf: COM_Parse, the FS traps and vector math,
 # with no allocation at all, so the suite needs no pool.
 SRC_g_masters := $(ROOT)/Game/Game/g_masters.c $(ROOT)/Game/Game/g_mem.c \
+                $(SHARED_CORE) $(SUPPORT) support/fake_fs.c support/rules_stubs.c
+# g_ring.c is the same shape again - COM_Parse, the FS traps and vector maths -
+# which is what lets the decision a tournament round hangs on be asserted
+# without a running game.
+SRC_g_ring   := $(ROOT)/Game/Game/g_ring.c $(ROOT)/Game/Game/g_mem.c \
                 $(SHARED_CORE) $(SUPPORT) support/fake_fs.c support/rules_stubs.c
 # g_progress.c stores tags by NAME, so the suite links the real tag vocabulary
 # out of g_rules.c rather than a stand-in: what is under test is exactly that a

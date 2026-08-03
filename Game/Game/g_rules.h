@@ -32,6 +32,7 @@ typedef enum {
 	fPowerCurrent, fPowerPercent, fFatigue, fHealth,
 	fTierCurrent, fTierTotal, fGravity, fStruggleEnergy,
 	fPowerRaiseTime, fAirborneTime, fAuraTime, fMasterNear,
+	fRingDistance, fRingHeight,
 	fFactCount
 } factKey_t;
 
@@ -42,6 +43,13 @@ typedef enum {
 	wRoundState, wRoundTime, wEventTimer, wScoreRed, wScoreBlue,
 	fWorldFactCount
 } worldFactKey_t;
+
+// The named values of roundState, in the order its vocabulary declares them:
+// `when world roundState is inProgress` compiles to roundInProgress, so the C
+// that drives the fact and the content that reads it cannot drift apart.
+typedef enum {
+	roundWaiting, roundInProgress, roundOver
+} roundState_t;
 
 // Client and world facts share one criterion key space; the flag selects which
 // array a criterion reads. Keeping criterion_t at three ints is the point of

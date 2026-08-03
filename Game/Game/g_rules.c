@@ -48,7 +48,13 @@ static factDef_t factDefs[fFactCount] = {
 	{"powerRaiseTime",	"s",	1000,		"ms",	1,	NULL,		0},
 	{"airborneTime",	"s",	1000,		"ms",	1,	NULL,		0},
 	{"auraTime",		"s",	1000,		"ms",	1,	NULL,		0},
-	{"masterNear",		NULL,	0,		NULL,	0,	masterValues,	3}
+	{"masterNear",		NULL,	0,		NULL,	0,	masterValues,	3},
+	// Both are world units and both are signed: ringDistance is how far PAST the
+	// ring edge the player is, so inside is negative, and ringHeight is measured
+	// from the ring floor, so below it is negative. Plain numbers rather than a
+	// unit, because there is no name for a Quake unit that an author would type.
+	{"ringDistance",	NULL,	0,		NULL,	0,	NULL,		0},
+	{"ringHeight",		NULL,	0,		NULL,	0,	NULL,		0}
 };
 
 // Indexed by worldFactKey_t.
