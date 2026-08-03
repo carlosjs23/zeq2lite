@@ -364,6 +364,8 @@ typedef struct {
 void Com_ScreenScale( screenScale_t *scale, int vidWidth, int vidHeight );
 void Com_ScreenAdjustFrom640( const screenScale_t *scale, qboolean stretch,
 		float *x, float *y, float *w, float *h );
+void Com_ScreenConsoleBounds( const screenScale_t *scale, float margin,
+		float *left, float *width );
 float Com_ScreenFovX( float fovX, int vidWidth, int vidHeight );
 
 #define TINYCHAR_WIDTH		(SMALLCHAR_WIDTH)

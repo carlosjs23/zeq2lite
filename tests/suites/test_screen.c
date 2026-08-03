@@ -184,6 +184,96 @@ Test(screen, null_pointers_are_ignored) {
 	cr_assert_float_eq(y, 360.0f, EPS);
 }
 
+/* ------------------------------------------------- Com_ScreenConsoleBounds */
+
+/*
+The defect these pin down: the console text column was positioned in virtual
+units while it was drawn in framebuffer pixels, so on every display wider than
+4:3 the first dozen characters of every line were off the left of the screen.
+
+The invariant is stated in pixels, because that is the space the two mappings
+have to agree in - the backdrop is stretched, the text is aspect-correct, and
+the text has to land on the backdrop whichever of those is doing the scaling.
+*/
+#define CON_TEST_MARGIN 56.0f
+
+Test(screen, console_bounds_are_the_identity_at_four_by_three) {
+	screenScale_t s;
+	float left, width;
+
+	Com_ScreenScale(&s, 1024, 768);
+	Com_ScreenConsoleBounds(&s, CON_TEST_MARGIN, &left, &width);
+
+	cr_assert_float_eq(left, CON_TEST_MARGIN, EPS);
+	cr_assert_float_eq(width, SCREEN_WIDTH - 2 * CON_TEST_MARGIN, EPS);
+}
+
+Test(screen, console_column_lands_on_the_stretched_backdrop) {
+	const int modes[][2] = { {640, 480}, {1024, 768}, {1280, 720}, {1280, 800},
+	                         {1920, 1080}, {2560, 1440}, {3440, 1440},
+	                         {1280, 1024} };
+	unsigned i;
+
+	for (i = 0; i < ARRAY_LEN(modes); ++i) {
+		screenScale_t s;
+		float left, width;
+		float x, w, wantLeft, wantRight;
+
+		Com_ScreenScale(&s, modes[i][0], modes[i][1]);
+		Com_ScreenConsoleBounds(&s, CON_TEST_MARGIN, &left, &width);
+
+		/* Where the column actually lands once it is drawn. */
+		x = left;
+		w = width;
+		Com_ScreenAdjustFrom640(&s, qfalse, &x, NULL, &w, NULL);
+
+		/* Where the backdrop's margins are, in the same pixels. */
+		wantLeft = CON_TEST_MARGIN;
+		Com_ScreenAdjustFrom640(&s, qtrue, &wantLeft, NULL, NULL, NULL);
+		wantRight = SCREEN_WIDTH - CON_TEST_MARGIN;
+		Com_ScreenAdjustFrom640(&s, qtrue, &wantRight, NULL, NULL, NULL);
+
+		cr_assert_float_eq(x, wantLeft, EPS,
+		                   "%dx%d: text column starts at %g px, backdrop margin is %g px",
+		                   modes[i][0], modes[i][1], x, wantLeft);
+		cr_assert_float_eq(x + w, wantRight, EPS,
+		                   "%dx%d: text column ends at %g px, backdrop margin is %g px",
+		                   modes[i][0], modes[i][1], x + w, wantRight);
+	}
+}
+
+/*
+A widescreen console is wider in characters than a 4:3 one, because the backdrop
+it sits on really is wider. Getting this backwards is what left the right third
+of the console permanently empty.
+*/
+Test(screen, console_gets_wider_with_the_display) {
+	screenScale_t narrow, wide;
+	float a, b;
+
+	Com_ScreenScale(&narrow, 1024, 768);
+	Com_ScreenScale(&wide, 1920, 1080);
+	Com_ScreenConsoleBounds(&narrow, CON_TEST_MARGIN, NULL, &a);
+	Com_ScreenConsoleBounds(&wide, CON_TEST_MARGIN, NULL, &b);
+
+	cr_assert(b > a, "16:9 console (%g) should be wider than 4:3 (%g)", b, a);
+}
+
+Test(screen, console_bounds_survive_a_degenerate_mode) {
+	screenScale_t s;
+	float left, width;
+
+	Com_ScreenScale(&s, 0, 0);
+	Com_ScreenConsoleBounds(&s, CON_TEST_MARGIN, &left, &width);
+
+	cr_assert(isfinite(left) && isfinite(width));
+	cr_assert(width > 0.0f, "a degenerate mode must still leave room to type");
+
+	/* A NULL scale is the pre-video case, and has to be finite too. */
+	Com_ScreenConsoleBounds(NULL, CON_TEST_MARGIN, &left, &width);
+	cr_assert_float_eq(left, CON_TEST_MARGIN, EPS);
+}
+
 /* ---------------------------------------------------------- Com_ScreenFovX */
 
 /*

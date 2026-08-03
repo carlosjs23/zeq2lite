@@ -41,12 +41,12 @@ typedef struct {
 	int 	linewidth;		// characters across screen
 	int		totallines;		// total lines in console scrollback
 
-	float	xadjust;		// for wide aspect screens
+	float	xadjust;		// virtual x of the text column's left edge
 
 	float	displayFrac;	// aproaches finalFrac at scr_conspeed
 	float	finalFrac;		// 0.0 to 1.0 lines of console to display
 
-	int		vislines;		// in scanlines
+	int		vislines;		// virtual y of the console's lowest legible row
 
 	int		times[NUM_CON_TIMES];	// cls.realtime time the line was generated
 								// for transparent notify lines
@@ -63,6 +63,12 @@ cvar_t		*con_displayAmount;
 cvar_t		*con_displayIngameAmount;
 
 #define	DEFAULT_CONSOLE_WIDTH	78
+
+// con.linewidth follows the display aspect, so it needs a ceiling: totallines is
+// CON_TEXTSIZE/linewidth and Field_VariableSizeDraw copies a line into a
+// MAX_STRING_CHARS buffer. 256 columns is past any real display and well inside
+// both.
+#define	MAX_CONSOLE_WIDTH		256
 
 
 /*
@@ -248,8 +254,24 @@ void Con_CheckResize (void)
 {
 	int		i, j, width, oldwidth, oldtotallines, numlines, numchars;
 	short	tbuf[CON_TEXTSIZE];
+	float	usable;
 
-	width = (SCREEN_WIDTH / SMALLCHAR_WIDTH) - 2;
+	// How many characters fit between the backdrop's margins, which is a
+	// different number per display aspect: the backdrop is stretched, so a
+	// wider screen really does give the console more room. A fixed 78 left the
+	// right third of a 16:9 console permanently empty and wrapped lines early.
+	SCR_ConsoleTextBounds( NULL, &usable );
+	width = (int)( usable / SMALLCHAR_WIDTH );
+	if ( width > MAX_CONSOLE_WIDTH ) {
+		width = MAX_CONSOLE_WIDTH;
+	}
+
+	// The input field shares the column, minus the cell the ']' prompt sits in.
+	g_console_field_width = width - 1;
+	g_consoleField.widthInChars = g_console_field_width;
+	for ( i = 0 ; i < COMMAND_HISTORY ; i++ ) {
+		historyEditLines[i].widthInChars = g_console_field_width;
+	}
 
 	if (width == con.linewidth)
 		return;
@@ -508,14 +530,14 @@ void Con_DrawInput (void) {
 		return;
 	}
 
-	y = con.vislines - ( SMALLCHAR_HEIGHT * 2 );
+	y = con.vislines - SMALLCHAR_HEIGHT;
 
 	re.SetColor( con.color );
 
-	SCR_DrawSmallChar( con.xadjust + 1 * SMALLCHAR_WIDTH, y, ']' );
+	SCR_DrawSmallChar( con.xadjust, y, ']' );
 
-	Field_Draw( &g_consoleField, con.xadjust + 2 * SMALLCHAR_WIDTH, y,
-		SCREEN_WIDTH - 3 * SMALLCHAR_WIDTH, qtrue, qtrue );
+	Field_Draw( &g_consoleField, con.xadjust + SMALLCHAR_WIDTH, y,
+		( con.linewidth - 1 ) * SMALLCHAR_WIDTH, qtrue, qtrue );
 }
 
 
@@ -569,7 +591,7 @@ void Con_DrawNotify (void)
 				currentColor = (text[x]>>8)&7;
 				re.SetColor( g_color_table[currentColor] );
 			}
-			//SCR_DrawSmallChar( cl_conXOffset->integer + con.xadjust + (x+1)*SMALLCHAR_WIDTH, v, text[x] & 0xff );
+			//SCR_DrawSmallChar( cl_conXOffset->integer + con.xadjust + x*SMALLCHAR_WIDTH, v, text[x] & 0xff );
 		}
 
 		v += 60;
@@ -604,54 +626,56 @@ void Con_DrawSolidConsole( float frac ) {
 	short			*text;
 	int				row;
 	int				lines;
+	int				frame;
 //	qhandle_t		conShader;
 	int				currentColor;
 	vec4_t			color;
 
-	lines = cls.glconfig.vidHeight * frac;
+	// Everything here is in 640x480 virtual units, including lines: the
+	// backdrop, the text and the separator all have to agree about where the
+	// bottom of the console is, and only one of the three can own the units.
+	lines = frac * SCREEN_HEIGHT;
 	if (lines <= 0)
 		return;
 
-	if (lines > cls.glconfig.vidHeight )
-		lines = cls.glconfig.vidHeight;
+	if (lines > SCREEN_HEIGHT )
+		lines = SCREEN_HEIGHT;
 
-	// The backdrop spans the screen, so console lines start at its left edge
-	// rather than inside the centred 4:3 box the rest of the 2D layer uses.
-	con.xadjust = SCR_ConsoleXAdjust();
+	// The backdrop spans the screen, so console lines follow it out of the
+	// centred 4:3 box the rest of the 2D layer stays inside.
+	SCR_ConsoleTextBounds( &con.xadjust, NULL );
 
 	// draw the background
-	y = frac * SCREEN_HEIGHT;
-	if ( y < 1 ) {
-		y = 0;
-	}
-	else {
-		SCR_DrawPicStretched( 0, 0, SCREEN_WIDTH, y, cls.consoleShader );
-	}
+	SCR_DrawPicStretched( 0, 0, SCREEN_WIDTH, lines, cls.consoleShader );
 
 	color[0] = 0.5;
 	color[1] = 0.5;
 	color[2] = 0.5;
 	color[3] = 0.5;
-	SCR_FillRectStretched( 0, y, SCREEN_WIDTH, 2, color );
+	SCR_FillRectStretched( 0, lines, SCREEN_WIDTH, 2, color );
 
-/*
-	// draw the version number
+	// Keep everything drawn on the backdrop clear of the frame burnt into it,
+	// which white text is illegible against. Rounded up to whole rows so the
+	// text grid stays aligned as the console slides open.
+	frame = (int)( lines * CON_FRAME_FRAC );
+	frame = ( ( frame + SMALLCHAR_HEIGHT - 1 ) / SMALLCHAR_HEIGHT ) * SMALLCHAR_HEIGHT;
+	con.vislines = lines - frame;
 
+	// draw the version number, right-aligned in the same column as the text
 	re.SetColor( g_color_table[ColorIndex(COLOR_GREEN)] );
 
 	i = strlen( Q3_VERSION );
 
 	for (x=0 ; x<i ; x++) {
-		SCR_DrawSmallChar( cls.glconfig.vidWidth - ( i - x + 1 ) * SMALLCHAR_WIDTH,
-			lines - SMALLCHAR_HEIGHT, Q3_VERSION[x] );
+		SCR_DrawSmallChar( con.xadjust + ( con.linewidth - i + x ) * SMALLCHAR_WIDTH,
+			con.vislines, Q3_VERSION[x] );
 	}
-*/
 
-	// draw the text
-	con.vislines = lines;
-	rows = (lines-SMALLCHAR_WIDTH)/SMALLCHAR_WIDTH;		// rows of text to draw
-
-	y = lines - (SMALLCHAR_HEIGHT*3);
+	// draw the text, upwards from the row above the input line. The pitch is
+	// SMALLCHAR_HEIGHT: counting rows in SMALLCHAR_WIDTH claimed twice as many
+	// as fit and drew half of them off the top of the screen.
+	y = con.vislines - SMALLCHAR_HEIGHT * 2;
+	rows = ( y - frame ) / SMALLCHAR_HEIGHT + 1;		// rows of text to draw
 
 	// draw from the bottom up
 	if (con.display != con.current)
@@ -659,7 +683,7 @@ void Con_DrawSolidConsole( float frac ) {
 	// draw arrows to show the buffer is backscrolled
 		re.SetColor( g_color_table[ColorIndex(COLOR_GREEN)] );
 		for (x=0 ; x<con.linewidth ; x+=4)
-			SCR_DrawSmallChar( con.xadjust + (x+1)*SMALLCHAR_WIDTH, y, '^' );
+			SCR_DrawSmallChar( con.xadjust + x*SMALLCHAR_WIDTH, y, '^' );
 		y -= SMALLCHAR_HEIGHT;
 		rows--;
 	}
@@ -693,7 +717,7 @@ void Con_DrawSolidConsole( float frac ) {
 				currentColor = (text[x]>>8)&7;
 				re.SetColor( g_color_table[currentColor] );
 			}
-			SCR_DrawSmallChar(  con.xadjust + (x+1)*SMALLCHAR_WIDTH, y, text[x] & 0xff );
+			SCR_DrawSmallChar(  con.xadjust + x*SMALLCHAR_WIDTH, y, text[x] & 0xff );
 		}
 	}
 

@@ -3000,8 +3000,12 @@ void CL_InitRenderer( void ) {
 	cls.whiteShader = re.RegisterShader( "white" );
 	cls.consoleShader = re.RegisterShader( "console" );
 	cls.chatInputShader = re.RegisterShader("chatInput");
-	g_console_field_width = cls.glconfig.vidWidth / SMALLCHAR_WIDTH - 2;
-	g_consoleField.widthInChars = g_console_field_width;
+
+	// The input field is as wide as the console column it sits in, which is a
+	// count of virtual character cells; dividing framebuffer pixels by
+	// SMALLCHAR_WIDTH used to claim four times that on a HiDPI display, so the
+	// field never scrolled and a long command ran off the right edge.
+	Con_CheckResize();
 }
 
 /*

@@ -1735,6 +1735,44 @@ void Com_ScreenAdjustFrom640( const screenScale_t *scale, qboolean stretch,
 
 /*
 ================
+Com_ScreenConsoleBounds
+
+Where console text belongs. The console backdrop is a stretched full-screen
+image with a soft frame burnt into it, so its inset is a fraction of the display
+rather than a virtual-unit distance; the text over it is drawn aspect-correct so
+its glyphs stay square. Those are two different mappings, and an inset authored
+against one is meaningless in the other unless it is carried across.
+
+margin is in the backdrop's own 640-wide space. left and width come back in the
+virtual units the aspect-correct drawing calls take, so a caller adds them to
+ordinary 640x480 coordinates. On a 4:3 display the two mappings coincide and
+this is the identity.
+================
+*/
+void Com_ScreenConsoleBounds( const screenScale_t *scale, float margin,
+		float *left, float *width ) {
+	float	span = SCREEN_WIDTH - 2.0f * margin;
+
+	if ( !scale || scale->scale <= 0.0f ) {
+		if ( left ) {
+			*left = margin;
+		}
+		if ( width ) {
+			*width = span;
+		}
+		return;
+	}
+
+	if ( left ) {
+		*left = ( margin * scale->xScale - scale->xBias ) / scale->scale;
+	}
+	if ( width ) {
+		*width = span * scale->xScale / scale->scale;
+	}
+}
+
+/*
+================
 Com_ScreenFovX
 
 Corrects a horizontal field of view for the display aspect, "Hor+" style:

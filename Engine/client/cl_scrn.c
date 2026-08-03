@@ -95,24 +95,20 @@ void SCR_AdjustFrom640Stretch( float *x, float *y, float *w, float *h ) {
 
 /*
 ================
-SCR_ConsoleXAdjust
+SCR_ConsoleTextBounds
 
-Virtual-space x offset that cancels the widescreen centring, so console lines
-start at the left edge of the console backdrop (which does span the screen)
-instead of at the left edge of the centred 4:3 box.
-
-Returned in virtual units on purpose: callers add it to virtual coordinates and
-the result goes through SCR_AdjustFrom640 like any other x.
+Left edge and usable width of the console's text column, in the virtual units
+SCR_DrawSmallChar takes. The backdrop spans the screen, so the text follows it
+out of the centred 4:3 box and uses the whole display; CON_MARGIN keeps it clear
+of the soft frame the backdrop art carries, which is a fraction of the screen
+and so has to be converted between the two mappings.
 ================
 */
-float SCR_ConsoleXAdjust( void ) {
+void SCR_ConsoleTextBounds( float *left, float *width ) {
 	screenScale_t	scale;
 
 	SCR_ScreenScale( &scale );
-	if ( scale.scale <= 0.0f ) {
-		return 0.0f;
-	}
-	return -scale.xBias / scale.scale;
+	Com_ScreenConsoleBounds( &scale, CON_MARGIN, left, width );
 }
 
 /*
@@ -214,12 +210,20 @@ static void SCR_DrawChar( int x, int y, float size, int ch ) {
 
 /*
 ** SCR_DrawSmallChar
-** small chars are drawn at native screen resolution
+** chars are drawn at 640*480 virtual screen size, like SCR_DrawChar
+**
+** These used to be placed in raw framebuffer pixels while every quantity their
+** callers combined them with - SCREEN_WIDTH, SMALLCHAR_WIDTH, the console's
+** x offset, the backdrop underneath - was in virtual units. The two agree only
+** on a 640x480 display, so on anything larger the console text came out
+** unreadably small, and on anything wider than 4:3 it also started off the left
+** edge of the screen.
 */
 void SCR_DrawSmallChar( int x, int y, int ch ) {
 	int row, col;
 	float frow, fcol;
 	float size;
+	float ax, ay, aw, ah;
 
 	ch &= 255;
 
@@ -231,6 +235,12 @@ void SCR_DrawSmallChar( int x, int y, int ch ) {
 		return;
 	}
 
+	ax = x;
+	ay = y;
+	aw = SMALLCHAR_WIDTH;
+	ah = SMALLCHAR_HEIGHT;
+	SCR_AdjustFrom640( &ax, &ay, &aw, &ah );
+
 	row = ch>>4;
 	col = ch&15;
 
@@ -238,9 +248,9 @@ void SCR_DrawSmallChar( int x, int y, int ch ) {
 	fcol = col*0.0625;
 	size = 0.0625;
 
-	re.DrawStretchPic( x, y, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT,
-					   fcol, frow, 
-					   fcol + size, frow + size, 
+	re.DrawStretchPic( ax, ay, aw, ah,
+					   fcol, frow,
+					   fcol + size, frow + size,
 					   cls.charSetShader );
 }
 

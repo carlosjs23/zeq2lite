@@ -530,6 +530,18 @@ qboolean CL_UpdateVisiblePings_f( int source );
 //
 // console
 //
+
+// Inset of the console's text column from the screen edge, in the backdrop's
+// stretched 640-wide space. The backdrop art fades to white over roughly the
+// outer 8% of its width, and white text on that is unreadable, so the column
+// starts past it rather than at the literal screen edge.
+#define CON_MARGIN		56
+
+// The same frame runs along the top and bottom, but the backdrop is stretched
+// to whatever height the console has been pulled down to, so there it is a
+// fraction of that height rather than a fixed distance.
+#define CON_FRAME_FRAC		0.13f
+
 void Con_DrawCharacter (int cx, int line, int num);
 
 void Con_CheckResize (void);
@@ -562,7 +574,7 @@ int		SCR_GetBigStringWidth( const char *str );	// returns in virtual 640x480 coo
 
 void	SCR_AdjustFrom640( float *x, float *y, float *w, float *h );
 void	SCR_AdjustFrom640Stretch( float *x, float *y, float *w, float *h );
-float	SCR_ConsoleXAdjust( void );
+void	SCR_ConsoleTextBounds( float *left, float *width );
 void	SCR_DrawPicStretched( float x, float y, float width, float height, qhandle_t hShader );
 void	SCR_FillRectStretched( float x, float y, float width, float height, const float *color );
 void	SCR_FillRect( float x, float y, float width, float height, 
