@@ -165,10 +165,6 @@ static void refreshFacts(gentity_t *ent){
 
 // ---------------------------------------------------------------- actions
 
-static void trainingSay(int clientNum,const char *text){
-	trap_SendServerCommand(clientNum,va("print \"%s\n\"",text));
-}
-
 // The three event-shaped messages. Text is quoted so it survives tokenizing as
 // one argument; everything else is a small integer.
 //
@@ -205,12 +201,10 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 		G_TagClear(&client->pers.tags,action->tag);
 		break;
 	case acSay:
-		// Two commands per line: the toast the HUD will draw, and the console
-		// print that has carried this loop since Phase 1. The print stays until
-		// the toast is on screen, because a lesson nobody can read is the
-		// failure this whole mode exists to fix.
+		// One delivery. This also went out as a console print while the HUD had
+		// nothing to draw it with; now that it does, the print was a second copy
+		// of every line in the chat feed.
 		trainingToast(clientNum,action->text);
-		trainingSay(clientNum,action->text);
 		break;
 	case acObjective:
 		Q_strncpyz(client->pers.objectiveText,action->text,sizeof(client->pers.objectiveText));
@@ -220,7 +214,6 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 		client->pers.objectiveComplete = qfalse;
 		trap_SendServerCommand(clientNum,va("trobj \"%s\" %i %i %i",action->text,
 			client->pers.objectiveId,action->track,action->value));
-		trainingSay(clientNum,va("Objective: %s",action->text));
 		break;
 	case acSetGravity:
 		// gravity[0] is the per-client base pmove falls back to; gravity[2] is

@@ -156,10 +156,19 @@ headers in `Engine/SDL12/include` must stay off the include path there, because
 `Engine/sdl/*.c` are SDL2 sources. Windows/mingw still links SDL 1.2 and is
 genuinely unported.
 
-**The protocol is 72, not the stock 71 that `master` keeps.** `powerLevel[]` and
-the two `attackPower` entity fields travel at 32 bits rather than 16. Peers and
-QVMs must be rebuilt together, and demos recorded under the old encoding will
-not replay - which is why this stays off `master`.
+**The protocol is 72, not the stock 71.** `powerLevel[]` and the two
+`attackPower` entity fields travel at 32 bits rather than 16. Staying
+wire-compatible with unmodified ZEQ2-Lite clients, servers and demos is no
+longer a goal: a widened field is a normal thing to do here when it is the right
+fit. What that costs is that peers and QVMs must be rebuilt together, and demos
+recorded under an older encoding will not replay.
+
+What still holds is **append, never renumber** for anything wire-visible —
+`netField_t`, `persEnum_t`, the event and `stat_t` enums. Renumbering breaks
+saved configs and recorded demos silently rather than loudly, and a new value at
+the end costs nothing. `persistant[]` also travels as a 16-bit value whatever
+the `int` in the struct says (`MSG_WriteShort` in `msg.c`), so a power level or
+a timestamp put in a `PERS_` slot truncates without a word.
 
 **`Sys_SigHandler` catches the fault signals**, so a stack-protector abort, a
 sanitizer abort or a segfault surfaces only as `=== fatal signal, exiting ===`
