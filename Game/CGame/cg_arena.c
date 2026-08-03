@@ -34,11 +34,14 @@
 #define ARENA_FILE_SIZE		2000
 
 // Tessellation. The segment count is what makes the edge read as round; the
-// band count is what lets the floor follow the ground it is draped on, and two
-// of them turned a gentle mound on lastStand into a tent. Together they are
-// 288 quads a frame against a 16000-poly budget.
+// band count is what lets the floor follow the ground it is draped on. Both are
+// sized so that no floor quad spans more than about a fighter's width at the
+// widest ring shipped (radius 448): 37 units radially, 58 along the rim. A quad
+// wider than that cannot follow a slope its middle crosses, and the fighter
+// standing on that middle is the one who ends up under it. 576 quads a frame
+// against a 16000-poly budget.
 #define ARENA_SEGMENTS		48
-#define ARENA_FLOOR_BANDS	6
+#define ARENA_FLOOR_BANDS	12
 
 // One texture repeat per this many world units. Eight tiles to the sheet, so
 // this is a 32-unit floor tile against a 56-unit fighter.
@@ -47,18 +50,11 @@
 // How far above the ground each floor vertex sits, and how far above and below
 // the authored height the drape looks for that ground. The lift is small
 // because fighters stand on the map's own surface rather than on this: every
-// unit of it is a unit of boot buried.
-#define ARENA_FLOOR_LIFT	2.0f
+// unit of it is a unit of boot buried, and it buys only the depth fight against
+// the surface directly underneath.
+#define ARENA_FLOOR_LIFT	1.0f
 #define ARENA_DRAPE_UP		512.0f
 #define ARENA_DRAPE_DOWN	1024.0f
-
-// How far below the authored floor a draped vertex may go. The ring is a
-// PLATFORM, and the author states its height by standing on it, so ground
-// above that height is a bump the ring is laid flat over and ground below it
-// is followed only this far - past which the surface stays level and a fighter
-// down in the dip is under it. A step's worth: enough for the fall-away the
-// shipped placements sit on, too little to read as a slope.
-#define ARENA_DROP_MAX		24.0f
 
 // The ki wall: how tall it stands, and how far inside the boundary a fighter
 // has to come before it starts answering him. The distance is deliberately
@@ -161,18 +157,35 @@ The arena file states ONE floor height, taken where the author stood, and the
 ground under the rest of the ring is not at it - on desert the corners sit
 tens of units lower, which a flat disc buries a fighter's boots in. So the ring
 surface is traced onto the map instead, once, when the arena is registered:
-~100 traces at load against 100 a frame, and a ring that is authored by
+~600 traces at load against 600 a frame, and a ring that is authored by
 standing somewhere is drawn on the ground that is actually there.
 
-A vertex with nothing under it keeps the authored height, because a ring hung
-over open air is the author's business and not something to guess at.
+The drape follows that ground wherever it goes, in both directions, and this is
+the whole point: a fighter stands on the MAP's surface and never on this mesh,
+so any unit by which the drawn floor departs from the ground under it is a unit
+of him buried or a unit of him hovering. An earlier pass clamped the drape to
+the authored height above and a step's worth below, on the theory that the ring
+is a platform laid over the terrain - which is exactly what put a fighter's
+legs through the floor on the ground that falls away past that step.
+
+The authored height is therefore no longer a ceiling or a floor. It is only
+where the trace starts looking, and the height a vertex keeps when there is
+nothing under it at all - a ring hung over open air being the author's business
+and not something to guess at.
+
+Relief is reported so a placement can be judged: a ring wants flat ground, and
+a drape that spans more than a fighter's height is a ring that should be moved
+rather than a mesh that should be bent.
 ================*/
 static void CG_ArenaDrape(void){
 	trace_t	trace;
 	vec3_t	start,end;
-	float	r,a,ground;
-	int		band,i;
+	float	r,a,ground,lo,hi;
+	int		band,i,missed;
 
+	lo = arena.floor;
+	hi = arena.floor;
+	missed = 0;
 	for(band=0;band<=ARENA_FLOOR_BANDS;band++){
 		r = arena.radius * band / (float)ARENA_FLOOR_BANDS;
 		for(i=0;i<ARENA_SEGMENTS;i++){
@@ -184,13 +197,20 @@ static void CG_ArenaDrape(void){
 			// The WORLD, not CG_Trace: an entity standing on the ring - a
 			// fighter, a mover - would otherwise become part of its floor.
 			trap_CM_BoxTrace(&trace,start,end,NULL,NULL,0,MASK_SOLID);
-			ground = arena.floor;
-			if(trace.fraction < 1.0f && !trace.startsolid){ground = trace.endpos[2];}
-			if(ground > arena.floor){ground = arena.floor;}
-			if(ground < arena.floor - ARENA_DROP_MAX){ground = arena.floor - ARENA_DROP_MAX;}
+			if(trace.fraction < 1.0f && !trace.startsolid){
+				ground = trace.endpos[2];
+			}else{
+				ground = arena.floor;
+				missed++;
+			}
+			if(ground < lo){lo = ground;}
+			if(ground > hi){hi = ground;}
 			arena.floorZ[band][i] = ground + ARENA_FLOOR_LIFT;
 		}
 	}
+	CG_Printf("Arena %s: floor draped, relief %.0f units (%.0f..%.0f about %.0f)%s\n",
+		arena.mapname,hi-lo,lo-arena.floor,hi-arena.floor,arena.floor,
+		missed ? va(", %d vertices over open air",missed) : "");
 }
 
 /*================
@@ -243,8 +263,8 @@ CG_ArenaLight
 
 One lightgrid sample for the whole ring, taken above the middle of it, rather
 than CG_LightVerts per quad. Two reasons, and the second one is the important
-one: the ring is a flat surface at one height so a per-vertex sample buys
-nothing, and CG_LightVerts hands trap_R_LightForPoint an UNINITIALISED
+one: the ring is one surface under one sky and the drape moves it by a fighter's
+height at most, so a per-vertex sample buys nothing, and CG_LightVerts hands trap_R_LightForPoint an UNINITIALISED
 ambientLight and uses it whatever the call returns. On a map with no lightgrid
 - desert is one - that trap returns qfalse without writing a byte, and the ring
 came out flat green. Defaults are set here before the call and kept if it
