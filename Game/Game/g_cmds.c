@@ -1284,6 +1284,14 @@ void Cmd_SetViewpos_f( gentity_t *ent ) {
 	angles[YAW] = atof( buffer );
 
 	TeleportPlayer( ent, origin, angles );
+
+	// A teleporter spits the player out along the exit angles and holds pmove
+	// for 160ms. setviewpos is a debug pin, not an exit, so drop both: a
+	// scripted run that asks for a coordinate has to land on it rather than
+	// 400ups downrange of it.
+	VectorClear( ent->client->ps.velocity );
+	ent->client->ps.pm_time = 0;
+	ent->client->ps.pm_flags &= ~PMF_TIME_KNOCKBACK;
 }
 
 

@@ -488,8 +488,14 @@ qboolean Com_AddStartupCommands( void ) {
 			continue;
 		}
 
-		// set commands already added with Com_StartupVariable
-		if ( !Q_stricmpn( com_consoleLines[i], "set", 3 ) ) {
+		// Set commands were already applied by Com_StartupVariable, so skip
+		// them here. Match the whole command name: a three-character prefix
+		// test also swallows every other command that happens to start with
+		// "set", which is why +setviewpos on the command line silently never
+		// reached the command buffer. Com_StartupVariable consumes exactly
+		// "set", so that is what this has to mirror.
+		Cmd_TokenizeString( com_consoleLines[i] );
+		if ( !strcmp( Cmd_Argv( 0 ), "set" ) ) {
 			continue;
 		}
 
