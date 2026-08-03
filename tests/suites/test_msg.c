@@ -172,6 +172,67 @@ Test(msg, msg_writebits_unsigned_31_is_not_undefined) {
 	cr_assert_eq((unsigned int)MSG_ReadBits(&msg, 31), 0x7FFFFFFFu);
 }
 
+/* ----------------------------------------------- delta-encoded wide fields */
+
+/*
+powerLevel[] rides the playerstate delta as full 32-bit values. It used to go
+over the wire as shorts, so anything past 32767 - a big damage accumulation, a
+raised plLimit - arrived truncated or sign-flipped, and a negative accumulator
+read as a heal on the client.
+*/
+Test(msg, playerstate_powerlevel_survives_values_beyond_16_bits) {
+	playerState_t to, out;
+	int i;
+
+	memset(&to, 0, sizeof(to));
+	memset(&out, 0, sizeof(out));
+	for (i = 0; i < MAX_POWERSTATS; ++i) {
+		to.powerLevel[i] = 32768 + i * 1000003;   /* all beyond the old short range */
+	}
+	to.powerLevel[0] = 100000000;    /* POWERLEVEL_MAX */
+	to.powerLevel[1] = 8000000;      /* the hurt_touch kill credit */
+	to.powerLevel[2] = -100000000;   /* plCurrent may legitimately go negative */
+	to.powerLevel[3] = 9001;         /* and small values still round-trip */
+
+	msg_setup();
+	MSG_WriteDeltaPlayerstate(&msg, NULL, &to);
+	MSG_BeginReading(&msg);
+	MSG_ReadDeltaPlayerstate(&msg, NULL, &out);
+
+	for (i = 0; i < MAX_POWERSTATS; ++i) {
+		cr_assert_eq(out.powerLevel[i], to.powerLevel[i],
+		             "powerLevel[%d]: wrote %d, read %d",
+		             i, to.powerLevel[i], out.powerLevel[i]);
+	}
+}
+
+/*
+attackPowerTotal/Current mirror plMaximum/plHealth into the entity state for
+other clients' health bars; their netfield widths have to keep up with the
+powerLevel range or spectators see wrapped values the owner does not.
+*/
+Test(msg, entitystate_attackpower_survives_values_beyond_16_bits) {
+	entityState_t from, to, out;
+	int number;
+
+	memset(&from, 0, sizeof(from));
+	memset(&to, 0, sizeof(to));
+	memset(&out, 0, sizeof(out));
+	to.number = 5;
+	to.attackPowerTotal = 100000000;
+	to.attackPowerCurrent = 99999999;
+
+	msg_setup();
+	MSG_WriteDeltaEntity(&msg, &from, &to, qtrue);
+	MSG_BeginReading(&msg);
+	number = MSG_ReadBits(&msg, GENTITYNUM_BITS);
+	MSG_ReadDeltaEntity(&msg, &from, &out, number);
+
+	cr_assert_eq(out.number, 5);
+	cr_assert_eq(out.attackPowerTotal, 100000000);
+	cr_assert_eq(out.attackPowerCurrent, 99999999);
+}
+
 /* ------------------------------------------------- playerState delta fields */
 
 /*

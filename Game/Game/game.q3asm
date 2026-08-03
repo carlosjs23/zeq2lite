@@ -8,10 +8,12 @@ bg_slidemove
 q_math
 q_shared
 g_active
+g_ai
 g_arenas
 g_client
 g_cmds
 g_combat
+g_dummy
 g_mem
 g_misc
 g_mover

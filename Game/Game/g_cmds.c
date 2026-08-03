@@ -28,9 +28,53 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ==================
 DeathmatchScoreboardMessage
 
+Fourteen fields per client because that is what CG_ParseScores still reads;
+everything past ping and time died with the rankings system and is sent as
+zero to keep the two sides counting the same columns.
 ==================
 */
-void DeathmatchScoreboardMessage( gentity_t *ent ) {}
+void DeathmatchScoreboardMessage( gentity_t *ent ) {
+	char		entry[1024];
+	char		string[1400];
+	int			stringlength;
+	int			i, j;
+	gclient_t	*cl;
+	int			numSorted;
+	int			ping;
+
+	// send the latest information on all clients
+	string[0] = 0;
+	stringlength = 0;
+
+	numSorted = level.numConnectedClients;
+	if ( numSorted > 32 ) {
+		numSorted = 32;
+	}
+
+	for (i=0 ; i < numSorted ; i++) {
+		cl = &level.clients[level.sortedClients[i]];
+
+		if ( cl->pers.connected == CON_CONNECTING ) {
+			ping = -1;
+		} else {
+			ping = cl->ps.ping < 999 ? cl->ps.ping : 999;
+		}
+
+		Com_sprintf (entry, sizeof(entry),
+			" %i %i %i %i 0 0 0 0 0 0 0 0 0 0",
+			level.sortedClients[i], cl->ps.persistant[PERS_SCORE], ping,
+			(level.time - cl->pers.enterTime)/60000 );
+		j = strlen(entry);
+		if (stringlength + j >= sizeof(string))
+			break;
+		strcpy (string + stringlength, entry);
+		stringlength += j;
+	}
+
+	trap_SendServerCommand( ent-g_entities, va("scores %i %i %i%s", i,
+		level.teamScores[TEAM_RED], level.teamScores[TEAM_BLUE],
+		string ) );
+}
 
 
 /*
@@ -1407,6 +1451,12 @@ void ClientCommand( int clientNum ) {
 		Cmd_SetViewpos_f( ent );
 	else if (Q_stricmp (cmd, "stats") == 0)
 		Cmd_Stats_f( ent );
+	else if (Q_stricmp (cmd, "dummy") == 0)
+		Cmd_Dummy_f( ent );
+	else if (Q_stricmp (cmd, "ai") == 0)
+		Cmd_AI_f( ent );
+	else if (Q_stricmp (cmd, "dummyclear") == 0)
+		Cmd_DummyClear_f( ent );
 	else
 		trap_SendServerCommand( clientNum, va("print \"unknown cmd %s\n\"", cmd ) );
 }

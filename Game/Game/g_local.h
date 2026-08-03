@@ -278,6 +278,10 @@ typedef struct {
 	int			voteCount;			// to prevent people from constantly calling votes
 	int			teamVoteCount;		// to prevent people from constantly calling votes
 	qboolean	teamInfo;			// send team overlay updates?
+	qboolean	isDummy;			// training dummy: no engine client behind this slot,
+									// the game module builds its usercmds itself
+	qboolean	aiActive;			// and builds them from g_ai.c rather than leaving
+									// them empty
 } clientPersistant_t;
 
 
@@ -313,6 +317,11 @@ extern struct gclient_s {
 	qboolean	damage_fromWorld;	// if true, don't use the damage_from vector
 	int			lastkilled_client;	// last client that this client killed
 	int			lasthurt_client;	// last client that damaged this client
+	// Who to credit when this client dies, and when they last earned it. Melee
+	// damage is dealt inside pmove, which cannot reach gclient_t, so the two
+	// damage paths both post here and the death transition reads it.
+	int			lastDamagedBy;		// client number, or -1
+	int			lastDamagedAt;		// level.time of that damage
 	int			lasthurt_mod;		// type of damage the client did
 	int			lasthurt_location;	// Where the client was hit.
 	// timers
@@ -327,12 +336,59 @@ extern struct gclient_s {
 	qboolean	fireHeld;			// used for hook
 	gentity_t	*hook;				// grapple hook if out
 
+	// g_ai.c: button timing for a game-driven fighter
+	int			aiAttackUntil;
+	int			aiNextAttack;
+	int			aiNextLock;
+	int			aiPowerUpUntil;
+	int			aiLeashedAt;
+	qboolean	aiRecovering;
+	int			aiRecoverAt;
+	int			aiFightUntil;
+	int			aiShotAt;
+	// g_ai.c: what it has noticed about its opponent, what it is still only
+	// looking at, and when that observation last changed
+	int			aiPerceivedFacts;
+	int			aiSeenFacts;
+	int			aiSeenAt;
+	// g_ai.c: choices rolled once and held, so a decision reads as a choice
+	// rather than as the twenty coin flips a second the think rate would give
+	int			aiPlantRollAt;
+	float		aiPlantRange;
+	qboolean	aiWillPlant;
+	int			aiPunishRollAt;
+	qboolean	aiWillPunish;
+	int			aiEscapeRollAt;
+	int			aiZanzokenAt;
+	qboolean	aiWillZanzoken;
+	int			aiGuardRollAt;
+	qboolean	aiWillGuard;
+	int			aiGuardUntil;
+	int			aiDodgeRollAt;
+	qboolean	aiWillDodge;
+	int			aiDodgeLean;
+	int			aiStunRollAt;
+	qboolean	aiWillStun;
+	int			aiStunnedAt;
+	int			aiPlantWeapon;
+	// g_ai.c: what this opponent keeps doing, counted when a perceived fact is
+	// newly adopted and halved as the reads age
+	int			aiTendencyOf;
+	int			aiTendencySeen;
+	int			aiTendencyAt;
+	int			aiChargeTally;
+	int			aiBlockTally;
+	int			aiRushTally;
+	int			aiChargeSeenAt;
+
 	// ADDING FOR ZEQ2
 	gentity_t	*guidetarget;		// guided weapon when firing one
 	gentity_t	*playerEntity;
 	char		*modelName;
 	tierConfig_g tiers[8];
-	
+	int			tierTransformCount[8];	// transforms into each tier this life; repeats compound the subsequent scales
+
+
 	// END ADDING
 
 	int			switchTeamTime;		// time the player switched teams
@@ -443,6 +499,7 @@ char *G_NewString( const char *string );
 // g_cmds.c
 //
 void Cmd_Score_f (gentity_t *ent);
+qboolean CheatsOk( gentity_t *ent );
 void StopFollowing( gentity_t *ent );
 void BroadcastTeamChange( gclient_t *client, int oldTeam );
 void SetTeam( gentity_t *ent, char *s );
@@ -485,6 +542,8 @@ const char *BuildShaderStateConfig( void );
 // g_combat.c
 //
 qboolean CanDamage (gentity_t *targ, vec3_t origin);
+void G_RecordAttacker( gclient_t *victim, int attackerNum );
+void G_AwardKill( gentity_t *victim );
 void G_Damage (gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_t dir, vec3_t point, int damage, int dflags, int mod);
 qboolean G_RadiusDamage (vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod);
 int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir );
@@ -620,8 +679,24 @@ void ClientCommand( int clientNum );
 //
 void SetTargetPos(gentity_t* ent);
 void ClientThink( int clientNum );
+void ClientThink_real( gentity_t *ent );
 void ClientEndFrame( gentity_t *ent );
 void G_RunClient( gentity_t *ent );
+
+//
+// g_dummy.c
+//
+void G_RunDummy( gentity_t *ent );
+gentity_t *G_NearestClient( gentity_t *from, qboolean humansOnly );
+void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance );
+void Cmd_Dummy_f( gentity_t *ent );
+void Cmd_AI_f( gentity_t *ent );
+void Cmd_DummyClear_f( gentity_t *ent );
+
+//
+// g_ai.c
+//
+void G_AIThink( gentity_t *ent );
 
 //
 // g_team.c
@@ -719,6 +794,7 @@ extern	vmCvar_t	g_knockback;
 extern	vmCvar_t	g_forcerespawn;
 extern	vmCvar_t	g_inactivity;
 extern	vmCvar_t	g_debugMove;
+extern	vmCvar_t	g_debugFight;
 extern	vmCvar_t	g_debugAlloc;
 extern	vmCvar_t	g_debugDamage;
 extern	vmCvar_t	g_synchronousClients;
@@ -764,6 +840,7 @@ extern	vmCvar_t	g_quickTransformCost;
 extern	vmCvar_t	g_quickTransformCostPerTier ;
 extern	vmCvar_t	g_quickZanzokenCost ;
 extern	vmCvar_t	g_quickZanzokenDistance ;
+extern	vmCvar_t	g_aiSkill;
 // END ADDING
 #if MAPLENSFLARES	// JUHOX: cvars for map lens flares
 extern	vmCvar_t	g_editmode;

@@ -69,6 +69,7 @@ void PM_ContinueLegsAnim(int anim);
 void PM_ContinueTorsoAnim(int anim);
 void PM_Accelerate(vec3_t wishdir,float wishspeed,float accel);
 void PM_WeaponRelease(void);
+void PM_WeaponDiscard(void);
 float PM_CmdScale(usercmd_t *cmd);
 void PM_CheckContextOperations(void);
 /*===================
@@ -307,9 +308,16 @@ void PM_CheckZanzoken(void){
 		PM_StopZanzoken();
 		return;
 	}
-	if(pm->ps->bitFlags & usingSoar || pm->ps->bitFlags & isPreparing || pm->ps->bitFlags & usingMelee){return;}
+	// A melee is not a refusal: teleporting out of an exchange is the escape the
+	// melee is built around, and PM_Melee ends the exchange for both fighters as
+	// soon as either of them shows usingZanzoken.
+	if(pm->ps->bitFlags & usingSoar || pm->ps->bitFlags & isPreparing){return;}
 	if(pm->ps->timers[tmZanzoken] > 0){
-		stepCost = ((pm->ps->powerLevel[plMaximum] * 0.09) * pm->ps->baseStats[stZanzokenCost]) / (pm->ps->timers[tmZanzoken] / 50.0);
+		// Both kinds of zanzoken are billed the same way, off their own cost stat.
+		// tmZanzoken holds the whole window, so the per-50ms share always sums to
+		// 9% of the ceiling however long the window is.
+		stepCost = pm->ps->bitFlags & usingQuickZanzoken ? pm->ps->baseStats[stZanzokenQuickCost] : pm->ps->baseStats[stZanzokenCost];
+		stepCost = ((pm->ps->powerLevel[plMaximum] * 0.09) * stepCost) / (pm->ps->timers[tmZanzoken] / 50.0);
 		speed = (pm->ps->powerLevel[plCurrent] / 13.1) + (pm->ps->baseStats[stZanzokenSpeed] * 4000);
 		pm->ps->measureTimers[mtZanzokenDistance] -= pml.msec;
 		if(pm->ps->measureTimers[mtZanzokenDistance] < 0 || (!(pm->cmd.buttons & BUTTON_TELEPORT) && !(pm->ps->bitFlags & usingQuickZanzoken))){
@@ -319,7 +327,11 @@ void PM_CheckZanzoken(void){
 		pm->ps->measureTimers[mtZanzoken] += pml.msec;
 		while(pm->ps->measureTimers[mtZanzoken] > 50){
 			pm->ps->buffers[bfZanzokenCost] += stepCost;
-			if(pm->ps->buffers[bfZanzokenCost] > 1 && !(pm->ps->bitFlags & usingQuickZanzoken)){
+			// A displacement costs what it costs. Waiving the per-step drain for
+			// the double-tap left the deliberate teleport paying eight times more
+			// fatigue per unit moved than the accidental one, so nobody ever had
+			// a reason to press the key.
+			if(pm->ps->buffers[bfZanzokenCost] > 1){
 				transfer = (int)pm->ps->buffers[bfZanzokenCost];
 				pm->ps->powerLevel[plUseFatigue] += transfer;
 				pm->ps->buffers[bfZanzokenCost] -= transfer;
@@ -345,7 +357,11 @@ void PM_CheckZanzoken(void){
 		pm->ps->powerLevel[plUseFatigue] += cost;
 		PM_AddEvent(EV_ZANZOKEN_START);
 	}
-	else if(!(pm->cmd.buttons & BUTTON_BOOST) && !(pm->cmd.buttons & BUTTON_POWERLEVEL) && (pm->ps->sequenceTimers[15]%10 == 2 || pm->ps->sequenceTimers[16]%10 == 2 || pm->ps->sequenceTimers[17]%10 == 2  ||
+	// Leaving a melee is the button's job alone. A zanzoken ends the exchange
+	// for both fighters, and the double-tap falls out of the strafing every
+	// melee is full of - so inside one, the quick variant would dissolve
+	// exchanges nobody chose to leave.
+	else if(!(pm->ps->bitFlags & usingMelee) && !(pm->cmd.buttons & BUTTON_BOOST) && !(pm->cmd.buttons & BUTTON_POWERLEVEL) && (pm->ps->sequenceTimers[15]%10 == 2 || pm->ps->sequenceTimers[16]%10 == 2 || pm->ps->sequenceTimers[17]%10 == 2  ||
 			pm->ps->sequenceTimers[18]%10 == 2	|| pm->ps->sequenceTimers[19]%10 == 2 || pm->ps->sequenceTimers[20]%10 == 2)){
 		PM_StopDash();
 		pm->ps->bitFlags |= usingZanzoken;
@@ -409,10 +425,24 @@ void PM_UsePowerLevel(){
 		useType += 1;
 	}
 }
+// Fatigue spent per point of damage the guard soaks. The one number that
+// decides whether holding a guard is a decision or a default.
+#define	FATIGUE_ABSORB_COST	1.0f
+// The share a full guard takes off an unblocked hit, and the ceiling on that
+// share once the defense multipliers are in. Blocking doubles defense, ground
+// and walking add more, so the cap is what stops any combination reaching a
+// clean nullification - part of every hit gets through whatever is raised.
+#define	GUARD_MITIGATION	0.5f
+#define	GUARD_MITIGATION_CAP	0.85f
+
 void PM_BurnPowerLevel(){
 	float percent;
-	int defense;
-	int burn,initial;
+	// float: it holds a multiplier, and rounding it makes the guard bonuses
+	// below no-ops
+	float defense;
+	float guard,mitigation;
+	float capacity;
+	int burn,initial,absorbed;
 	int newValue;
 	int burnType;
 	int limit;
@@ -434,17 +464,57 @@ void PM_BurnPowerLevel(){
 			burnType += 1;
 			continue;
 		}
-		defense = burnType == 1 ? pm->ps->stats[stDefenseMelee] : pm->ps->stats[stDefenseEnergy];
+		// stDefense* index baseStats, not stats
+		defense = burnType == 1 ? pm->ps->baseStats[stDefenseMelee] : pm->ps->baseStats[stDefenseEnergy];
 		defense = pm->ps->bitFlags & usingBlock ? defense * 2.0 : defense;
 		defense = pm->ps->bitFlags & usingBallFlip ? defense * 1.5 : defense;
 		defense = pm->ps->bitFlags & atopGround ? defense * 1.1 : defense;
 		defense = (pm->cmd.buttons & BUTTON_WALKING) && pm->ps->bitFlags & atopGround ? defense * 1.5 : defense;
 		initial = burn;
 		percent = 1.0 - ((float)pm->ps->powerLevel[plCurrent] / (float)pm->ps->powerLevel[plMaximum]);
-		burn -= (int)(((float)pm->ps->powerLevel[plFatigue] * 0.1) * defense);
-		if(burnType != 2){
+		if(percent > 1.0f){percent = 1.0f;}
+		else if(percent < 0.0f){percent = 0.0f;}
+		// A guard reduces a hit; it does not erase one. Mitigation is a share of
+		// what actually landed, scaled by how much guard is left, so a fresh
+		// guard softens a blow and a spent one barely slows it.
+		//
+		// The flat fatigue * 0.1 * defense this replaces was worth about 2000
+		// against a full guard, more than a melee hit carries, so every hit
+		// resolved to nothing: a standing fighter took no health damage for the
+		// first eighteen seconds of a fight and read as unhittable while its
+		// guard quietly paid for all of it.
+		guard = (float)pm->ps->powerLevel[plFatigue] / (float)pm->ps->powerLevel[plMaximum];
+		if(guard > 1.0f){guard = 1.0f;}
+		else if(guard < 0.0f){guard = 0.0f;}
+		mitigation = guard * defense * GUARD_MITIGATION;
+		if(mitigation > GUARD_MITIGATION_CAP){mitigation = GUARD_MITIGATION_CAP;}
+		absorbed = (int)((float)burn * mitigation);
+		burn -= absorbed;
+		// The guard is fatigue, so what it soaks comes out of it - mitigation is
+		// spent, never free, and a guard therefore weakens as it works. Paying
+		// through plUseFatigue rather than plFatigue directly carries the
+		// overdraft into health like every other cost, which is what a guard
+		// breaking under a hit too big for it looks like.
+		//
+		// The tier's defenseCapacity is the guard's endurance, not its strength:
+		// it divides what a point of fatigue costs to spend, never what a hit is
+		// reduced by. Unset (0) means the stock cost.
+		capacity = pm->ps->baseStats[stDefenseCapacity];
+		if(capacity <= 0){capacity = 1.0f;}
+		pm->ps->powerLevel[plUseFatigue] += (int)(absorbed * FATIGUE_ABSORB_COST / capacity);
+		// Only damage that survived the guard pays into the pools. A blocked
+		// hit leaves burn negative, and crediting that took the pools down
+		// past zero - the fighter was paying to be defended.
+		//
+		// Zenkai is banked, never granted. What a beating is worth to the
+		// ceiling goes in here with the rest and only becomes ceiling through a
+		// charge, at POWERLEVEL_POOL_PER_POINT a point. Adding it straight to
+		// plMaximum made growth instant, free and untouchable by any amount of
+		// charging, so standing still and being hit was the fastest way to get
+		// stronger.
+		if(burn > 0 && burnType != 2){
 			pm->ps->powerLevel[plHealthPool] += burn * 0.5;
-			pm->ps->powerLevel[plMaximumPool] += burn * 0.7;
+			pm->ps->powerLevel[plMaximumPool] += (burn * 0.7) + (initial * 0.7f * percent);
 		}
 		if(pm->ps->powerLevel[plHealthPool] > limit){pm->ps->powerLevel[plHealthPool] = limit;}
 		if(pm->ps->powerLevel[plMaximumPool] > limit){pm->ps->powerLevel[plMaximumPool] = limit;}
@@ -453,15 +523,6 @@ void PM_BurnPowerLevel(){
 			if(newValue > limit){newValue = limit;}
 			else if(newValue < 0){newValue = 0;}
 			pm->ps->powerLevel[plHealth] = newValue;
-			if(burnType != 2){
-				newValue = pm->ps->powerLevel[plMaximum] + (initial * 0.7f * percent);
-				if(newValue > pm->ps->powerLevel[plMaximum] * 1.25f){
-					newValue = pm->ps->powerLevel[plMaximum] * 1.25f;
-				}
-				if(newValue > limit){newValue = limit;}
-				else if(newValue < 0){newValue = 0;}
-				pm->ps->powerLevel[plMaximum] = newValue;
-			}
 		}
 		if(burnType == 0){pm->ps->powerLevel[plDamageFromEnergy] = 0;}
 		else if(burnType == 1){pm->ps->powerLevel[plDamageFromMelee] = 0;}
@@ -500,7 +561,8 @@ void PM_CheckStatus(void){
 
 			PM_StopMovement();
 			PM_StopFlight();
-			PM_WeaponRelease();
+			// The dead do not fire: a charge dies with its owner.
+			PM_WeaponDiscard();
 			PM_AddEvent(EV_DEATH);
 		}
 		else{
@@ -731,6 +793,32 @@ qboolean PM_CheckTransform(void){
 	}
 	return qfalse;
 }
+#define	POWERLEVEL_RECOVERY_DELAY	1000
+// Time out of the exchange that counts as being clear of it, and earns the full
+// recovery rate rather than the trickle. Longer than the delay above so a gap
+// between punches is not mistaken for having got away, but not by much: a
+// fighter being chased gets windows of one to two and a half seconds and almost
+// nothing longer, so a threshold above that is one no losing fighter ever meets.
+#define	POWERLEVEL_RECOVERY_CLEAR	1500
+// Share of a power-up tick that goes into healing out of the health pool. The
+// pool itself is the zenkai loop and stays as it is - damage banks it, a charge
+// spends it - this only decides how fast a charge can hand it back.
+#define	POWERLEVEL_HEAL_RATE		0.12f
+// Speed under which a fighter counts as resting. Flight is not on the lockout
+// list below and never will be - everyone flies constantly - so without this the
+// rest bonus paid out at three quarters of full speed and running away was the
+// most profitable thing in the game. Squared, to keep the test off the sqrt.
+#define	POWERLEVEL_REST_SPEED_SQR	(150.0f * 150.0f)
+// Pool spent per point of ceiling a limit break banks. The pool is the only way
+// a ceiling grows, so this price is the whole zenkai loop.
+#define	POWERLEVEL_POOL_PER_POINT	4
+// Ceiling points banked per 25ms conversion step, scaling the tier's own
+// breakLimitRate. Throughput has to fit inside one fatigue bar: the sustain
+// below prices a full bar at about eleven seconds of charge, and at this rate
+// those seconds convert a respawn's whole pool - slower, and a conversion can
+// never finish between exchanges, so a fighter stands in an aura forever.
+#define	POWERLEVEL_CONVERT_RATE		4
+
 void PM_CheckPowerLevel(void){
 	int plSpeed,amount,limit;
 	int *timers,*powerLevel;
@@ -738,46 +826,84 @@ void PM_CheckPowerLevel(void){
 	float statScale;
 	float fatigueScale;
 	float check;
-	float *fractionPool;
 	int pushLimit;
 	int newValue;
-	int idleScale;
+	int gained;
+	int heal;
+	// float, not int: this holds 2.8 and an int truncated it to 2, so the bonus
+	// was always a fifth smaller than every comment describing it.
+	float safeScale;
+	float recoveryDelay;
 	int smaller;
 	timers = pm->ps->timers;
 	powerLevel = pm->ps->powerLevel;
-	// Per player and on the wire, not a function static. One accumulator shared
-	// by every client the server runs pmove for lets them spend each other's
-	// charge, and a client copy that is never re-derived from the snapshot
-	// accumulates again on every prediction pass. buffers[] exists for this -
-	// see bfZanzokenCost - and costs nothing to extend: its delta mask is a
-	// fixed MAX_RBUFFERS bits wide however many entries are in use.
-	fractionPool = &pm->ps->buffers[bfBreakLimit];
 	timers[tmPowerAuto] += pml.msec;
 	limit = powerLevel[plLimit];
+	// Both pools are credited from half a dozen places - every melee branch
+	// pays the attacker, PM_BurnPowerLevel pays the target, G_UserWeaponDamage
+	// pays across the module boundary - and only one of them clamped. Doing it
+	// once a frame here covers all of them.
+	if(powerLevel[plHealthPool] > limit){powerLevel[plHealthPool] = limit;}
+	if(powerLevel[plMaximumPool] > limit){powerLevel[plMaximumPool] = limit;}
 	while(timers[tmPowerAuto] >= 100){
 		timers[tmPowerAuto] -= 100;
-		idleScale = (!pm->cmd.forwardmove && !pm->cmd.rightmove && !pm->cmd.upmove) ? 2.8 : 1;
+		// Recovery belongs to being out of the exchange, and the bonus rate on
+		// top of it belongs to actually resting there. Breaking off is movement,
+		// so the base rate has to survive it - a fighter that opened a thousand
+		// units of gap otherwise lost guard the whole way out and a guard once
+		// lost was the fight lost. But the bonus is what rest is worth, and
+		// paying it at flight speed made disengaging strictly better than
+		// stopping: flight itself costs nothing and is not on the lockout below,
+		// because everyone flies constantly and locking it out would end
+		// recovery altogether.
+		//
+		// The tier's defenseRecoveryDelay overrides the stock delay; 0 means
+		// unset. The clear threshold rides the same distance behind it as stock,
+		// so the full-rate bonus can never arrive before recovery itself does.
+		recoveryDelay = pm->ps->baseStats[stDefenseRecoveryDelay] > 0 ? pm->ps->baseStats[stDefenseRecoveryDelay] : POWERLEVEL_RECOVERY_DELAY;
+		safeScale = timers[tmSafe] >= recoveryDelay + (POWERLEVEL_RECOVERY_CLEAR - POWERLEVEL_RECOVERY_DELAY)
+			&& VectorLengthSquared(pm->ps->velocity) < POWERLEVEL_REST_SPEED_SQR ? 2.8f : 1.0f;
 		statScale = 1.0 - ((float)powerLevel[plCurrent] / (float)powerLevel[plMaximum]);
 		if(statScale > 0.75){statScale = 0.75;}
 		if(statScale < 0.25){statScale = 0.25;}
 		fatigueScale = (float)powerLevel[plFatigue] / (float)powerLevel[plMaximum];
-		recovery = (float)powerLevel[plMaximum] * 0.01 * idleScale;
+		recovery = (float)powerLevel[plMaximum] * 0.01 * safeScale;
 		recovery *=  statScale;
 		recovery *=  fatigueScale < 0.15 ? 0.15 : fatigueScale;
 		recovery *= pm->ps->baseStats[stFatigueRecovery];
+		// The guard is fatigue, so defenseRecovery is the tier's knob on how
+		// fast a spent guard comes back; it composes with fatigueRecovery.
+		// Unset (0) is neutral.
+		recovery *= pm->ps->baseStats[stDefenseRecovery] > 0 ? pm->ps->baseStats[stDefenseRecovery] : 1.0f;
 		if(recovery < 1){recovery = 1;}
+		// A raised guard is not rest. Blocking spends fatigue on every hit it
+		// soaks and refills none of it, so the guard only ever runs down while
+		// it is up - holding it buys time at a price instead of for free.
 		if(pm->ps->bitFlags & usingAlter || pm->ps->bitFlags & isStruggling || pm->ps->bitFlags & usingSoar
 		|| pm->ps->bitFlags & usingJump || pm->ps->bitFlags & usingBoost || pm->ps->bitFlags & usingZanzoken
+		|| pm->ps->bitFlags & usingBlock
 		|| pm->ps->bitFlags & isBreakingLimit || pm->ps->weaponstate >= WEAPON_GUIDING){recovery = 0;}
+		// Nobody recovers mid-exchange. tmSafe is the time since this fighter
+		// last dealt or took damage, so the delay is the price of breaking
+		// off: without that, fatigue refills faster than a fight can spend it
+		// and nothing that costs fatigue ever costs anything.
+		if(timers[tmSafe] < recoveryDelay){recovery = 0;}
 		/*if(powerLevel[plCurrent] > powerLevel[plFatigue]){
 			newValue = powerLevel[plCurrent] - (powerLevel[plMaximum] * 0.005);
 			powerLevel[plCurrent] = (powerLevel[plCurrent] - newValue >= 0) ? newValue : 0;
 		}*/
 		newValue = powerLevel[plCurrent] + powerLevel[plDrainCurrent];
 		if(newValue < powerLevel[plMaximum] && newValue > 0){powerLevel[plCurrent] = newValue;}
+		// A tier drain empties a resource; it never runs it into the negative.
+		// Goku's fifth tier drains 1250 fatigue a second against a recovery
+		// ceiling of 630, so an unclamped guard went below zero and stayed
+		// there - and light melee damage is fatigue * 0.013, so every hit that
+		// fighter threw healed its target and paid itself negative pools.
 		newValue = powerLevel[plFatigue] + powerLevel[plDrainFatigue];
+		if(newValue < 0){newValue = 0;}
 		if(newValue < powerLevel[plMaximum]){powerLevel[plFatigue] = newValue;}
 		newValue = powerLevel[plHealth] + powerLevel[plDrainHealth];
+		if(newValue < 0){newValue = 0;}
 		if(newValue < powerLevel[plMaximum]){powerLevel[plHealth] = newValue;}
 		newValue = powerLevel[plMaximum] + powerLevel[plDrainMaximum];
 		if(newValue < limit &&  newValue > 0){powerLevel[plMaximum] = newValue;}
@@ -837,13 +963,38 @@ void PM_CheckPowerLevel(void){
 				if(newValue > limit){newValue = limit;}
 				powerLevel[plCurrent] = newValue;
 				if(powerLevel[plCurrent] == powerLevel[plMaximum]){
+					// Refused, not overdrafted: every cost below lands on
+					// plUseFatigue, and PM_UsePowerLevel takes an unpayable
+					// fatigue bill out of health at 0.75 - a fighter holding the
+					// button on an empty bar would be burning its own health to
+					// stand in an aura. The bar covers the step or the step does
+					// not happen, the same terms the zanzoken floor sets.
+					if(powerLevel[plFatigue] < powerLevel[plUseFatigue] + raise){break;}
 					if(!(pm->ps->bitFlags & isBreakingLimit)){PM_AddEvent(EV_POWERINGUP_START);}
 					pm->ps->bitFlags |= isBreakingLimit;
-					*fractionPool += pm->ps->breakLimitRate;
-					pushLimit = powerLevel[plCurrent] + (int)*fractionPool;
+					// Whole points of ceiling, bought at
+					// POWERLEVEL_POOL_PER_POINT each. The pool is the only
+					// source, so what it cannot cover is simply not gained -
+					// the ceiling never moves for free.
+					pm->ps->buffers[bfBreakLimit] += pm->ps->breakLimitRate * POWERLEVEL_CONVERT_RATE;
+					gained = (int)pm->ps->buffers[bfBreakLimit];
+					pm->ps->buffers[bfBreakLimit] -= gained;
+					if(gained * POWERLEVEL_POOL_PER_POINT > powerLevel[plMaximumPool]){
+						gained = powerLevel[plMaximumPool] / POWERLEVEL_POOL_PER_POINT;
+					}
+					if(powerLevel[plMaximum] + gained > limit){gained = limit - powerLevel[plMaximum];}
+					if(gained < 0){gained = 0;}
+					pushLimit = powerLevel[plCurrent] + gained;
 					if(pushLimit > limit){pushLimit = limit;}
 					if((pm->ps->options & canOverheal) && powerLevel[plHealth] < powerLevel[plMaximum] && powerLevel[plHealthPool] > 0){
-						smaller = (powerLevel[plHealth] + raise * 0.3) < powerLevel[plMaximum] ? (raise * 0.3) : (powerLevel[plMaximum] - powerLevel[plHealth]);
+						// A charge hands the health pool back at
+						// POWERLEVEL_HEAL_RATE and no faster. At 0.3 it
+						// returned about 2200 health a second against damage
+						// arriving at 335, so a fighter undid a whole exchange
+						// in two seconds of aura and no beating ever stuck:
+						// sixty seconds of continuous fighting left both
+						// fighters above ninety percent.
+						smaller = (powerLevel[plHealth] + raise * POWERLEVEL_HEAL_RATE) < powerLevel[plMaximum] ? (raise * POWERLEVEL_HEAL_RATE) : (powerLevel[plMaximum] - powerLevel[plHealth]);
 						if(powerLevel[plHealthPool] > smaller){
 							powerLevel[plHealth] += smaller;
 							powerLevel[plUseFatigue] += smaller * 0.84;
@@ -856,16 +1007,27 @@ void PM_CheckPowerLevel(void){
 						}
 						if(powerLevel[plHealthPool] < 0){powerLevel[plHealthPool] = 0;}
 					}
-					if(powerLevel[plMaximumPool] > 0){
-						powerLevel[plHealth] += pushLimit - powerLevel[plMaximum];
+					// Holding the charge costs fatigue whether or not the
+					// ceiling moved. The pool buys the ceiling; it has never
+					// bought the effort of holding the charge that spends it,
+					// and waiving the cost for anyone carrying a pool balance
+					// made a limit break free for exactly the fighter who had
+					// just been beaten into affording one. A quarter of the
+					// raise, so a full bar sustains about eleven seconds of
+					// charge - enough, at POWERLEVEL_CONVERT_RATE, to finish a
+					// conversion it starts.
+					powerLevel[plUseFatigue] += raise * 0.25;
+					if(gained > 0){
+						// Health follows the ceiling up, but no faster than a
+						// charge heals - this is the same pool-fed heal as
+						// above and answers to the same throttle.
+						heal = raise * POWERLEVEL_HEAL_RATE;
+						if(heal > gained){heal = gained;}
+						powerLevel[plHealth] += heal;
 						powerLevel[plCurrent] = powerLevel[plMaximum] = pushLimit;
+						powerLevel[plMaximumPool] -= gained * POWERLEVEL_POOL_PER_POINT;
+						if(powerLevel[plMaximumPool] < 0){powerLevel[plMaximumPool] = 0;}
 					}
-					else{
-						powerLevel[plUseFatigue] += raise * 0.75;
-					}
-					powerLevel[plMaximumPool] -= raise * 0.3 * (int)*fractionPool;
-					if(powerLevel[plMaximumPool] < 0){powerLevel[plMaximumPool] = 0;}
-					*fractionPool -= (int)*fractionPool;
 				}
 				if(pm->ps->bitFlags & isBreakingLimit){
 					if(powerLevel[plCurrent] < ((float)powerLevel[plMaximum] * 0.95)){
@@ -1103,7 +1265,9 @@ float PM_CmdScale(usercmd_t *cmd){
 	if(pm->cmd.buttons & BUTTON_WALKING){totalSpeed = 1000;}
 	if(pm->ps->powerups[PW_DRIFTING] > 0){
 		totalSpeed = 1000;
-		if(pm->ps->lockedPlayer->timers[tmMeleeIdle] > 1500 && pm->ps->timers[tmMeleeIdle] > 1500){totalSpeed = 1500;}
+		// lockedPlayer is a server-side pointer that is never networked, so it is
+		// always NULL while the client predicts this move.
+		if(pm->ps->lockedPlayer && pm->ps->lockedPlayer->timers[tmMeleeIdle] > 1500 && pm->ps->timers[tmMeleeIdle] > 1500){totalSpeed = 1500;}
 	}
 	if(pm->ps->timers[tmMeleeIdle] < 0){totalSpeed = 4000;}
 	scale = (float)totalSpeed * max / (127.0 * total);
@@ -2360,12 +2524,30 @@ void PM_TorsoAnimation(void){
 /*=============================================*\
     Amazin' Melee (now with 99% more strategy!)
 \*=============================================*/
+// How close two locked fighters have to be for melee to resolve at all, and how
+// far apart they can drift before an exchange in progress ends.
+#define	MELEE_ENGAGE_RANGE		64
+// The range inside which jumping and footsteps stand down so ground movement
+// cannot interrupt an exchange. Deliberately tighter than MELEE_ENGAGE_RANGE:
+// the pair can drift out of this and still be fighting.
+#define	MELEE_SUPPRESS_RANGE	48
+// How long a power melee holds its target in knockback. Short enough that the
+// airbrake window PM_CheckKnockback offers is reachable for the whole of it -
+// a knockback nobody can answer is a lockout, not a hit.
+#define	POWER_MELEE_KNOCKBACK	2000
+
 void PM_StopMelee(void){
 	if(pm->ps->bitFlags & usingMelee || pm->ps->stats[stMeleeState]){
+		// Nothing an exchange imposed outlives the exchange. tmFreeze and
+		// tmMeleeBreakerWait are both costs of being in one, and a fighter left
+		// paying either after the melee is over stands still owing a debt to a
+		// fight that no longer exists.
 		pm->ps->stats[stMeleeState] = 0;
 		pm->ps->timers[tmMeleeCharge] = 0;
 		pm->ps->timers[tmMeleeIdle] = 0;
 		pm->ps->timers[tmMeleeBreaker] = 0;
+		pm->ps->timers[tmMeleeBreakerWait] = 0;
+		pm->ps->timers[tmFreeze] = 0;
 		pm->ps->bitFlags &= ~usingMelee;
 		PM_AddEvent(EV_STOPLOOPINGSOUND);
 		PM_EndDrift();
@@ -2374,14 +2556,22 @@ void PM_StopMelee(void){
 			pm->ps->lockedPlayer->timers[tmMeleeCharge] = 0;
 			pm->ps->lockedPlayer->timers[tmMeleeIdle] = 0;
 			pm->ps->lockedPlayer->timers[tmMeleeBreaker] = 0;
+			pm->ps->lockedPlayer->timers[tmMeleeBreakerWait] = 0;
+			pm->ps->lockedPlayer->timers[tmFreeze] = 0;
 			pm->ps->lockedPlayer->powerups[PW_DRIFTING] = 0;
 			pm->ps->lockedPlayer->bitFlags &= ~usingMelee;
 		}
 	}
 }
 void PM_CheckDrift(void){
+	int	state;
 	if(pm->ps->lockedPlayer){
-		if(!pm->ps->lockedPlayer->powerups[PW_DRIFTING] && pm->ps->stats[stMeleeState] & stMeleeUsingSpeed){
+		// Only a fighter actually pursuing takes the pursuer role, and these are
+		// the states PM_StopDrift keeps the drift alive for. melee_t is an
+		// ordinal enum, so this must be an equality test: a bitmask against
+		// stMeleeUsingSpeed matches every state numbered above it as well.
+		state = pm->ps->stats[stMeleeState];
+		if(!pm->ps->lockedPlayer->powerups[PW_DRIFTING] && (state == stMeleeStartAttack || state == stMeleeUsingSpeed)){
 			pm->ps->powerups[PW_DRIFTING] = 1;
 			pm->ps->lockedPlayer->powerups[PW_DRIFTING] = 2;
 		}
@@ -2398,7 +2588,7 @@ void PM_StopDrift(void){
 }
 void PM_SyncMelee(void){
 	if(pm->ps->lockedPlayer){
-		if(pm->ps->lockedPlayer->bitFlags & usingZanzoken || pm->ps->lockedPlayer->bitFlags & usingZanzoken){return;}
+		if(pm->ps->lockedPlayer->bitFlags & usingZanzoken || pm->ps->bitFlags & usingZanzoken){return;}
 		pm->ps->pm_flags |= PMF_ATTACK1_HELD;
 		pm->ps->pm_flags |= PMF_ATTACK2_HELD;
 		pm->ps->bitFlags |= usingMelee;
@@ -2409,15 +2599,34 @@ void PM_SyncMelee(void){
 		pm->ps->lockedPlayer->bitFlags |= usingMelee;
 		pm->ps->lockedPlayer->bitFlags |= usingFlight;
 		pm->ps->lockedPlayer->bitFlags &= ~isBlinking;
-		pm->ps->lockedPlayer->weaponstate = WEAPON_READY;
-		if(pm->ps->lockedPlayer->stats[stMeleeState] == 0){
-			pm->ps->lockedPlayer->pm_flags |= PMF_ATTACK1_HELD;
-			pm->ps->lockedPlayer->pm_flags |= PMF_ATTACK2_HELD;
+		// The opponent's weapon and buttons stay theirs. Their own pmove reaches
+		// the melee interrupt on its next frame and looses a ready charge there,
+		// and PMF_ATTACK*_HELD only means anything against the buttons its owner
+		// is actually holding.
+		// Facing the attacker is ours to impose only while the opponent is not
+		// already aiming at someone: their own lock outranks ours.
+		if(pm->ps->lockedPlayer->stats[stMeleeState] == 0 && pm->ps->lockedPlayer->lockedTarget == 0){
 			pm->ps->lockedPlayer->lockedTarget = pm->ps->clientNum + 1;
 			pm->ps->lockedPlayer->lockedPlayer = 0;
 		}
 	}
 }
+// How long a melee in which nothing happens survives before it dissolves.
+// Comfortably past the 1500 at which PM_MeleeIdle starts drifting two idle
+// fighters apart: drift separates them past the 64 units that ends a melee
+// cleanly, and PM_StopMelee ends the drift with it, so breaking on the same
+// threshold pre-empts the separation and leaves the pair where they stood.
+// This is the backstop for when drift cannot do it - pinned against geometry,
+// mostly - not the first thing to fire.
+#define	MELEE_IDLE_BREAK	3000
+// How long a landed stun holds the victim, and how much of the front of it is
+// the check window. The window has to close before the stun is worth having -
+// a stun that can be shaken at any point is a damage tick with extra steps -
+// and the attacker's own recovery equals the window, so the knockout can only
+// land on a victim that had its whole chance to check and spent it elsewhere.
+#define	MELEE_STUN_TIME		1500
+#define	MELEE_STUN_CHECK	600
+
 void PM_MeleeIdle(void){
 	pm->ps->timers[tmMeleeIdle] += pml.msec;
 	if(pm->ps->lockedPlayer){
@@ -2449,7 +2658,7 @@ void PM_Melee(void){
 			PM_StopMelee();
 			return;
 		}
-		if(pm->ps->lockedPlayer){
+		if(pm->ps->lockedPlayer && pm->ps->lockedPosition){
 			if(pm->ps->lockedPlayer->bitFlags & usingZanzoken){
 				PM_StopMelee();
 				return;
@@ -2465,8 +2674,16 @@ void PM_Melee(void){
 				PM_StopLockon();
 				return;
 			}
-			if(state != stMeleeIdle){pm->ps->timers[tmMeleeIdle] = 0;}
-			if(distance > 64 && pm->ps->bitFlags & usingMelee){PM_StopMelee();}
+			// A raised guard is idle too. Holding one is a state the melee never
+			// leaves on its own, so resetting the timer under it starved the
+			// only clock the exchange has and left a one-sided block holding
+			// both fighters in a melee neither was acting in.
+			if(state != stMeleeIdle && state != stMeleeUsingBlock){pm->ps->timers[tmMeleeIdle] = 0;}
+			if(distance > MELEE_ENGAGE_RANGE && pm->ps->bitFlags & usingMelee){PM_StopMelee();}
+			// The exchange ends when it stops being one. Distance, a zanzoken
+			// and a death were the only exits, and all three need someone to
+			// act - a blocked attacker that simply stops has none of them.
+			if(pm->ps->timers[tmMeleeIdle] > MELEE_IDLE_BREAK && pm->ps->bitFlags & usingMelee){PM_StopMelee();}
 		}
 	}
 	else{
@@ -2480,10 +2697,22 @@ void PM_Melee(void){
 		enemyState = pm->ps->lockedPlayer->stats[stMeleeState];
 		enemyDefense = enemyState == stMeleeUsingEvade || enemyState == stMeleeUsingBlock ? qtrue : qfalse;
 	}
+	// Stunned. Every verb is gone but the check: attack inside the front of the
+	// daze spends guard to shrug it off, and the freeze it clears is what the
+	// rest of the melee logic is gated on, so a checked fighter is acting again
+	// this same frame - while whoever landed the stun is still recovering.
+	if(state == stMeleeUsingStun && pm->ps->timers[tmFreeze] > 0){
+		if(pm->ps->timers[tmFreeze] > MELEE_STUN_TIME - MELEE_STUN_CHECK && pm->cmd.buttons & BUTTON_ATTACK){
+			PM_AddEvent(EV_MELEE_CHECK);
+			pm->ps->timers[tmFreeze] = 0;
+			pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
+			state = stMeleeIdle;
+		}
+	}
 	// ===================
 	// Melee Logic
 	// ===================
-	if(distance <= 64 && !pm->ps->timers[tmFreeze]){
+	if(distance <= MELEE_ENGAGE_RANGE && !pm->ps->timers[tmFreeze]){
 		// Preparation
 		PM_CheckDrift();
 		if(state != stMeleeStartAttack && state != stMeleeUsingSpeed){PM_StopDrift();}
@@ -2493,13 +2722,14 @@ void PM_Melee(void){
 			if(pm->ps->timers[tmMeleeBreakerWait] < 0){pm->ps->timers[tmMeleeBreakerWait] = 0;}
 		}
 		if(pm->ps->timers[tmMeleeBreaker]){
-			damage = (pm->ps->powerLevel[plCurrent] * 0.05) * pm->ps->stats[stMeleeAttack];
+			// stMeleeAttack indexes baseStats, not stats
+			damage = (pm->ps->powerLevel[plCurrent] * 0.05) * pm->ps->baseStats[stMeleeAttack];
 			if(pm->ps->timers[tmMeleeBreaker] > 0){
 				state = stMeleeUsingChargeBreaker;
 				if(enemyState == stMeleeUsingSpeed){
 					//PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);
 					pm->ps->timers[tmFreeze] = 950;
-					pm->ps->powerLevel[plUseFatigue] = damage;
+					pm->ps->powerLevel[plUseFatigue] += damage;
 					state = stMeleeIdle;
 				}
 				else if(pm->ps->lockedPlayer->timers[tmMeleeBreaker]){
@@ -2514,10 +2744,17 @@ void PM_Melee(void){
 					PM_EndDrift();
 					PM_AddEvent(EV_MELEE_BREAKER);
 					enemyState = stMeleeIdle;
-					pm->ps->timers[tmFreeze] = 100;
+					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
-					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = damage;
+					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+					if(pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] > POWERLEVEL_MAX){pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = POWERLEVEL_MAX;}
+					// Landing a hit is being in the exchange. Only g_usermissile
+					// set this, so tmSafe measured "since last took damage" for a
+					// fighter throwing punches and the mid-exchange recovery
+					// lockout bound the target alone - the aggressor recovered
+					// its guard while spending the other's.
+					pm->ps->states |= causedDamage;
 					pm->ps->lockedPlayer->timers[tmFreeze] = 500;
 					pm->ps->lockedPlayer->timers[tmMeleeCharge] = 0;
 				}
@@ -2544,19 +2781,47 @@ void PM_Melee(void){
 					enemyState = stMeleeIdle;
 					pm->ps->powerLevel[plHealthPool] += damage * 0.5;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.3;
-					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = damage;
-					pm->ps->timers[tmFreeze] = 100;
+					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+					if(pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] > POWERLEVEL_MAX){pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = POWERLEVEL_MAX;}
+					pm->ps->states |= causedDamage;
+					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->lockedPlayer->timers[tmFreeze] = 500;
 				}
 			}
 			pm->ps->timers[tmMeleeBreaker] = 0;
+		}
+		// Knockout - cashing in a stun the check window did not clear. Any
+		// offensive input consumes it, speed swings included, so a stunned
+		// fighter is one payoff and not a target to be wailed on for free.
+		else if(enemyState == stMeleeUsingStun && pm->ps->lockedPlayer->timers[tmFreeze] > 0 &&
+			(pm->cmd.buttons & BUTTON_ATTACK || pm->cmd.buttons & BUTTON_ALT_ATTACK || pm->cmd.forwardmove > 0)){
+			damage = (pm->ps->powerLevel[plCurrent] * 0.15) * pm->ps->baseStats[stMeleeAttack];
+			// stKnockbackPower indexes baseStats, not stats
+			pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] = (pm->ps->powerLevel[plCurrent] / 21.84) + pm->ps->baseStats[stKnockbackPower];
+			if(pm->ps->bitFlags & usingBoost){
+				damage *= 1.5;
+				pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] *= 1.8;
+			}
+			pm->ps->lockedPlayer->knockBackDirection = 5;
+			pm->ps->lockedPlayer->timers[tmKnockback] = POWER_MELEE_KNOCKBACK;
+			pm->ps->powerLevel[plHealthPool] += damage;
+			pm->ps->powerLevel[plMaximumPool] += damage * 0.8;
+			pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+			pm->ps->states |= causedDamage;
+			PM_AddEvent(EV_MELEE_KNOCKOUT);
+			state = stMeleeUsingPower;
+			enemyState = -1;
+			// The knockback replaces the daze: PM_StopMelee clears the victim's
+			// freeze with the rest of the exchange, and the commitment below has
+			// to follow it for the same reason the power melee's does.
+			PM_StopMelee();
+			pm->ps->timers[tmFreeze] = 1000;
 		}
 		// Power Melee / Charge Breaker
 		else if(state == stMeleeChargingPower || state == stMeleeStartPower || pm->cmd.buttons & BUTTON_ALT_ATTACK){
 			if((state == stMeleeChargingPower || state == stMeleeStartPower) && (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) || meleeCharge >= 550)){
 				if(meleeCharge >= 550){
 					damage = 0;
-					pm->ps->timers[tmFreeze] = 1000;
 					PM_EndDrift();
 					pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
 					if(pm->ps->lockedPlayer->timers[tmMeleeCharge] > 50){
@@ -2567,27 +2832,44 @@ void PM_Melee(void){
 						PM_StopMelee();
 					}
 					else if(enemyState != stMeleeUsingEvade){
-						damage = (pm->ps->powerLevel[plCurrent] * 0.15) * pm->ps->stats[stMeleeAttack];
+						damage = (pm->ps->powerLevel[plCurrent] * 0.15) * pm->ps->baseStats[stMeleeAttack];
 						if(enemyState == stMeleeUsingBlock){damage *= 0.3;}
 						if(state != stMeleeStartPower){PM_AddEvent(EV_MELEE_KNOCKBACK);}
 					}
 					else{
-						pm->ps->powerLevel[plUseFatigue] = damage * 0.8;
-						pm->ps->lockedPlayer->powerLevel[plUseFatigue] = damage * 0.4;
+						// An evaded heavy is still a heavy that was thrown. Both
+						// fighters pay for it - the swing and the dodge - out of the
+						// damage the swing would have done, which is what the split
+						// is a fraction of. The hit itself lands on nothing, so the
+						// damage banked below stays zero.
+						damage = (pm->ps->powerLevel[plCurrent] * 0.15) * pm->ps->baseStats[stMeleeAttack];
+						pm->ps->powerLevel[plUseFatigue] += damage * 0.8;
+						pm->ps->lockedPlayer->powerLevel[plUseFatigue] += damage * 0.4;
+						damage = 0;
 					}
 					if(enemyState != stMeleeUsingBlock && enemyState != stMeleeUsingEvade){
-						pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] = (pm->ps->powerLevel[plCurrent] / 21.84) + pm->ps->stats[stKnockbackPower];
+						// stKnockbackPower indexes baseStats, not stats.
+						// knockbackIntensity scales the whole launch where
+						// knockbackPower only adds to it; unset (0) is neutral.
+					pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] = ((pm->ps->powerLevel[plCurrent] / 21.84) + pm->ps->baseStats[stKnockbackPower])
+						* (pm->ps->baseStats[stKnockbackIntensity] > 0 ? pm->ps->baseStats[stKnockbackIntensity] : 1.0f);
 						if(pm->ps->lockedPlayer->timers[tmKnockback]){pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] *= 2;}
 						if(pm->ps->bitFlags & usingBoost){
 							damage *= 1.5;
 							pm->ps->lockedPlayer->powerups[PW_KNOCKBACK_SPEED] *= 1.8;
 						}
-						pm->ps->lockedPlayer->timers[tmKnockback] = 5000;
+						pm->ps->lockedPlayer->timers[tmKnockback] = POWER_MELEE_KNOCKBACK;
 						PM_StopMelee();
 					}
+					// Applied after the exchange, not before it: PM_StopMelee above
+					// clears tmFreeze along with the rest of an exchange's state, so
+					// a commitment set ahead of it would be thrown away.
+					pm->ps->timers[tmFreeze] = 1000;
 					pm->ps->powerLevel[plHealthPool] += damage;
 					pm->ps->powerLevel[plMaximumPool] += damage * 0.8;
 					pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+					if(pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] > POWERLEVEL_MAX){pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = POWERLEVEL_MAX;}
+					pm->ps->states |= causedDamage;
 					state = stMeleeUsingPower;
 					meleeCharge = 0;
 				}
@@ -2614,7 +2896,52 @@ void PM_Melee(void){
 		// Stun Melee / Speed Breaker
 		else if(state == stMeleeChargingStun || pm->cmd.buttons & BUTTON_ATTACK){
 			if(state == stMeleeChargingStun && (!(pm->cmd.buttons & BUTTON_ATTACK) ||  meleeCharge >= 1000)){
-				if(!pm->ps->timers[tmMeleeBreakerWait]){
+				// A full charge is the stun; anything released short of it stays
+				// the speed breaker. The two prices are the same shape as the
+				// power melee's: the swing costs 5% of the ceiling whatever
+				// happens, and a read - the enemy winding up, or sidestepping -
+				// turns the whole second of charging into the loss.
+				if(meleeCharge >= 1000){
+					meleeCharge = 0;
+					PM_EndDrift();
+					pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
+					if(pm->ps->lockedPlayer->timers[tmMeleeCharge] > 50){
+						pm->ps->timers[tmMeleeIdle] = -480;
+						pm->ps->lockedPlayer->timers[tmMeleeIdle] = -480;
+						PM_AddEvent(EV_MELEE_KNOCKBACK);
+						// After PM_StopMelee, which clears tmFreeze for both.
+						PM_StopMelee();
+						pm->ps->timers[tmFreeze] = 1000;
+					}
+					else if(enemyState == stMeleeUsingEvade){
+						pm->ps->timers[tmFreeze] = 1000;
+						pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.05;
+						PM_AddEvent(EV_MELEE_MISS);
+					}
+					else{
+						// Lands through a raised guard - cracking one is what
+						// the long charge buys, and every other melee is already
+						// answered by blocking - though the guard still soaks
+						// half the blow on its way in.
+						damage = (pm->ps->powerLevel[plCurrent] * 0.10) * pm->ps->baseStats[stMeleeAttack];
+						if(enemyState == stMeleeUsingBlock){damage *= 0.5;}
+						pm->ps->timers[tmFreeze] = MELEE_STUN_CHECK;
+						pm->ps->powerLevel[plHealthPool] += damage;
+						pm->ps->powerLevel[plMaximumPool] += damage * 0.8;
+						pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+						// The blow chips the guard the same way a landed speed
+						// hit does - a stun that costs no guard leaves blocking
+						// strictly worse than being hit.
+						pm->ps->lockedPlayer->powerLevel[plUseFatigue] += damage;
+						pm->ps->states |= causedDamage;
+						PM_AddEvent(EV_MELEE_STUN);
+						enemyState = stMeleeUsingStun;
+						pm->ps->lockedPlayer->timers[tmFreeze] = MELEE_STUN_TIME;
+						pm->ps->lockedPlayer->timers[tmMeleeCharge] = 0;
+						state = stMeleeIdle;
+					}
+				}
+				else if(!pm->ps->timers[tmMeleeBreakerWait]){
 					pm->ps->timers[tmMeleeBreaker] = -1;
 					pm->ps->timers[tmMeleeBreakerWait] = 500;
 					pm->ps->stats[stAnimState] = (Q_random(&realRandom.tm_sec) * 5)+1;
@@ -2650,7 +2977,7 @@ void PM_Melee(void){
 						pm->ps->lockedPlayer->powerups[PW_DRIFTING] = 2;
 						enemyState = stMeleeStartDodge;
 						PM_AddEvent(EV_MELEE_BREAKER);
-						pm->ps->powerLevel[plUseFatigue] = pm->ps->powerLevel[plMaximum] * 0.10;
+						pm->ps->powerLevel[plUseFatigue] += pm->ps->powerLevel[plMaximum] * 0.10;
 					}
 					else{
 						if(pm->ps->lockedPlayer->timers[tmKnockback]){
@@ -2680,6 +3007,17 @@ void PM_Melee(void){
 								state = stMeleeUsingSpeed;
 							}
 							else{
+								// A knockback costs the fighter throwing it too.
+								// Freezing only the victim hands the attacker two
+								// and a half seconds of sole initiative, and
+								// initiative is what decides who attacks next, so
+								// whoever lands one of these goes on landing them
+								// - measured as one fighter opening every
+								// exchange in a ninety second duel and the other
+								// opening none. The victim still comes off worse,
+								// which is what a knockback is; 1000 is what the
+								// other heavy paths here already commit.
+								pm->ps->timers[tmFreeze] = 1000;
 								pm->ps->lockedPlayer->timers[tmFreeze] = 2500;
 								enemyState = stMeleeStartHit;
 								PM_AddEvent(EV_MELEE_KNOCKBACK);
@@ -2689,7 +3027,7 @@ void PM_Melee(void){
 				}
 				// Speed Melee
 				else{
-					damage = (pm->ps->powerLevel[plFatigue] * 0.013) * pm->ps->stats[stMeleeAttack];
+					damage = (pm->ps->powerLevel[plFatigue] * 0.013) * pm->ps->baseStats[stMeleeAttack];
 					if(pm->ps->powerups[PW_DRIFTING]==1){damage *= 1.2;}
 					if(pm->ps->bitFlags & usingBoost){damage *= 1.5;}
 					pm->ps->timers[tmMeleeSpeed] += pml.msec;
@@ -2703,6 +3041,15 @@ void PM_Melee(void){
 							pm->ps->powerLevel[plHealthPool] += damage * 0.7;
 							pm->ps->powerLevel[plMaximumPool] += damage * 0.5;
 							pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] += damage;
+							if(pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] > POWERLEVEL_MAX){pm->ps->lockedPlayer->powerLevel[plDamageFromMelee] = POWERLEVEL_MAX;}
+							pm->ps->states |= causedDamage;
+							// A landed hit costs the target guard whether or not
+							// it gets through it. Fatigue is what
+							// PM_BurnPowerLevel measures incoming damage
+							// against, so without this the guard is a wall
+							// pressure can never wear down and light melee is
+							// worthless for as long as its target stands there.
+							pm->ps->lockedPlayer->powerLevel[plUseFatigue] += damage;
 						}
 						else{
 							pm->ps->lockedPlayer->powerLevel[plUseFatigue] += damage;
@@ -2775,13 +3122,17 @@ void PM_Melee(void){
 				if(state == stMeleeStartPower){animation = ANIM_BREAKER_MELEE_HIT1;}
 			}
 		}
+		// stMeleeUsingStun marks the fighter that is stunned, not the one that
+		// swung: the swing resolves in a frame while the daze lasts, so the
+		// lasting state has to live on the victim for the AI, the fight report
+		// and the knockout gate to read. The stunner only holds the
+		// follow-through pose while it has nothing else going.
 		if(state == stMeleeUsingStun  || enemyState == stMeleeUsingStun){
 			if(state == stMeleeUsingStun){
-				animation = ANIM_POWER_MELEE_3_HIT;
+				animation = ANIM_STUNNED_MELEE;
 			}
-			else{
-				if(state == stMeleeUsingBlock){animation = ANIM_BLOCK;}
-				else{animation = ANIM_STUNNED_MELEE;}
+			else if(state == stMeleeIdle || state == stMeleeInactive){
+				animation = ANIM_POWER_MELEE_3_HIT;
 			}
 		}
 		if(state == stMeleeChargingPower){
@@ -2827,7 +3178,7 @@ void PM_Melee(void){
 	}
 	pm->ps->stats[stMeleeState] = state;
 	pm->ps->timers[tmMeleeCharge] = meleeCharge;
-	if(distance <= 64){pm->cmd.rightmove = 0;}
+	if(distance <= MELEE_ENGAGE_RANGE){pm->cmd.rightmove = 0;}
 }
 
 /*
@@ -2873,15 +3224,96 @@ void PM_CheckWeaponSelectionMode(void)
 	if(weaponIndex == 16){pm->cmd.weapon = originalWeaponIndex;}
 }
 
-void PM_WeaponRelease(void){
+/*==============
+PM_FireCharge
+Looses a charge that has reached its ready threshold, and reports whether it
+did. The costs of a windup are debited per percent as it runs and are never
+refunded, so a charge past the threshold has to resolve as a shot no matter
+what ended it - the shot is the thing that was paid for.
+'guidable' is false when an interrupt ended the charge: a fighter taking a hit
+is in no position to steer, so the shot leaves on its own rather than entering
+a guiding state the interrupt would tear down again on the next frame.
+The charge percentage is deliberately left standing; the server sizes the shot
+from it when it handles the fire event, and clears it there.
+==============*/
+static qboolean PM_FireCharge(qboolean guidable){
+	int	*weaponInfo;
+	int	*alt_weaponInfo;
+
+	weaponInfo = pm->ps->currentSkill;
+	if(weaponInfo[WPSTAT_NUMCHECK] != pm->ps->weapon){return qfalse;}
+	if(weaponInfo[WPSTAT_BITFLAGS] & WPF_ALTWEAPONPRESENT){
+		alt_weaponInfo = &weaponInfo[WPSTAT_ALT_POWER];
+	} else{
+		alt_weaponInfo = weaponInfo;
+	}
+	if(pm->ps->weaponstate == WEAPON_CHARGING){
+		if(!(weaponInfo[WPSTAT_BITFLAGS] & WPF_READY)){return qfalse;}
+		weaponInfo[WPSTAT_BITFLAGS] &= ~WPF_READY;
+		pm->ps->timers[tmAttack1] = 0;
+		if(guidable && weaponInfo[WPSTAT_BITFLAGS] & WPF_GUIDED){
+			pm->ps->weaponstate = WEAPON_GUIDING;
+			pm->ps->bitFlags |= isGuiding;
+		} else{
+			pm->ps->weaponstate = WEAPON_COOLING;
+			pm->ps->weaponTime += weaponInfo[WPSTAT_COOLTIME];
+		}
+		PM_AddEvent(EV_FIRE_WEAPON);
+		PM_StartTorsoAnim(ANIM_KI_ATTACK1_FIRE + (pm->ps->weapon - 1) * 2 );
+		return qtrue;
+	}
+	if(pm->ps->weaponstate == WEAPON_ALTCHARGING){
+		if(!(alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_READY)){return qfalse;}
+		alt_weaponInfo[WPSTAT_BITFLAGS] &= ~WPF_READY;
+		pm->ps->timers[tmAttack2] = 0;
+		if(guidable && alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_GUIDED){
+			pm->ps->weaponstate = WEAPON_ALTGUIDING;
+			pm->ps->bitFlags |= isGuiding;
+		} else{
+			pm->ps->weaponstate = WEAPON_COOLING;
+			pm->ps->weaponTime += alt_weaponInfo[WPSTAT_COOLTIME];
+		}
+		PM_AddEvent(EV_ALTFIRE_WEAPON);
+		PM_StartTorsoAnim(ANIM_KI_ATTACK1_ALT_FIRE + (pm->ps->weapon - 1) * 2 );
+		return qtrue;
+	}
+	return qfalse;
+}
+
+/*==============
+PM_WeaponDiscard
+Throws away whatever the weapon was doing, charge included. Only the states
+that have no shot left to give use this - death, and a windup that never
+reached its ready threshold.
+==============*/
+void PM_WeaponDiscard(void){
 	if(pm->ps->bitFlags & isStruggling){return;}
 	if(pm->ps->bitFlags & isGuiding){
 		PM_AddEvent(EV_DETONATE_WEAPON);
 		pm->ps->bitFlags &= ~isGuiding;
 	}
+	// A charge only exists while it is being wound up. Zeroing outside that
+	// would eat the percentage a fire event queued earlier this frame has not
+	// been sized from yet.
+	if(pm->ps->weaponstate == WEAPON_CHARGING || pm->ps->weaponstate == WEAPON_ALTCHARGING){
+		pm->ps->stats[stChargePercentPrimary] = 0;
+		pm->ps->stats[stChargePercentSecondary] = 0;
+	}
 	pm->ps->weaponstate = WEAPON_READY;
-	pm->ps->stats[stChargePercentPrimary] = 0;
-	pm->ps->stats[stChargePercentSecondary] = 0;
+}
+
+/*==============
+PM_WeaponRelease
+Ends the weapon for everything that interrupts a fighter - knockback, melee,
+a transform, the start of a soar. A charge past its ready threshold fires; the
+investment resolves as a shot that may well be badly aimed, rather than
+evaporating. Below the threshold it is still lost, which is the risk the
+windup carries.
+==============*/
+void PM_WeaponRelease(void){
+	if(pm->ps->bitFlags & isStruggling){return;}
+	if(PM_FireCharge(qfalse)){return;}
+	PM_WeaponDiscard();
 }
 void PM_Weapon(void){
 	int	*weaponInfo;
@@ -2957,6 +3389,10 @@ void PM_Weapon(void){
 		if(pm->ps->weapon == pm->cmd.weapon){
 			if(pm->cmd.buttons & BUTTON_ATTACK) {
 				if(weaponInfo[WPSTAT_BITFLAGS] & WPF_NEEDSCHARGE){
+					// A windup starts from nothing. Owning that here rather than in
+					// whatever ended the last one keeps a percentage a fired shot has
+					// not been sized from yet out of the teardown's way.
+					pm->ps->stats[stChargePercentPrimary] = 0;
 					pm->ps->weaponstate = WEAPON_CHARGING;
 					PM_StartTorsoAnim(ANIM_KI_ATTACK1_PREPARE + (pm->ps->weapon - 1) * 2 );
 					break;
@@ -2976,6 +3412,7 @@ void PM_Weapon(void){
 			}
 			if(pm->cmd.buttons & BUTTON_ALT_ATTACK){
 				if(alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_NEEDSCHARGE){
+					pm->ps->stats[stChargePercentSecondary] = 0;
 					pm->ps->weaponstate = WEAPON_ALTCHARGING;
 					PM_StartTorsoAnim(ANIM_KI_ATTACK1_ALT_PREPARE + (pm->ps->weapon - 1) * 2 );
 					break;
@@ -3040,19 +3477,8 @@ void PM_Weapon(void){
 		}
 		if(!(pm->cmd.buttons & BUTTON_ATTACK)) {
 			pm->ps->timers[tmAttack1] = 0;
-			if(weaponInfo[WPSTAT_BITFLAGS] & WPF_READY){
-				weaponInfo[WPSTAT_BITFLAGS] &= ~WPF_READY;
-				if(weaponInfo[WPSTAT_BITFLAGS] & WPF_GUIDED){
-					pm->ps->weaponstate = WEAPON_GUIDING;
-					pm->ps->bitFlags |= isGuiding;
-				} else{
-					pm->ps->weaponstate = WEAPON_COOLING;
-					pm->ps->weaponTime += weaponInfo[WPSTAT_COOLTIME];
-				}
-				PM_AddEvent(EV_FIRE_WEAPON);
-				PM_StartTorsoAnim(ANIM_KI_ATTACK1_FIRE + (pm->ps->weapon - 1) * 2 );
-			}
-			else{
+			// Letting go on purpose is the one release that gets to guide.
+			if(!PM_FireCharge(qtrue)){
 				pm->ps->weaponTime = 0;
 				pm->ps->weaponstate = WEAPON_READY;
 				pm->ps->stats[stChargePercentPrimary] = 0;
@@ -3063,37 +3489,30 @@ void PM_Weapon(void){
 	case WEAPON_ALTCHARGING:
 		chargeRate = (pm->ps->bitFlags & usingBoost) ? 2 : 1;
 		pm->ps->timers[tmAttack2] += pml.msec;
-		pm->ps->timers[tmImpede] = weaponInfo[WPSTAT_ALT_RESTRICT_MOVEMENT];
-		pm->ps->attackPower = weaponInfo[WPSTAT_ALT_POWER] * ((float)pm->ps->stats[stChargePercentSecondary] / 100.0f) * powerScale;
-		if(pm->ps->timers[tmAttack2] >= weaponInfo[WPSTAT_ALT_CHRGTIME]){
-			pm->ps->timers[tmAttack2] -= weaponInfo[WPSTAT_ALT_CHRGTIME];
+		// alt_weaponInfo is the altfire's own base, and falls back to the primary
+		// set when a skill has no altfire. Reaching the alt fields off the primary
+		// base lands on the same words only while an altfire exists.
+		pm->ps->timers[tmImpede] = alt_weaponInfo[WPSTAT_RESTRICT_MOVEMENT];
+		pm->ps->attackPower = alt_weaponInfo[WPSTAT_POWER] * ((float)pm->ps->stats[stChargePercentSecondary] / 100.0f) * powerScale;
+		if(pm->ps->timers[tmAttack2] >= alt_weaponInfo[WPSTAT_CHRGTIME]){
+			pm->ps->timers[tmAttack2] -= alt_weaponInfo[WPSTAT_CHRGTIME];
 			if(pm->ps->stats[stChargePercentSecondary] < 100){
-				if(pm->ps->stats[stChargePercentPrimary] == 0 && pm->ps->bitFlags & usingBoost){
-					pm->ps->stats[stChargePercentPrimary] = 25;
-					costSecondary *= 25;
+				if(pm->ps->stats[stChargePercentSecondary] == 0 && pm->ps->bitFlags & usingBoost){
+					pm->ps->stats[stChargePercentSecondary] = 25;
+					costSecondary *= 40;
 				}
 				pm->ps->stats[stChargePercentSecondary] += chargeRate;
 				if(pm->ps->stats[stChargePercentSecondary] > 100){
 					pm->ps->stats[stChargePercentSecondary] = 100;
 				}
 				pm->ps->powerLevel[plUseFatigue] += costSecondary * pm->ps->baseStats[stEnergyAttackCost] * energyScale;
-				pm->ps->powerLevel[plUseHealth] += weaponInfo[WPSTAT_ALT_HEALTHCOST] * ((float)pm->ps->powerLevel[plMaximum] * 0.0001);
-				pm->ps->powerLevel[plUseMaximum] += weaponInfo[WPSTAT_ALT_MAXIMUMCOST] * ((float)pm->ps->powerLevel[plMaximum] * 0.0001);
+				pm->ps->powerLevel[plUseHealth] += alt_weaponInfo[WPSTAT_HEALTHCOST] * ((float)pm->ps->powerLevel[plMaximum] * 0.0001);
+				pm->ps->powerLevel[plUseMaximum] += alt_weaponInfo[WPSTAT_MAXIMUMCOST] * ((float)pm->ps->powerLevel[plMaximum] * 0.0001);
 			}
 		}
 		if(!(pm->cmd.buttons & BUTTON_ALT_ATTACK)) {
-			if(alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_READY){
-				alt_weaponInfo[WPSTAT_BITFLAGS] &= ~WPF_READY;
-				if(alt_weaponInfo[WPSTAT_BITFLAGS] & WPF_GUIDED){
-					pm->ps->weaponstate = WEAPON_ALTGUIDING;
-					pm->ps->bitFlags |= isGuiding;
-				} else{
-					pm->ps->weaponstate = WEAPON_COOLING;
-					pm->ps->weaponTime += alt_weaponInfo[WPSTAT_COOLTIME];
-				}
-				PM_AddEvent(EV_ALTFIRE_WEAPON );
-				PM_StartTorsoAnim(ANIM_KI_ATTACK1_ALT_FIRE + (pm->ps->weapon - 1) * 2 );
-			} else{
+			// Letting go on purpose is the one release that gets to guide.
+			if(!PM_FireCharge(qtrue)){
 				pm->ps->weaponTime = 0;
 				pm->ps->weaponstate = WEAPON_READY;
 				pm->ps->stats[stChargePercentSecondary] = 0;
@@ -3109,7 +3528,10 @@ void PM_Weapon(void){
 			break;
 		}
 		pm->ps->weaponTime += pml.msec;
+		// Continuous fire bills fatigue per whole 100ms held; the leftover carries
+		// into the next frame, so every step has to be taken out of weaponTime.
 		while(pm->ps->weaponTime > 100){
+			pm->ps->weaponTime -= 100;
 			pm->ps->powerLevel[plUseFatigue] += costPrimary * pm->ps->baseStats[stEnergyAttackCost] * energyScale;
 		}
 		break;
@@ -3121,7 +3543,10 @@ void PM_Weapon(void){
 			break;
 		}
 		pm->ps->weaponTime += pml.msec;
+		// Continuous fire bills fatigue per whole 100ms held; the leftover carries
+		// into the next frame, so every step has to be taken out of weaponTime.
 		while(pm->ps->weaponTime > 100){
+			pm->ps->weaponTime -= 100;
 			pm->ps->powerLevel[plUseFatigue] += costSecondary * pm->ps->baseStats[stEnergyAttackCost] * energyScale;
 		}
 		break;
@@ -3134,7 +3559,9 @@ PM_CheckLockon
 ================*/
 void PM_StopLockon(void){
 	if(pm->ps->lockedTarget>0){
-		pm->ps->lockedPlayer->bitFlags &= ~isTargeted;
+		// A lock can name a weapon instead of a player, and the pointer is never
+		// networked, so it is NULL for the whole of the client's prediction.
+		if(pm->ps->lockedPlayer){pm->ps->lockedPlayer->bitFlags &= ~isTargeted;}
 		PM_AddEvent(EV_LOCKON_END);
 	}
 	pm->ps->lockedPosition = NULL;
@@ -3309,7 +3736,10 @@ void PM_UpdateViewAngles(playerState_t *ps, const usercmd_t *cmd){
 		pml.gravityNormal[2] = 1;
 	}
 	VectorScale(pml.gravityNormal,pm->ps->gravity[2],pml.gravityDirection);
-	if((pm->ps->lockedTarget > 0) && !(pm->ps->bitFlags & usingAlter) && *ps->lockedPosition){
+	// Test lockedPosition, don't dereference it: lockedTarget is set on its own
+	// by PM_Melee and by the network, while the pointer is filled in later by
+	// LockonCheck, so a frame with a target and no position is legal.
+	if((pm->ps->lockedTarget > 0) && !(pm->ps->bitFlags & usingAlter) && ps->lockedPosition){
 		vec3_t dir;
 		vec3_t angles;
 		VectorSubtract(*(ps->lockedPosition),ps->origin,dir);
@@ -3454,8 +3884,8 @@ void PmoveSingle(pmove_t *pmove){
 	if(pm->cmd.buttons != 0 && pm->cmd.buttons != 2048){
 		//Com_Printf("%i\n",pm->cmd.buttons);
 	}
-	if(pm->ps->lockedTarget > 0){
-		meleeRange = Distance(pm->ps->origin,*(pm->ps->lockedPosition)) <= 48 ? qtrue : qfalse;
+	if(pm->ps->lockedTarget > 0 && pm->ps->lockedPosition){
+		meleeRange = Distance(pm->ps->origin,*(pm->ps->lockedPosition)) <= MELEE_SUPPRESS_RANGE ? qtrue : qfalse;
 	}
 	if(!(pm->ps->bitFlags & isTransforming)){
 		PM_UsePowerLevel();
@@ -3469,8 +3899,13 @@ void PmoveSingle(pmove_t *pmove){
 			PM_CheckLockon();
 			PM_CheckZanzoken();
 			PM_CheckBlink();
+			// Not gated on meleeRange the way jump and footsteps are. This is
+			// the only thing that reads the block button, so skipping it inside
+			// 48 units latches usingBlock at whatever it held on the way in: a
+			// guard that cannot be raised against an exchange already underway
+			// and, once raised, cannot be lowered until the exchange ends.
+			PM_CheckBlock();
 			if(!meleeRange){
-				PM_CheckBlock();
 				PM_CheckJump();
 				PM_Footsteps();
 			}
@@ -3497,11 +3932,18 @@ void PmoveSingle(pmove_t *pmove){
 		int state;
 		PM_Melee();
 		state = pm->ps->stats[stMeleeState];
-		if(state != stMeleeUsingPower || state != stMeleeUsingStun){
+		// Aim and weapon handling stand down while a heavy is landing. Both terms
+		// have to hold for them to run, or the test is true of every state and
+		// suppresses nothing.
+		if(state != stMeleeUsingPower && state != stMeleeUsingStun){
 			PM_UpdateViewAngles(pm->ps,&pm->cmd);
 			PM_Weapon();
 		}
 	}
+	// Knockback takes away the ability to act, never the ability to look. The
+	// trajectory is PM_CheckKnockback's, driven from knockBackDirection, so the
+	// camera is free while the fighter is not.
+	else{PM_UpdateViewAngles(pm->ps,&pm->cmd);}
 	if(pm->ps->pm_type == PM_SPECTATOR){
 		PM_FlyMove();
 	}

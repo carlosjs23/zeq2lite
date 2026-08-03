@@ -251,7 +251,10 @@ PROTOCOL
 ==============================================================
 */
 
-#define	PROTOCOL_VERSION	71
+// 72 widened powerLevel[] and the two attackPower entity fields to 32 bits.
+// A 71 peer parses those deltas at the old width and desyncs silently, so the
+// version has to move with them for the handshake to reject it instead.
+#define	PROTOCOL_VERSION	72
 #define PROTOCOL_LEGACY_VERSION	68
 // 1.31 - 67
 

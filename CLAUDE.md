@@ -42,8 +42,9 @@ from another checkout since `.d` files hold absolute paths.
 
 `Tools/dev/` holds the whole dev loop — `zeq2run.sh` (soak a map for N seconds),
 `zeq2smoke.sh` and `zeq2test.sh` (gates), `zeq2shot.sh` (screenshot a settled
-frame without Screen Recording permission), `zeq2linux.sh` (Linux build and
-tests in a container), `zeq2sanitize.sh`, `zeq2audit.sh`.
+frame without Screen Recording permission), `zeq2duel.sh` (two AI fighters plus
+`g_debugFight`), `zeq2linux.sh` (Linux build and tests in a container),
+`zeq2sanitize.sh`, `zeq2audit.sh`.
 **Read `Tools/dev/README.md` before using them**; it documents the sanitizer
 flags that must not be dropped and how to read the output. `tests/README.md`
 covers the unit-test layout, the stub/fake seams, and the lint rationale.
@@ -82,6 +83,14 @@ Three layers, and knowing which one you are in determines what you can call:
   `Tools/dev/zeq2linux.sh`. The bytecode has no libc: its maths are engine
   syscalls listed in `g_syscalls.asm` (there is `atan2` and no `atan`), and the
   rest of the C library is `bg_lib.c`.
+
+  `Game/Game/g_dummy.c` and `g_ai.c` are training scaffolding, not shipped
+  gameplay: game-module-owned client slots the engine is never told about
+  (their `client_t` stays `CS_FREE`), allocated from the top of the array
+  downwards so they cannot collide with real connections handed out bottom-up.
+  Everything they do goes in through a usercmd, so there is no path here a
+  player does not also take. `dummy`, `ai` and `dummyclear` are cheat-gated,
+  so the map must be started with `devmap`.
 
 Two boundaries carry most of the porting risk:
 
@@ -147,9 +156,10 @@ headers in `Engine/SDL12/include` must stay off the include path there, because
 `Engine/sdl/*.c` are SDL2 sources. Windows/mingw still links SDL 1.2 and is
 genuinely unported.
 
-**The protocol is stock 71**, so this tree stays wire-compatible with unmodified
-ZEQ2-Lite clients, servers and demos. The gameplay work on `combat-and-ai`
-widens `powerLevel[]` on the wire and moves to 72; keep that off this branch.
+**The protocol is 72, not the stock 71 that `master` keeps.** `powerLevel[]` and
+the two `attackPower` entity fields travel at 32 bits rather than 16. Peers and
+QVMs must be rebuilt together, and demos recorded under the old encoding will
+not replay - which is why this stays off `master`.
 
 **`Sys_SigHandler` catches the fault signals**, so a stack-protector abort, a
 sanitizer abort or a segfault surfaces only as `=== fatal signal, exiting ===`

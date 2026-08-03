@@ -23,6 +23,87 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_combat.c
 
 #include "g_local.h"
+
+// How long an attacker stays on the hook for a death. Long enough that the hit
+// that started a fall still counts, short enough that a fighter who broke off
+// a minute ago is not credited with someone else's kill.
+#define	KILL_CREDIT_WINDOW	10000
+// Share of the dead fighter's ceiling that goes into each of the killer's pools.
+// The pools are what growth is bought with, so this is what a kill is worth:
+// against a 20000 ceiling, 2500 into each - roughly two solid exchanges' worth
+// of zenkai, arriving all at once for finishing the job.
+#define	KILL_POOL_SHARE		8
+
+/*
+==============
+G_RecordAttacker
+
+Notes who last damaged a client, for the kill credit paid out on their death.
+==============
+*/
+void G_RecordAttacker( gclient_t *victim, int attackerNum ) {
+	if ( !victim ) {
+		return;
+	}
+	if ( attackerNum < 0 || attackerNum >= level.maxclients ) {
+		return;
+	}
+	if ( victim == &level.clients[attackerNum] ) {
+		return;
+	}
+	victim->lastDamagedBy = attackerNum;
+	victim->lastDamagedAt = level.time;
+}
+
+/*
+==============
+G_AwardKill
+
+Pays the fighter who put this one down: a point of score, and a share of the
+ceiling it took to do it into both pools. Growth costs pool and nothing else
+handed pool out for winning, so a fight that ended was worth exactly as much as
+a fight that never started. Also prints the obituary, credited or not - this
+is the one place every death passes through.
+==============
+*/
+void G_AwardKill( gentity_t *victim ) {
+	gclient_t	*killer;
+	int			award;
+	int			limit;
+	if ( !victim->client ) {
+		return;
+	}
+	killer = NULL;
+	if ( victim->client->lastDamagedBy >= 0 && victim->client->lastDamagedBy < level.maxclients
+		&& level.time - victim->client->lastDamagedAt <= KILL_CREDIT_WINDOW ) {
+		killer = &level.clients[victim->client->lastDamagedBy];
+		if ( killer == victim->client || killer->pers.connected != CON_CONNECTED
+			|| killer->sess.sessionTeam == TEAM_SPECTATOR ) {
+			killer = NULL;
+		}
+	}
+	victim->client->lastDamagedBy = -1;
+	if ( !killer ) {
+		trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " was defeated.\n\"",
+			victim->client->pers.netname ) );
+		return;
+	}
+	trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " was defeated by %s" S_COLOR_WHITE ".\n\"",
+		victim->client->pers.netname, killer->pers.netname ) );
+	killer->ps.persistant[PERS_SCORE] += 1;
+	killer->lastkilled_client = victim->client->ps.clientNum;
+	killer->lastKillTime = level.time;
+	// plLimit is the fighter's own ceiling; neither pool may exceed it.
+	limit = killer->ps.powerLevel[plLimit];
+	award = victim->client->ps.powerLevel[plMaximum] / KILL_POOL_SHARE;
+	killer->ps.powerLevel[plHealthPool] += award;
+	killer->ps.powerLevel[plMaximumPool] += award;
+	if ( killer->ps.powerLevel[plHealthPool] > limit ) { killer->ps.powerLevel[plHealthPool] = limit; }
+	if ( killer->ps.powerLevel[plMaximumPool] > limit ) { killer->ps.powerLevel[plMaximumPool] = limit; }
+	// the score change is what CS_SCORES1/2 and the fraglimit check read
+	CalculateRanks();
+}
+
 int RaySphereIntersections( vec3_t origin, float radius, vec3_t point, vec3_t dir, vec3_t intersections[2] ) {
 	float b, c, d, t;
 	VectorNormalize(dir);

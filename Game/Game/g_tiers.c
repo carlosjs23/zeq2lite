@@ -20,10 +20,14 @@ void syncTier(gclient_t *client){
 	ps->stats[stTransformEffectMaximum] = tier->transformEffectMaximum;
 	ps->baseStats[stSpeed] = tier->speed;
 	ps->baseStats[stZanzokenDistance] = tier->zanzokenDistance;
-	ps->baseStats[stZanzokenQuickDistance] = g_quickZanzokenDistance.value != -1.0 ? g_quickZanzokenDistance.value : tier->zanzokenQuickDistance;
+	// -1 on the cvar means "use the tier's value"; a tier that states no quick
+	// pair uses its ordinary zanzoken rather than a distance of zero
+	ps->baseStats[stZanzokenQuickDistance] = g_quickZanzokenDistance.value != -1.0 ? g_quickZanzokenDistance.value :
+		(tier->zanzokenQuickDistance ? tier->zanzokenQuickDistance : tier->zanzokenDistance);
 	ps->baseStats[stZanzokenSpeed] = tier->zanzokenSpeed;
 	ps->baseStats[stZanzokenCost] = tier->zanzokenCost;
-	ps->baseStats[stZanzokenQuickCost] = g_quickZanzokenCost.value != -1.0 ? g_quickZanzokenCost.value : tier->zanzokenQuickCost;
+	ps->baseStats[stZanzokenQuickCost] = g_quickZanzokenCost.value != -1.0 ? g_quickZanzokenCost.value :
+		(tier->zanzokenQuickCost ? tier->zanzokenQuickCost : tier->zanzokenCost);
 	ps->baseStats[stBoostCost] = tier->boostCost;
 	ps->baseStats[stFatigueRecovery] = tier->fatigueRecovery;
 	ps->baseStats[stTransformSubsequentDuration] = tier->transformSubsequentDuration;
@@ -32,14 +36,40 @@ void syncTier(gclient_t *client){
 	ps->baseStats[stTransformSubsequentMaximumScale] = tier->transformSubsequentMaximumScale;
 	ps->baseStats[stAirBrakeCost] = tier->airBrakeCost;
 	ps->baseStats[stMeleeAttack] = tier->meleeAttack;
+	ps->baseStats[stKnockbackPower] = tier->knockbackPower;
+	ps->baseStats[stKnockbackIntensity] = tier->knockbackIntensity ? tier->knockbackIntensity : 1.0;
 	ps->baseStats[stEnergyAttack] = tier->energyAttackDamage;
 	ps->baseStats[stDefenseMelee] = tier->defenseMelee;
 	ps->baseStats[stDefenseEnergy] = tier->defenseEnergy;
+	// The guard knobs: capacity and recovery are multipliers, neutral when a
+	// config states nothing. The delay is milliseconds, and 0 means "use the
+	// stock delay" - the default is pmove's, not ours, so it lives there.
+	ps->baseStats[stDefenseCapacity] = tier->defenseCapacity ? tier->defenseCapacity : 1.0;
+	ps->baseStats[stDefenseRecovery] = tier->defenseRecovery ? tier->defenseRecovery : 1.0;
+	ps->baseStats[stDefenseRecoveryDelay] = tier->defenseRecoveryDelay;
 	ps->baseStats[stEnergyAttackCost] = tier->energyAttackCost;
 	ps->powerLevel[plDrainCurrent] = tier->effectCurrent;
 	ps->powerLevel[plDrainFatigue] = tier->effectFatigue;
 	ps->powerLevel[plDrainHealth] = tier->effectHealth;
 	ps->powerLevel[plDrainMaximum] = tier->effectMaximum;
+}
+
+// A transformation may exhaust the player, never kill them outright, and an
+// unscripted (zero) cost must leave the resource untouched.
+void applyTransformCosts(playerState_t *ps,int healthCost,int fatigueCost,int maximumEffect){
+	if(healthCost){
+		ps->powerLevel[plHealth] -= healthCost;
+		if(ps->powerLevel[plHealth] < 1){ps->powerLevel[plHealth] = 1;}
+	}
+	if(fatigueCost){
+		ps->powerLevel[plFatigue] -= fatigueCost;
+		if(ps->powerLevel[plFatigue] < 0){ps->powerLevel[plFatigue] = 0;}
+	}
+	if(maximumEffect){
+		ps->powerLevel[plMaximum] += maximumEffect;
+		if(ps->powerLevel[plLimit] > 0 && ps->powerLevel[plMaximum] > ps->powerLevel[plLimit]){ps->powerLevel[plMaximum] = ps->powerLevel[plLimit];}
+		if(ps->powerLevel[plMaximum] < 1){ps->powerLevel[plMaximum] = 1;}
+	}
 }
 
 qboolean checkTierUpTransformation(gclient_t *client, int nextTierIndex, int currentTierIndex, int tierChangeMode){
@@ -80,14 +110,29 @@ qboolean checkTierUpTransformation(gclient_t *client, int nextTierIndex, int cur
 					newPowerLevel = (int)(nextTier->requirementCurrent * 1.1 );
 					if(nextTierIndex > ps->powerLevel[plTierTotal]){
 						ps->powerLevel[plTierTotal] = nextTierIndex;
-						ps->timers[tmTransform] = client->tiers[ps->powerLevel[plTierCurrent]].transformTime;
+						ps->timers[tmTransform] = nextTier->transformFirstDuration > 0 ? nextTier->transformFirstDuration : nextTier->transformTime;
 						ps->stats[stTransformState] = 2;
+						applyTransformCosts(ps,nextTier->transformFirstHealth,nextTier->transformFirstFatigue,nextTier->transformFirstEffectMaximum);
 						if(ps->powerLevel[plCurrent] < nextTier->requirementCurrent) {
 							ps->powerLevel[plCurrent] = newPowerLevel ;
 						}
 					}
 					else {
+						// Repeat transforms compound the subsequent scales; an unscripted scale (<= 0) leaves the cost alone.
+						int repeat = client->tierTransformCount[nextTierIndex] > 0 ? client->tierTransformCount[nextTierIndex] - 1 : 0;
+						float duration = nextTier->transformDuration;
+						float healthCost = nextTier->transformHealth;
+						float fatigueCost = nextTier->transformFatigue;
+						float maximumEffect = nextTier->transformEffectMaximum;
+						while(repeat-- > 0){
+							duration += nextTier->transformSubsequentDuration;
+							if(nextTier->transformSubsequentHealthScale > 0){healthCost *= nextTier->transformSubsequentHealthScale;}
+							if(nextTier->transformSubsequentFatigueScale > 0){fatigueCost *= nextTier->transformSubsequentFatigueScale;}
+							if(nextTier->transformSubsequentMaximumScale > 0){maximumEffect *= nextTier->transformSubsequentMaximumScale;}
+						}
+						if(duration > 1){ps->timers[tmTransform] = (int)duration;}
 						ps->stats[stTransformState] = 1;
+						applyTransformCosts(ps,(int)healthCost,(int)fatigueCost,(int)maximumEffect);
 						if(tierChangeMode==3) {
 							if(ps->powerLevel[plCurrent] < nextTier->requirementCurrent) {
 								ps->powerLevel[plFatigue] -= (newPowerLevel - ps->powerLevel[plCurrent]) *(g_quickTransformCost.value +( (nextTierIndex - currentTierIndex) * g_quickTransformCostPerTier.value)) ;
@@ -95,6 +140,7 @@ qboolean checkTierUpTransformation(gclient_t *client, int nextTierIndex, int cur
 							}
 						}
 					}
+					client->tierTransformCount[nextTierIndex]++;
 					ps->powerLevel[plTierSelectionMode]=0;
 					return qtrue;
 				}
@@ -226,6 +272,7 @@ void setupTiers(gclient_t *client){
 	for(i=0;i<8;i++){
 		tier = &client->tiers[i];
 		memset(tier,0,sizeof(tierConfig_g));
+		client->tierTransformCount[i] = 0;
 		// Most thresholds are lower bounds, where the zero left by the memset
 		// reads as "no requirement". requirementHealthMaximum is an upper bound
 		// as a percentage of maximum, so zero would read as "only at zero
@@ -275,27 +322,29 @@ void parseTier(char *path,tierConfig_g *tier){
 				if(!token[0]){break;}
 				tier->speed = atof(token);
 			}
-			else if(!Q_stricmp(token,"meleeAttack")){
+			// percent* is the spelling the configs use for the five combat
+			// multipliers; the bare names are the older ones
+			else if(!Q_stricmp(token,"meleeAttack") || !Q_stricmp(token,"percentMeleeAttack")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->meleeAttack = atof(token);
 			}
-			else if(!Q_stricmp(token,"energyAttackDamage")){
+			else if(!Q_stricmp(token,"energyAttackDamage") || !Q_stricmp(token,"percentEnergyAttackDamage")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->energyAttackDamage = atof(token);
 			}
-			else if(!Q_stricmp(token,"energyAttackCost")){
+			else if(!Q_stricmp(token,"energyAttackCost") || !Q_stricmp(token,"percentEnergyAttackCost")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->energyAttackCost = atof(token);
 			}
-			else if(!Q_stricmp(token,"defenseMelee")){
+			else if(!Q_stricmp(token,"defenseMelee") || !Q_stricmp(token,"percentMeleeDefense")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->defenseMelee = atof(token);
 			}
-			else if(!Q_stricmp(token,"defenseEnergy")){
+			else if(!Q_stricmp(token,"defenseEnergy") || !Q_stricmp(token,"percentEnergyDefense")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->defenseEnergy = atof(token);
@@ -400,7 +449,8 @@ void parseTier(char *path,tierConfig_g *tier){
 				if(!token[0]){break;}
 				tier->requirementCurrentPercent = atoi(token);
 			}
-			else if(!Q_stricmp(token,"requirementMaximum")){
+			// requirementMax is the abbreviation some configs use
+			else if(!Q_stricmp(token,"requirementMaximum") || !Q_stricmp(token,"requirementMax")){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->requirementMaximum = atoi(token);
@@ -521,6 +571,13 @@ void parseTier(char *path,tierConfig_g *tier){
 				token = COM_Parse(&parse);
 				if(!token[0]){break;}
 				tier->requirementButtonUp = strlen(token) == 4 ? qtrue : qfalse;
+			}
+			// the configs carry one key for both directions
+			else if(!Q_stricmp(token,"requirementButton")){
+				token = COM_Parse(&parse);
+				if(!token[0]){break;}
+				tier->requirementButtonUp = strlen(token) == 4 ? qtrue : qfalse;
+				tier->requirementButtonDown = tier->requirementButtonUp;
 			}
 			else if(!Q_stricmp(token,"requirementButtonDown")){
 				token = COM_Parse(&parse);

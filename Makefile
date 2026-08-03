@@ -1935,10 +1935,12 @@ GOBJ_ = \
   $(B)/Base/Game/bg_slidemove.o \
   $(B)/Base/Game/bg_lib.o \
   $(B)/Base/Game/g_active.o \
+  $(B)/Base/Game/g_ai.o \
   $(B)/Base/Game/g_arenas.o \
   $(B)/Base/Game/g_client.o \
   $(B)/Base/Game/g_cmds.o \
   $(B)/Base/Game/g_combat.o \
+  $(B)/Base/Game/g_dummy.o \
   $(B)/Base/Game/g_mem.o \
   $(B)/Base/Game/g_misc.o \
   $(B)/Base/Game/g_mover.o \

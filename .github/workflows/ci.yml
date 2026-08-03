@@ -238,8 +238,15 @@ jobs:
             ls Build/Release-linux-*/Base/vm/${m}.qvm >/dev/null
           done
 
-  # The smoke and sanitizer suites need the ~324MB game data, which is not in
-  # this repository, so they cannot run on a clean CI checkout. Run them locally:
+  # The smoke, duel and sanitizer gates all need the ~324MB game data, which is
+  # not in this repository, so none of them can run on a clean CI checkout. Run
+  # them locally:
   #   Tools/dev/zeq2smoke.sh --seconds 20 --dedicated
+  #   Tools/dev/zeq2duel.sh --seconds 240 --skill 5 --assert
   #   Tools/dev/zeq2sanitize.sh
-  # Wire them up here once the data is available to CI (artifact, cache or LFS).
+  #
+  # The duel is the balance regression gate: two AI fighters, real usercmds, and
+  # assertions on the shape of the fight rather than on any single number. It is
+  # the only check here that can catch combat quietly ceasing to function - the
+  # unit suites cannot see it and the smoke gate only asserts the map loads.
+  # Wire all three up once the data is available to CI (artifact, cache or LFS).

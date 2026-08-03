@@ -207,7 +207,8 @@ qboolean G_weapPhys_AddLinkRef( g_weapPhysParser_t *parser, int index, char* pri
 
 	true_index = index - 1; // The script parses 1 as the first weapon, but arrays start at 0.
 
-	if ( ( true_index < 0 ) || ( true_index > MAX_LINKS ) ) {
+	// linkList holds MAX_LINKS entries, so MAX_LINKS itself is already past the end.
+	if ( ( true_index < 0 ) || ( true_index >= MAX_LINKS ) ) {
 		G_weapPhys_ErrorHandle( ERROR_LINK_BOUNDS, scanner, NULL, NULL );
 		return qfalse;
 	}

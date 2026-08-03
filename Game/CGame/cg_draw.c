@@ -631,16 +631,32 @@ void CG_DrawScreenEffects(){
 CG_Scoreboard
 ================*/
 void CG_DrawScoreboard(){
-	int clientNum;
+	int		i;
+	int		clientNum;
+	int		y;
 	vec3_t	angles;
-	for(clientNum=0;clientNum<MAX_CLIENTS;++clientNum){
-		if(cgs.clientinfo[clientNum].infoValid){
-			CG_DrawHead(180,(36*clientNum)+180,50,50,clientNum,angles);
-			CG_DrawSmallStringHalfHeight(240,(36*clientNum)+200,cgs.clientinfo[clientNum].name,1.0F);
-			CG_DrawSmallStringHalfHeight(320,(36*clientNum)+200,va("%i",cg.scores[clientNum].score),1.0F);
-			CG_DrawSmallStringHalfHeight(380,(36*clientNum)+200,va("%i",cg.scores[clientNum].ping),1.0F);
-			CG_DrawSmallStringHalfHeight(420,(36*clientNum)+200,va("%i",cg.scores[clientNum].time),1.0F);
-		}
+	// the server pushes scores on its own only at intermission; while the
+	// board is up, keep asking so it tracks the fight
+	if(cg.scoresRequestTime + 2000 < cg.time){
+		cg.scoresRequestTime = cg.time;
+		trap_SendClientCommand("score");
+	}
+	VectorClear(angles);
+	CG_DrawSmallStringHalfHeight(240,160,"Name",1.0F);
+	CG_DrawSmallStringHalfHeight(320,160,"Score",1.0F);
+	CG_DrawSmallStringHalfHeight(380,160,"Ping",1.0F);
+	CG_DrawSmallStringHalfHeight(420,160,"Time",1.0F);
+	// cg.scores is packed in rank order, so the row index is the rank and the
+	// client number has to come from the entry
+	for(i=0;i<cg.numScores;++i){
+		clientNum = cg.scores[i].client;
+		if(!cgs.clientinfo[clientNum].infoValid){continue;}
+		y = (36*i)+180;
+		CG_DrawHead(180,y,50,50,clientNum,angles);
+		CG_DrawSmallStringHalfHeight(240,y+20,cgs.clientinfo[clientNum].name,1.0F);
+		CG_DrawSmallStringHalfHeight(320,y+20,va("%i",cg.scores[i].score),1.0F);
+		CG_DrawSmallStringHalfHeight(380,y+20,va("%i",cg.scores[i].ping),1.0F);
+		CG_DrawSmallStringHalfHeight(420,y+20,va("%i",cg.scores[i].time),1.0F);
 	}
 }
 /*================
@@ -799,8 +815,7 @@ static void CG_DrawStatusBar( void ) {
 	if(cg_drawStatus.integer == 0){return;}
 	cent = &cg_entities[cg.snap->ps.clientNum];
 	tier = (float)ps->powerLevel[plTierCurrent];
-	CG_CheckChat();	
-	//CG_DrawScoreboard();
+	CG_CheckChat();
 	CG_DrawScreenEffects();
 	if(ps->lockedTarget > 0 && cgs.clientinfo[ps->lockedTarget-1].infoValid){
 		playerState_t lockedTargetPS;
@@ -1373,6 +1388,77 @@ void CG_DrawScripted2D(void){
 		}
 	}
 }
+
+/*
+=====================
+CG_DrawFightDebug
+
+The fight line answers "what did this cost" after the fact; this answers "what
+is it looking at" while it happens. Everything here gates a melee or a charge,
+and none of it is otherwise on screen - the power bar shows one of five values
+the HUD tracks and the decisions are all about the other four.
+
+Drawn from cg.snap->ps, so following a fighter as a spectator shows that
+fighter's state. That is what the duel harness leaves you in.
+=====================
+*/
+static void CG_DrawFightDebug( void ) {
+	const playerState_t	*ps;
+	char				line[128];
+	int					y;
+	int					ready;
+	int					dist;
+
+	if ( !cg_debugFight.integer ) {
+		return;
+	}
+
+	ps = &cg.snap->ps;
+	y = 140;
+	ready = ( ps->currentSkill[WPSTAT_BITFLAGS] & WPF_READY ) ? 1 : 0;
+
+	// -1 rather than 0 for "no lock": zero is a real distance and this is the
+	// number every melee gate is really asking about.
+	dist = -1;
+	if ( ps->lockedTarget > 0 && ps->lockedTarget <= MAX_CLIENTS ) {
+		const centity_t *foe = &cg_entities[ps->lockedTarget - 1];
+		if ( foe->currentValid ) {
+			dist = (int)Distance( ps->origin, foe->lerpOrigin );
+		}
+	}
+
+	Com_sprintf( line, sizeof( line ), "hp %i/%i  guard %i  pool %i/%i",
+		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
+		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool] );
+	CG_DrawSmallString( 8, y, line, 1.0f );
+	y += SMALLCHAR_HEIGHT;
+
+	// The charge funnel, on screen: a windup below its ready threshold is
+	// thrown away by any interrupt, so "charging 40%" and "charging, ready"
+	// are entirely different situations and the bar does not distinguish them.
+	Com_sprintf( line, sizeof( line ), "wpn %i %s  charge %i%%%s",
+		ps->weapon, BG_WeaponStateName( ps->weaponstate ),
+		ps->stats[stChargePercentPrimary], ready ? " READY" : "" );
+	CG_DrawSmallString( 8, y, line, 1.0f );
+	y += SMALLCHAR_HEIGHT;
+
+	Com_sprintf( line, sizeof( line ), "melee %s %s  lock %i dist %i",
+		( ps->bitFlags & usingMelee ) ? "yes" : "no",
+		BG_MeleeStateName( ps->stats[stMeleeState] ),
+		ps->lockedTarget, dist );
+	CG_DrawSmallString( 8, y, line, 1.0f );
+	y += SMALLCHAR_HEIGHT;
+
+	// Everything that makes a melee branch or a recovery refuse itself. A
+	// fighter standing in range doing nothing is always one of these.
+	Com_sprintf( line, sizeof( line ), "freeze %i  safe %i  mIdle %i  %s%s%s",
+		ps->timers[tmFreeze], ps->timers[tmSafe], ps->timers[tmMeleeIdle],
+		( ps->bitFlags & usingBlock ) ? "block " : "",
+		( ps->bitFlags & usingAlter ) ? "alter " : "",
+		( ps->bitFlags & usingZanzoken ) ? "zanzoken " : "" );
+	CG_DrawSmallString( 8, y, line, 1.0f );
+}
+
 static void CG_Draw2D( void ) {
 	// if we are taking a levelshot for the menu, don't draw anything
 	if ( cg.levelShot ) {
@@ -1382,6 +1468,7 @@ static void CG_Draw2D( void ) {
 		return;
 	}
 	if ( cg.snap->ps.pm_type == PM_INTERMISSION ) {
+		CG_DrawScoreboard();
 		return;
 	}
 	if(cg_scripted2D.integer != 0){
@@ -1411,6 +1498,10 @@ static void CG_Draw2D( void ) {
 	CG_DrawVote();
 	CG_DrawTeamVote();
 	CG_DrawUpperRight();
+	CG_DrawFightDebug();
+	if ( cg.showScores ) {
+		CG_DrawScoreboard();
+	}
 }
 void CG_DrawScreenFlash ( void ) {
 	float		*color;

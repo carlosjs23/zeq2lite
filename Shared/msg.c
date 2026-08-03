@@ -904,8 +904,8 @@ netField_t	entityStateFields[] =
 // <-- RiO: Need to communicate weaponstate and tier as well
 { NETF(weaponstate), 4 },
 { NETF(tier), 4 },
-{ NETF(attackPowerTotal), 16 },
-{ NETF(attackPowerCurrent), 16 },
+{ NETF(attackPowerTotal), 32 },
+{ NETF(attackPowerCurrent), 32 },
 // -->
 { NETF(clientNum), 8 },
 { NETF(angles[1]), 0 },
@@ -1534,7 +1534,7 @@ void MSG_WriteDeltaPlayerstate( msg_t *msg, struct playerState_s *from, struct p
 		MSG_WriteBits( msg, powerlevelbits, MAX_POWERSTATS );
 		for (i=0 ; i<MAX_POWERSTATS ; i++)
 			if (powerlevelbits & (1u<<i) )
-				MSG_WriteShort( msg, to->powerLevel[i] );
+				MSG_WriteLong( msg, to->powerLevel[i] );
 	} else {
 		MSG_WriteBits( msg, 0, 1 );	// no change
 	}
@@ -1752,7 +1752,7 @@ void MSG_ReadDeltaPlayerstate (msg_t *msg, playerState_t *from, playerState_t *t
 			bits = MSG_ReadBits (msg, MAX_POWERSTATS);
 			for (i=0 ; i<MAX_POWERSTATS ; i++) {
 				if (bits & (1u<<i) ) {
-					to->powerLevel[i] = MSG_ReadShort(msg);
+					to->powerLevel[i] = MSG_ReadLong(msg);
 				}
 			}
 		}

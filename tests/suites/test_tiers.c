@@ -172,3 +172,267 @@ Test(tiers, a_model_with_no_tiers_of_its_own_inherits_the_default_model) {
 	cr_assert_eq(client.tiers[1].requirementCurrent, 2500,
 	             "and inherit its thresholds, not just its existence");
 }
+
+/*
+The parser and the shipped configs have to agree on spelling, and twice they did
+not.
+
+The five combat multipliers are written percent* in every config in the data
+set, while the parser only knew meleeAttack, energyAttackDamage,
+energyAttackCost, defenseMelee and defenseEnergy. Nothing wrote them, so they
+kept the zero setupTiers memsets in - and a zero multiplier is not a weak
+fighter, it is one whose attacks compute to no damage and whose defense scales
+nothing. These are the numbers everything else in combat is measured against, so
+they get asserted by value rather than by "non-zero".
+*/
+Test(tiers, the_combat_multipliers_are_read_under_the_names_the_configs_use) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg",
+	            "percentMeleeAttack 1.5\n"
+	            "percentEnergyAttackDamage 2.0\n"
+	            "percentEnergyAttackCost 0.5\n"
+	            "percentMeleeDefense 1.25\n"
+	            "percentEnergyDefense 0.75\n");
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stMeleeAttack], 1.5f, 0.001f,
+	                   "percentMeleeAttack must reach baseStats or melee lands for nothing");
+	cr_assert_float_eq(client.ps.baseStats[stEnergyAttack], 2.0f, 0.001f,
+	                   "percentEnergyAttackDamage must reach baseStats or ki attacks charge to 0");
+	cr_assert_float_eq(client.ps.baseStats[stEnergyAttackCost], 0.5f, 0.001f, "energy cost multiplier");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseMelee], 1.25f, 0.001f, "melee defense multiplier");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseEnergy], 0.75f, 0.001f, "energy defense multiplier");
+}
+
+/*
+knockBackPower is stated by every config and was parsed all along, but syncTier
+never handed it to the playerState, so the melee knockback that reads it saw
+whatever else lived at that index.
+*/
+Test(tiers, the_knockback_multiplier_reaches_the_player_state) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg", "knockBackPower 2.0\n");
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stKnockbackPower], 2.0f, 0.001f,
+	                   "a tier's knockback power must reach baseStats to be readable");
+}
+
+/*
+The guard knobs - defenseCapacity, defenseRecovery, defenseRecoveryDelay - and
+knockbackIntensity were parsed into the tier config but syncTier never handed
+them to the playerState, so a tier could state them and change nothing.
+*/
+Test(tiers, the_guard_knobs_reach_the_player_state) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg",
+	            "defenseCapacity 2.0\n"
+	            "defenseRecovery 1.5\n"
+	            "defenseRecoveryDelay 2000\n"
+	            "knockbackIntensity 0.8\n");
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stDefenseCapacity], 2.0f, 0.001f,
+	                   "a tier's guard capacity must reach baseStats to be readable");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseRecovery], 1.5f, 0.001f,
+	                   "a tier's guard recovery must reach baseStats to be readable");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseRecoveryDelay], 2000.0f, 0.001f,
+	                   "a tier's recovery delay must reach baseStats to be readable");
+	cr_assert_float_eq(client.ps.baseStats[stKnockbackIntensity], 0.8f, 0.001f,
+	                   "a tier's knockback intensity must reach baseStats to be readable");
+}
+
+/*
+No shipped config states the guard knobs, so the multipliers must come through
+neutral rather than as the zero the memset left - a guard with a capacity of
+zero would divide by nothing and one with a recovery of zero would never refill.
+The delay is the exception: 0 means "unset", and pmove substitutes its stock
+delay for it.
+*/
+Test(tiers, unstated_guard_knobs_are_neutral_not_zero) {
+	given_tiers(NULL);   /* configs as shipped: no guard keys anywhere */
+
+	cr_assert_float_eq(client.ps.baseStats[stDefenseCapacity], 1.0f, 0.001f,
+	                   "an unstated guard capacity must be neutral");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseRecovery], 1.0f, 0.001f,
+	                   "an unstated guard recovery must be neutral");
+	cr_assert_float_eq(client.ps.baseStats[stDefenseRecoveryDelay], 0.0f, 0.001f,
+	                   "an unstated recovery delay must stay 0 so pmove uses its stock delay");
+	cr_assert_float_eq(client.ps.baseStats[stKnockbackIntensity], 1.0f, 0.001f,
+	                   "an unstated knockback intensity must be neutral");
+}
+
+/*
+goku's tier5 abbreviates requirementMaximum to requirementMax. Unread it stays
+at zero, and zero is the permissive value for a lower bound, so the tier admits
+a fighter who has never come near the maximum power it asks for.
+*/
+Test(tiers, a_tier_that_abbreviates_its_maximum_requirement_is_still_gated) {
+	given_tiers("requirementMax 30000\n");
+	given_a_healthy_fighter();   /* maximum 20000, short of the 30000 asked for */
+
+	cr_assert(!checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP),
+	          "requirementMax must gate the tier the same as requirementMaximum");
+
+	client.ps.powerLevel[plMaximum] = 30000;
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP),
+	          "and must admit a fighter who meets it");
+}
+
+/*
+The quick zanzoken - the double tap - reads its distance and cost from
+zanzokenQuickDistance and zanzokenQuickCost, which no shipped config writes. The
+two cvars that would override them default to -1, meaning "use the tier's
+value", so the distance resolved to zero and a double tap spent its event and
+its animation to move the player nowhere.
+*/
+Test(tiers, a_double_tap_zanzoken_falls_back_to_the_ordinary_one) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg",
+	            "zanzokenDistance 1.0\nzanzokenCost 2.0\n");   /* no quick pair, as shipped */
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickDistance], 1.0f, 0.001f,
+	                   "a quick zanzoken with no distance of its own teleports nowhere");
+	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickCost], 2.0f, 0.001f,
+	                   "and must not be free either");
+}
+
+/*
+A config that does state the quick pair keeps it - the fallback above must not
+overwrite a character who was tuned for a shorter, cheaper double tap.
+*/
+Test(tiers, a_stated_quick_zanzoken_is_left_alone) {
+	fake_fs_reset();
+	memset(&client, 0, sizeof(client));
+	client.modelName = "tester";
+
+	fake_fs_add("players/tierDefault.cfg", "tierName Normal\n");
+	fake_fs_add("players/tester/tier1/tier.cfg",
+	            "zanzokenDistance 1.0\nzanzokenCost 2.0\n"
+	            "zanzokenQuickDistance 0.4\nzanzokenQuickCost 0.5\n");
+
+	setupTiers(&client);
+
+	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickDistance], 0.4f, 0.001f, "stated distance wins");
+	cr_assert_float_eq(client.ps.baseStats[stZanzokenQuickCost], 0.5f, 0.001f, "stated cost wins");
+}
+
+/*
+The tier configs can price a transformation - transformFirst* for the first
+ascension to a tier in a life, transform* for every return to it - and syncTier
+has carried those numbers into the playerState since the fields were added, but
+nothing ever spent them: ascending swapped the multipliers and cost nothing.
+The tests below pin the prices to the transition itself.
+*/
+static void given_transform_priced_tiers(void) {
+	given_tiers(
+	    "transformTime 3000\n"
+	    "transformFirstDuration 5000\n"
+	    "transformFirstHealth 3000\n"
+	    "transformFirstFatigue 2000\n"
+	    "transformFirstEffectMaximum 1000\n"
+	    "transformDuration 800\n"
+	    "transformHealth 500\n"
+	    "transformFatigue 400\n"
+	    "transformEffectMaximum 100\n"
+	    "transformSubsequentDuration 200\n"
+	    "transformEffectSubsequentHealthScale 2.0\n"
+	    "transformEffectSubsequentFatigueScale 2.0\n"
+	    "transformEffectSubsequentMaximumScale 2.0\n");
+	given_a_healthy_fighter();
+	client.ps.powerLevel[plLimit] = 100000;
+}
+
+/* Power back down to base without touching the pools, the way a test steps
+   between ascensions. plTierTotal keeps the high-water mark, so the next
+   ascension is a repeat, not a first. */
+static void given_the_fighter_powered_back_down(void) {
+	client.ps.powerLevel[plTierCurrent] = 0;
+	client.ps.timers[tmTransform] = 0;
+	given_a_healthy_fighter();
+	client.ps.powerLevel[plLimit] = 100000;
+}
+
+Test(tiers, the_first_ascension_pays_its_scripted_toll) {
+	given_transform_priced_tiers();
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 17000, "transformFirstHealth must come out of health");
+	cr_assert_eq(client.ps.powerLevel[plFatigue], 18000, "transformFirstFatigue must come out of fatigue");
+	cr_assert_eq(client.ps.powerLevel[plMaximum], 21000, "transformFirstEffectMaximum must reach the maximum");
+	cr_assert_eq(client.ps.timers[tmTransform], 5000, "a scripted first duration overrides transformTime");
+}
+
+Test(tiers, a_first_ascension_without_its_own_duration_takes_transformTime) {
+	given_tiers("transformTime 3000\ntransformFirstHealth 100\n");
+	given_a_healthy_fighter();
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.timers[tmTransform], 3000, "transformTime is the default first duration");
+}
+
+Test(tiers, a_repeat_ascension_pays_the_per_transform_price) {
+	given_transform_priced_tiers();
+	checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP);
+	given_the_fighter_powered_back_down();
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 19500, "transformHealth prices the return trip");
+	cr_assert_eq(client.ps.powerLevel[plFatigue], 19600, "transformFatigue prices the return trip");
+	cr_assert_eq(client.ps.powerLevel[plMaximum], 20100, "transformEffectMaximum applies on the return trip");
+	cr_assert_eq(client.ps.timers[tmTransform], 800, "a scripted transformDuration replaces the instant switch");
+}
+
+Test(tiers, further_repeats_compound_the_subsequent_scales) {
+	given_transform_priced_tiers();
+	checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP);
+	given_the_fighter_powered_back_down();
+	checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP);
+	given_the_fighter_powered_back_down();
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 19000, "the second repeat costs transformHealth scaled once");
+	cr_assert_eq(client.ps.powerLevel[plFatigue], 19200, "the second repeat costs transformFatigue scaled once");
+	cr_assert_eq(client.ps.powerLevel[plMaximum], 20200, "the maximum effect scales with the repeats too");
+	cr_assert_eq(client.ps.timers[tmTransform], 1000, "each repeat stretches the duration by transformSubsequentDuration");
+}
+
+Test(tiers, an_unpriced_ascension_still_costs_nothing) {
+	given_tiers(NULL);
+	given_a_healthy_fighter();
+	client.ps.powerLevel[plLimit] = 100000;
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 20000, "no scripted price, no health charge");
+	cr_assert_eq(client.ps.powerLevel[plFatigue], 20000, "no scripted price, no fatigue charge");
+	cr_assert_eq(client.ps.powerLevel[plMaximum], 20000, "no scripted effect, the maximum stays put");
+}
+
+Test(tiers, the_toll_may_exhaust_the_fighter_but_never_kill) {
+	given_transform_priced_tiers();
+	client.ps.powerLevel[plHealth] = 2500;   /* under the 3000 the first ascension asks */
+
+	cr_assert(checkTierUpTransformation(&client, 1, 0, TIER_CHANGE_KEY_UP));
+	cr_assert_eq(client.ps.powerLevel[plHealth], 1, "the toll bottoms out at 1 health, not a death");
+}

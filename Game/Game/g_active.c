@@ -346,14 +346,22 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 		case EV_CHANGE_WEAPON:
 			break;
 		case EV_ZANZOKEN_START:
-			if(!ps->bitFlags & usingMelee){}
+			// Nothing to do server side: a teleport out of a melee is resolved by
+			// the pmove itself, which stops the exchange for both fighters.
 			break;
 		case EV_ALTFIRE_WEAPON:
 			FireWeapon(ent,qtrue);
 			break;
 		case EV_DETONATE_WEAPON:
+			// The guided weapon may have exploded frames ago and its slot been
+			// handed to something else, so the pointer only counts while it still
+			// names a live weapon of this client's.
 			missile = client->guidetarget;
-			G_DetachUserWeapon(missile);
+			if(missile && missile->inuse && missile->parent == ent
+				&& (missile->s.eType == ET_MISSILE || missile->s.eType == ET_BEAMHEAD)){
+				G_DetachUserWeapon(missile);
+			}
+			client->guidetarget = NULL;
 			break;
 		case EV_BALLFLIP:
 			break;
@@ -394,6 +402,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			ent->r.contents &= ~CONTENTS_BODY;
 			syncTier(client);
 			client->respawnTime = level.time + 10000;
+			G_AwardKill(ent);
 			break;
 		case EV_UNCONCIOUS:
 			syncTier(client);
@@ -442,9 +451,15 @@ void SendPendingPredictableEvents( playerState_t *ps ) {
 void LockonCheck(gclient_t *client){
 	int entityNum = -1;
 	playerState_t *ps;
+	gentity_t *target;
 	ps = &client->ps;
 	if(ps->lockedTarget>0){
-		if(!&g_entities[ps->lockedTarget-1].client || &g_entities[ps->lockedTarget-1].client->pers.connected == CON_DISCONNECTED){
+		target = &g_entities[ps->lockedTarget-1];
+		// A blocked weapon parks its own entity number here so the blocker keeps
+		// facing it. That lock has no client behind it and is released by the
+		// weapon code, so only a lock on a player is followed from here.
+		if(!target->client){return;}
+		if(target->client->pers.connected == CON_DISCONNECTED){
 			ps->lockonData[lkLastLockedPlayer] = -1;
 			ps->lockedPosition = 0;
 			ps->lockedPlayer = 0;
@@ -469,10 +484,310 @@ void LockonCheck(gclient_t *client){
 					return;
 			}
 		}
-		ps->lockedPosition = &g_entities[ps->lockedTarget-1].r.currentOrigin;
-		ps->lockedPlayer = &g_entities[ps->lockedTarget-1].client->ps;
+		ps->lockedPosition = &target->r.currentOrigin;
+		ps->lockedPlayer = &target->client->ps;
 	}
 }
+/*
+==============
+G_DebugFight
+
+One line per fighter every g_debugFight milliseconds, or nothing when it is 0.
+
+A fight is made of resources that never appear on screen as numbers - the guard
+behind the bar, the two pools, what each fighter is holding down - and reading
+them out is how any question about combat gets answered. The timestamps are
+per client because a single one would only ever print whoever thought first.
+==============
+*/
+/*
+==============
+G_MeleeStateName
+G_WeaponStateName
+
+Names, not indices. Both of these enums have been misread straight off the log
+- a meleeState of 11 and a weaponstate of 7 say nothing at a glance, and
+guessing at them sent two diagnoses the wrong way. Anything outside the enum
+prints as its number so a bad value stays visible rather than reading as a
+state that exists.
+==============
+*/
+
+/*
+==============
+G_ButtonNames
+
+What the fighter is holding, spelled out. A bitfield printed as a decimal is the
+worst of both worlds - 8192 and 4096 and 512 look alike at a glance and have
+been read for each other more than once - and the whole reason this line exists
+is to be read quickly.
+==============
+*/
+static const char *G_ButtonNames( int buttons ) {
+	static char		out[128];
+	static const struct {
+		int			bit;
+		const char	*name;
+	} named[] = {
+		{ BUTTON_ATTACK, "atk" },
+		{ BUTTON_ALT_ATTACK, "altAtk" },
+		{ BUTTON_BLOCK, "block" },
+		{ BUTTON_BOOST, "boost" },
+		{ BUTTON_TELEPORT, "teleport" },
+		{ BUTTON_POWERLEVEL, "powerLevel" },
+		{ BUTTON_JUMP, "jump" },
+		{ BUTTON_GESTURE, "gesture" },
+		{ BUTTON_WALKING, "walk" }
+	};
+	int				i;
+	int				left;
+
+	out[0] = '\0';
+	left = buttons;
+	for ( i = 0 ; i < (int)( sizeof( named ) / sizeof( named[0] ) ) ; i++ ) {
+		if ( !( buttons & named[i].bit ) ) {
+			continue;
+		}
+		if ( out[0] ) {
+			Q_strcat( out, sizeof( out ), "+" );
+		}
+		Q_strcat( out, sizeof( out ), named[i].name );
+		left &= ~named[i].bit;
+	}
+
+	// Anything left over keeps its bits rather than vanishing, so a button this
+	// list has not been taught about still shows up as something to look into.
+	if ( left ) {
+		if ( out[0] ) {
+			Q_strcat( out, sizeof( out ), "+" );
+		}
+		Q_strcat( out, sizeof( out ), va( "0x%x", left ) );
+	}
+
+	return out[0] ? out : "-";
+}
+
+
+// Verbs worth counting rather than sampling, and how many uses of each a
+// fighter is credited with.
+typedef enum {
+	fightUseBlock,
+	fightUseZanzoken,
+	fightUseQuickZan,
+	fightUseBoost,
+	fightUseStruggle,
+	// Which end of an exchange this fighter is on. The melee start sequence puts
+	// stMeleeStartAttack on whoever opened it and stMeleeStartHit on whoever it
+	// opened against, so counting both says whether a fighter ever gets a turn
+	// attacking or only ever receives - which no level in this line answers,
+	// since both fighters read melee 1 either way.
+	fightUseInitiate,
+	fightUseStruck,
+	// A landed stun, counted on the fighter it landed on. The state is the
+	// lasting half of the exchange - the swing resolves in a frame - so the
+	// victim's rising edge is the one count that cannot be missed by sampling.
+	fightUseStunned,
+	// Whether a charged skill ever leaves the hand. A charge that is abandoned
+	// half-made and one that fires look identical in every level on the line,
+	// and cooling is only entered by having fired.
+	fightUseCharge,
+	// The stage between starting a windup and firing one. A charge below
+	// costs_chargeReady is discarded by any interrupt, so "began 90, fired 6"
+	// has two very different explanations - never reached the threshold, or
+	// reached it and the release did not fire - and only this separates them.
+	fightUseReady,
+	fightUseFired,
+	// Deaths, for the same reason as the rest: counting the samples that caught
+	// a fighter dead measures how long it stayed down, not how often it went.
+	fightUseDied,
+	fightUseCount
+} fightUse_t;
+
+// Why a windup ended without becoming a shot. "began 90, fired 6" says the
+// charge is being lost but not to what, and the answer decides whether the
+// fix is the threshold, the plant range or the interrupt itself. Classified on
+// the falling edge of charging, from the state that is up at that moment - the
+// same set PM_WeaponRelease is called for.
+typedef enum {
+	fightLossMelee,
+	fightLossKnockback,
+	fightLossTransform,
+	fightLossSoar,
+	fightLossDied,
+	// The windup ended with none of the above up. A weapon change or a
+	// sub-threshold release by the fighter's own hand lands here.
+	fightLossOther,
+	fightLossCount
+} fightLoss_t;
+
+static const char *fightLossNames[fightLossCount] = {
+	"melee", "knock", "trans", "soar", "died", "other"
+};
+
+static void G_DebugFight( gentity_t *ent ) {
+	static int		reported[MAX_CLIENTS];
+	static int		wasUsing[MAX_CLIENTS][fightUseCount];
+	static int		uses[MAX_CLIENTS][fightUseCount];
+	static int		losses[MAX_CLIENTS][fightLossCount];
+	// The lowest the guard has been at any point, not the lowest any sample
+	// caught it at. A guard that breaks and refills between two samples is
+	// invisible to a minimum taken over the printed lines.
+	static int		guardLow[MAX_CLIENTS];
+	char			lossText[128];
+	char			lossPart[32];
+	gclient_t		*client;
+	playerState_t	*ps;
+	gentity_t		*foe;
+	int				using[fightUseCount];
+	int				clientNum;
+	int				dist;
+	int				i;
+
+	if ( !g_debugFight.integer ) {
+		return;
+	}
+
+	clientNum = ent - g_entities;
+	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+		return;
+	}
+
+	client = ent->client;
+	ps = &client->ps;
+
+	// Counted on the rising edge, every frame, because sampling a level cannot
+	// see a verb that lasts less time than the gap between samples. A zanzoken
+	// is up for a few hundred milliseconds; sampled every couple of seconds it
+	// reads as never used, and reporting that a fighter never reached for a
+	// verb it reached for repeatedly is worse than reporting nothing.
+	using[fightUseBlock] = ( ps->bitFlags & usingBlock ) ? 1 : 0;
+	// Split by kind: the deliberate one is a button, the quick one falls out of
+	// a double tap on a movement key, and they answer different questions about
+	// whether a fighter chose to leave or simply moved that way.
+	using[fightUseZanzoken] = ( ( ps->bitFlags & usingZanzoken ) && !( ps->bitFlags & usingQuickZanzoken ) ) ? 1 : 0;
+	using[fightUseQuickZan] = ( ps->bitFlags & usingQuickZanzoken ) ? 1 : 0;
+	using[fightUseBoost] = ( ps->bitFlags & usingBoost ) ? 1 : 0;
+	using[fightUseStruggle] = ( ps->bitFlags & isStruggling ) ? 1 : 0;
+	using[fightUseInitiate] = ( ps->stats[stMeleeState] == stMeleeStartAttack ) ? 1 : 0;
+	using[fightUseStruck] = ( ps->stats[stMeleeState] == stMeleeStartHit ) ? 1 : 0;
+	using[fightUseStunned] = ( ps->stats[stMeleeState] == stMeleeUsingStun ) ? 1 : 0;
+	using[fightUseCharge] = ( ps->weaponstate == WEAPON_CHARGING || ps->weaponstate == WEAPON_ALTCHARGING ) ? 1 : 0;
+	using[fightUseReady] = ( ps->currentSkill[WPSTAT_BITFLAGS] & WPF_READY ) ? 1 : 0;
+	using[fightUseFired] = ( ps->weaponstate == WEAPON_COOLING ) ? 1 : 0;
+	using[fightUseDied] = ( ps->bitFlags & isDead ) ? 1 : 0;
+
+	// A windup that ends without entering a firing state was lost. Attribute it
+	// to whatever is up on the frame it ended: PM_WeaponRelease is called for
+	// exactly these, and the first match wins because a knockback that arrives
+	// mid-melee is still the melee's doing.
+	if ( wasUsing[clientNum][fightUseCharge] && !using[fightUseCharge]
+		&& ps->weaponstate != WEAPON_COOLING
+		&& ps->weaponstate != WEAPON_GUIDING
+		&& ps->weaponstate != WEAPON_ALTGUIDING ) {
+		if ( ps->bitFlags & isDead ) {
+			losses[clientNum][fightLossDied]++;
+		} else if ( ps->bitFlags & usingMelee ) {
+			losses[clientNum][fightLossMelee]++;
+		} else if ( ps->timers[tmKnockback] > 0 ) {
+			losses[clientNum][fightLossKnockback]++;
+		} else if ( ps->timers[tmTransform] > 1 ) {
+			losses[clientNum][fightLossTransform]++;
+		} else if ( ps->bitFlags & usingSoar ) {
+			losses[clientNum][fightLossSoar]++;
+		} else {
+			losses[clientNum][fightLossOther]++;
+		}
+	}
+
+	for ( i = 0 ; i < fightUseCount ; i++ ) {
+		if ( using[i] && !wasUsing[clientNum][i] ) {
+			uses[clientNum][i]++;
+		}
+		wasUsing[clientNum][i] = using[i];
+	}
+
+	// Every frame, so a dip between two samples still counts.
+	if ( !guardLow[clientNum] || ps->powerLevel[plFatigue] < guardLow[clientNum] ) {
+		guardLow[clientNum] = ps->powerLevel[plFatigue];
+	}
+
+	if ( level.time - reported[clientNum] < g_debugFight.integer ) {
+		return;
+	}
+	reported[clientNum] = level.time;
+
+	// Only the causes that have happened, so the line does not carry five
+	// zeroes for a fight that never lost a charge.
+	lossText[0] = '\0';
+	for ( i = 0 ; i < fightLossCount ; i++ ) {
+		if ( !losses[clientNum][i] ) {
+			continue;
+		}
+		Com_sprintf( lossPart, sizeof( lossPart ), "%s%s:%i",
+			lossText[0] ? "," : "", fightLossNames[i], losses[clientNum][i] );
+		Q_strcat( lossText, sizeof( lossText ), lossPart );
+	}
+	if ( !lossText[0] ) {
+		Q_strncpyz( lossText, "none", sizeof( lossText ) );
+	}
+
+	// Distance to whatever it is locked to, because every melee gate below is
+	// really a question about range and none of the rest of the line answers
+	// it. -1 when there is no lock to measure against.
+	dist = -1;
+	if ( ps->lockedTarget > 0 && ps->lockedTarget <= MAX_CLIENTS ) {
+		foe = &g_entities[ps->lockedTarget - 1];
+		if ( foe->client ) {
+			dist = (int)Distance( ps->origin, foe->client->ps.origin );
+		}
+	}
+
+	// Everything PM_Melee can refuse on, so a fighter that stands in range
+	// hitting nothing says which gate stopped it rather than leaving it to be
+	// guessed at. It returns outright on mIdle below zero and on a charging
+	// weapon, and skips all melee logic while freeze is non-zero or dist is
+	// over 64; wpn is there because a skill left selected is what puts the
+	// weapon into a charge in the first place.
+	//
+	// safe is the delay since damage, alter covers powering up in either
+	// direction, and melee against meleeState separates being held in an
+	// exchange from doing anything inside one.
+	//
+	// The four verbs read now/total: whether it is up at this instant, and how
+	// many times it has been reached for since the map loaded.
+	G_Printf( "fight c%i t%i.%i: health %i/%i fatigue %i pools %i/%i lock %i buttons %s"
+		" dist %i freeze %i mIdle %i wst %s wpn %s"
+		" safe %i alter %s soar %s jump %s melee %s meleeState %s"
+		" block %i/%i zanzoken %i/%i quickzan %i/%i boost %i/%i struggle %i/%i"
+		" initiate %i/%i struck %i/%i stunned %i/%i charge %i/%i ready %i/%i fired %i/%i dead %i/%i"
+		" guardLow %i lost %s\n",
+		clientNum, level.time / 1000, ( level.time % 1000 ) / 100,
+		ps->powerLevel[plHealth], ps->powerLevel[plMaximum], ps->powerLevel[plFatigue],
+		ps->powerLevel[plHealthPool], ps->powerLevel[plMaximumPool],
+		ps->lockedTarget, G_ButtonNames( client->pers.cmd.buttons ),
+		dist, ps->timers[tmFreeze], ps->timers[tmMeleeIdle],
+		BG_WeaponStateName( ps->weaponstate ), ps->weapon ? va( "%i", ps->weapon ) : "none",
+		ps->timers[tmSafe],
+		( ps->bitFlags & usingAlter ) ? "yes" : "no",
+		( ps->bitFlags & usingSoar ) ? "yes" : "no",
+		( ps->bitFlags & usingJump ) ? "yes" : "no",
+		( ps->bitFlags & usingMelee ) ? "yes" : "no",
+		BG_MeleeStateName( ps->stats[stMeleeState] ),
+		using[fightUseBlock], uses[clientNum][fightUseBlock],
+		using[fightUseZanzoken], uses[clientNum][fightUseZanzoken],
+		using[fightUseQuickZan], uses[clientNum][fightUseQuickZan],
+		using[fightUseBoost], uses[clientNum][fightUseBoost],
+		using[fightUseStruggle], uses[clientNum][fightUseStruggle],
+		using[fightUseInitiate], uses[clientNum][fightUseInitiate],
+		using[fightUseStruck], uses[clientNum][fightUseStruck],
+		using[fightUseStunned], uses[clientNum][fightUseStunned],
+		using[fightUseCharge], uses[clientNum][fightUseCharge],
+		using[fightUseReady], uses[clientNum][fightUseReady],
+		using[fightUseFired], uses[clientNum][fightUseFired],
+		using[fightUseDied], uses[clientNum][fightUseDied],
+		guardLow[clientNum], lossText );
+}
+
 /*
 ==============
 ClientThink
@@ -521,6 +836,7 @@ void ClientThink_real( gentity_t *ent ) {
 	else{
 		client->ps.pm_type = PM_NORMAL;
 	}
+	G_DebugFight( ent );
 	ent->s.playerBitFlags = client->ps.bitFlags;
 	ent->s.attackPowerCurrent = client->ps.powerLevel[plHealth];
 	ent->s.attackPowerTotal = client->ps.powerLevel[plMaximum];
@@ -539,6 +855,13 @@ void ClientThink_real( gentity_t *ent ) {
 	pm.pmove_fixed = pmove_fixed.integer | client->pers.pmoveFixed;
 	pm.pmove_msec = pmove_msec.integer;
 	VectorCopy(client->ps.origin,client->oldOrigin);
+	// Melee damage is dealt inside pmove, which has no reach into gclient_t.
+	// The attacker's own pmove has already posted the damage here and the melee
+	// lock still names them, so the credit is taken now - PM_BurnPowerLevel
+	// spends plDamageFromMelee and clears it a few lines into Pmove below.
+	if(client->ps.powerLevel[plDamageFromMelee] > 0 && client->ps.lockedTarget > 0){
+		G_RecordAttacker(client,client->ps.lockedTarget - 1);
+	}
 	Pmove(&pm);
 	checkTier(client);
 	if(pm.ps->powerLevel[plTierChanged] == 1)
@@ -611,6 +934,12 @@ void ClientThink( int clientNum ) {
 
 
 void G_RunClient( gentity_t *ent ) {
+	// a dummy has no engine client to deliver usercmds, so it thinks here
+	// every server frame rather than on arrival of a command
+	if ( ent->client->pers.isDummy ) {
+		G_RunDummy( ent );
+		return;
+	}
 	if ( !g_synchronousClients.integer && !ent->client->ps.lockedTarget) {
 		return;
 	}

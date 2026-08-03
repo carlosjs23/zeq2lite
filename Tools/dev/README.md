@@ -10,6 +10,7 @@ Python scripts use only the standard library; shell scripts need bash.
 | `zeq2run.sh` | join a map, stay alive N seconds, report how the run ended |
 | `zeq2shot.sh` | join a map, grab an in-engine screenshot, convert it to PNG |
 | `zeq2bench.sh` | time the renderer on a scene that repeats exactly, and A/B a cvar |
+| `zeq2duel.sh` | fight two AI opponents and report what each spent doing it; `--assert` makes it a gate |
 | `zeq2smoke.sh` | **gate**: load every map, assert the game survives joining it |
 | `zeq2audit.sh` | report where the code expects assets the data set never shipped |
 | `zeq2aura.sh` | sweep the aura's tuning and contact-sheet what each value renders as |
@@ -198,6 +199,82 @@ things are invisible on darwin-arm:
 - **`ld64` tolerates undefined symbols that GNU `ld` rejects.** A test suite
   missing a stub for a function it never calls links on macOS and fails on
   Linux.
+
+## Looking at a fight
+
+`zeq2duel.sh` puts two AI opponents in a map, lets them fight, and reads the
+result out of `g_debugFight` — one line per fighter per sample carrying the
+things a fight is actually made of and none of which are on screen as numbers:
+the guard behind the power bar, the two pools, the lock, the buttons held, and
+whether each defensive verb is in use.
+
+```bash
+Tools/dev/zeq2duel.sh --seconds 120       # long enough for guards to break
+```
+
+The summary is per fighter: what it opened and closed with, its guard's
+low-water mark, and how many samples it spent blocking, teleporting, boosting
+or struggling. **A verb with a count of zero is one the fight never had a
+reason to use**, which is the difference between a mechanic and a gimmick, and
+it is the signal to read after any balance change.
+
+The cvar works on its own for a fight involving a human: `g_debugFight 1000`
+reports every client every second, including yours.
+
+Counts are events, not samples. Every verb, the death count and the guard's
+low-water mark are tracked per frame in `G_DebugFight` and read off the last
+line, because anything sampled at the reporting interval measures *how long*
+something lasted rather than *how often* it happened. A zanzoken is up for a
+few hundred milliseconds; the death count once reported ten for a duel with
+two obituaries.
+
+### The charge funnel
+
+`charged` / `ready` / `fired` are three stages of one thing, and the split is
+what makes a stalled fight diagnosable:
+
+- **charged** — windups begun.
+- **ready** — windups that reached `chargeReadyPct`. Below it, any interrupt
+  discards the charge outright, so this is the stage that usually leaks.
+- **fired** — windups that became a shot.
+
+`charges lost to:` names what ended each windup that never fired — `melee`,
+`knock`, `trans`, `soar`, `died`, or `other` when nothing external was up and
+the fighter simply let go of the button. An aggregate "began 90, fired 6"
+supports two opposite explanations; these separate them in one run.
+
+### As a gate (`--assert`)
+
+```bash
+Tools/dev/zeq2duel.sh --seconds 240 --skill 5 --assert
+```
+
+Exits non-zero when the fight has stopped working: fewer fighters than
+expected, no melee exchange opened, or a charge-to-ready ratio under the floor.
+These are not balance targets - they are the shape of a fight that has
+degenerated, which a code change can cause silently and which no unit test can
+see.
+
+**Use a long run.** The metrics are noisy over 60s - consecutive runs have given
+ready ratios of 0.075 and 0.348 - so a short duel will flap. 240s is the
+shortest that has been stable.
+
+### Watching it live (`cg_debugFight`)
+
+```
+cg_debugFight 1
+```
+
+Draws the followed fighter's decision inputs on screen: pools, weapon state,
+charge percent and whether it is ready, lock and distance, melee state, and the
+timers every melee branch refuses on. The duel harness leaves you spectating and
+following, so this shows the AI's state as it fights. Cheat-gated and not
+archived.
+
+It reads `cg.snap->ps`, so it shows what the *client* knows. The AI's own
+intent - its plant range, its held rolls, its tendency counters - stays
+server-side on the fight line, because putting it on screen would mean
+networking it.
 
 ## Why the smoke test drives the client, not the dedicated server
 

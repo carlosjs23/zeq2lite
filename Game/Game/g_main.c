@@ -58,6 +58,7 @@ vmCvar_t	g_quadfactor;
 vmCvar_t	g_forcerespawn;
 vmCvar_t	g_inactivity;
 vmCvar_t	g_debugMove;
+vmCvar_t	g_debugFight;
 vmCvar_t	g_debugDamage;
 vmCvar_t	g_debugAlloc;
 vmCvar_t	g_weaponRespawn;
@@ -108,6 +109,7 @@ vmCvar_t	g_quickTransformCost;
 vmCvar_t	g_quickTransformCostPerTier ;
 vmCvar_t	g_quickZanzokenCost;
 vmCvar_t	g_quickZanzokenDistance;
+vmCvar_t	g_aiSkill;
 
 static cvarTable_t		gameCvarTable[] = {
 	// don't override the cheat state set by the system
@@ -154,6 +156,7 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_forcerespawn, "g_forcerespawn", "20", 0, 0, qtrue },
 	{ &g_inactivity, "g_inactivity", "0", 0, 0, qtrue },
 	{ &g_debugMove, "g_debugMove", "0", 0, 0, qfalse },
+	{ &g_debugFight, "g_debugFight", "0", 0, 0, qfalse },
 	{ &g_debugDamage, "g_debugDamage", "0", 0, 0, qfalse },
 	{ &g_debugAlloc, "g_debugAlloc", "0", 0, 0, qfalse },
 	{ &g_motd, "g_motd", "", 0, 0, qfalse },
@@ -195,6 +198,7 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_quickTransformCostPerTier , "g_quickTransformCostPerTier", "0.08", CVAR_ARCHIVE | CVAR_SERVERINFO,0,qtrue },
 	{ &g_quickZanzokenCost , "g_quickZanzokenCost", "-1.0", CVAR_ARCHIVE | CVAR_SERVERINFO,0,qtrue },
 	{ &g_quickZanzokenDistance , "g_quickZanzokenDistance", "-1.0", CVAR_ARCHIVE | CVAR_SERVERINFO,0,qtrue },
+	{ &g_aiSkill, "g_aiSkill", "3", CVAR_ARCHIVE, 0, qtrue },
 	// END ADDING
 
 };
@@ -767,10 +771,6 @@ and team change.
 */
 void CalculateRanks( void ) {
 	int		i;
-	int		rank;
-	int		score;
-	int		newScore;
-	gclient_t	*cl;
 
 	level.follow1 = -1;
 	level.follow2 = -1;
@@ -782,7 +782,37 @@ void CalculateRanks( void ) {
 	for (i = 0; i < ARRAY_LEN(level.numteamVotingClients); i++)
 		level.numteamVotingClients[i] = 0;
 
-	qsort( level.sortedClients, level.numConnectedClients, 
+	for ( i = 0 ; i < level.maxclients ; i++ ) {
+		if ( level.clients[i].pers.connected == CON_DISCONNECTED ) {
+			continue;
+		}
+		level.sortedClients[level.numConnectedClients] = i;
+		level.numConnectedClients++;
+
+		if ( level.clients[i].sess.sessionTeam != TEAM_SPECTATOR ) {
+			level.numNonSpectatorClients++;
+
+			if ( level.clients[i].pers.connected == CON_CONNECTED ) {
+				level.numPlayingClients++;
+				// dummies are game-side clients with no one behind them
+				if ( !level.clients[i].pers.isDummy ) {
+					level.numVotingClients++;
+					if ( level.clients[i].sess.sessionTeam == TEAM_RED ) {
+						level.numteamVotingClients[0]++;
+					} else if ( level.clients[i].sess.sessionTeam == TEAM_BLUE ) {
+						level.numteamVotingClients[1]++;
+					}
+				}
+				if ( level.follow1 == -1 ) {
+					level.follow1 = i;
+				} else if ( level.follow2 == -1 ) {
+					level.follow2 = i;
+				}
+			}
+		}
+	}
+
+	qsort( level.sortedClients, level.numConnectedClients,
 		sizeof(level.sortedClients[0]), SortRanks );
 
 	// set the CS_SCORES1/2 configstrings, which will be visible to everyone
@@ -1117,13 +1147,26 @@ void LogExit( const char *string ) {
 =================
 CheckIntermissionExit
 
-The level will stay at the intermission for a minimum of 5 seconds
-If all players wish to continue, the level will then exit.
-If one or more players have not acknowledged the continue, the game will
-wait 10 seconds before going on.
+The intermission holds long enough to read the final scoreboard, then the
+level exits on its own. Nothing waits on client readiness here.
 =================
 */
-void CheckIntermissionExit( void ) {ExitLevel();}
+void CheckIntermissionExit( void ) {
+	char nextmap[MAX_STRING_CHARS];
+
+	if ( level.time < level.intermissiontime + 10000 ) {
+		return;
+	}
+
+	// ExitLevel resolves the next map with "vstr nextmap"; with the cvar unset
+	// that is a no-op and the game stalls with every client left connecting.
+	trap_Cvar_VariableStringBuffer( "nextmap", nextmap, sizeof(nextmap) );
+	if ( !nextmap[0] ) {
+		trap_Cvar_Set( "nextmap", "map_restart 0" );
+	}
+
+	ExitLevel();
+}
 
 /*
 =============
@@ -1156,7 +1199,51 @@ and the time everyone is moved to the intermission spot, so you
 can see the last frag.
 =================
 */
-void CheckExitRules( void ) {}
+void CheckExitRules( void ) {
+	int			i;
+	gclient_t	*cl;
+
+	// if at the intermission, wait for all non-bots to
+	// signal ready, then go to next level
+	if ( level.intermissiontime ) {
+		CheckIntermissionExit ();
+		return;
+	}
+
+	if ( level.intermissionQueued ) {
+		if ( level.time - level.intermissionQueued >= INTERMISSION_DELAY_TIME ) {
+			level.intermissionQueued = 0;
+			BeginIntermission();
+		}
+		return;
+	}
+
+	// fraglimit is the only exit rule alive; team score limits went out with
+	// the rankings system
+	if ( g_fraglimit.integer ) {
+		for ( i=0 ; i< g_maxclients.integer ; i++ ) {
+			cl = level.clients + i;
+			if ( cl->pers.connected != CON_CONNECTED ) {
+				continue;
+			}
+			if ( cl->sess.sessionTeam != TEAM_FREE ) {
+				continue;
+			}
+			// A dummy's kills stay on the board but cannot end the map. A
+			// sparring partner exists to keep the fight running; one that
+			// wins the match freezes the fight it was spawned to feed.
+			if ( cl->pers.isDummy ) {
+				continue;
+			}
+			if ( cl->ps.persistant[PERS_SCORE] >= g_fraglimit.integer ) {
+				LogExit( "Fraglimit hit." );
+				trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
+					cl->pers.netname ) );
+				return;
+			}
+		}
+	}
+}
 
 
 

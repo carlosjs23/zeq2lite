@@ -241,6 +241,48 @@ void BG_EvaluateTrajectoryDelta( entityState_t *es, const trajectory_t *tr, int 
 	}
 }
 
+// Indexed directly by entity_event_t, so this must stay in the same order and
+// hold the same number of entries as that enum in bg_public.h - a name missing
+// here shifts every event after it and reads off the end of the table.
+
+/*
+==============
+BG_WeaponStateName / BG_MeleeStateName
+
+Names, not indices. Both of these enums have been misread straight off the log -
+a meleeState of 11 and a weaponstate of 7 say nothing at a glance. Shared so the
+fight line and the on-screen overlay cannot drift apart. Anything outside the
+enum prints as its number, so a bad value stays visible rather than reading as a
+state that exists.
+==============
+*/
+const char *BG_WeaponStateName( int state ) {
+	static const char	*names[] = {
+		"ready", "firing", "guiding", "charging",
+		"altFiring", "altGuiding", "altCharging",
+		"cooling", "raising", "dropping"
+	};
+
+	if ( state < 0 || state >= (int)( sizeof( names ) / sizeof( names[0] ) ) ) {
+		return va( "%i", state );
+	}
+	return names[state];
+}
+const char *BG_MeleeStateName( int state ) {
+	static const char	*names[] = {
+		"inactive", "aggressing", "degressing", "idle",
+		"startPower", "startAttack", "startDodge", "startHit",
+		"usingSpeed", "usingPower", "usingStun", "usingBlock", "usingEvade",
+		"usingSpeedBreaker", "usingChargeBreaker", "usingZanzoken",
+		"chargingPower", "chargingStun"
+	};
+
+	if ( state < 0 || state >= (int)( sizeof( names ) / sizeof( names[0] ) ) ) {
+		return va( "%i", state );
+	}
+	return names[state];
+}
+
 char *eventnames[] = {
 	"EV_NONE",
 	"EV_FOOTSTEP",
@@ -252,25 +294,23 @@ char *eventnames[] = {
 	"EV_STEP_8",
 	"EV_STEP_12",
 	"EV_STEP_16",
-	"EV_MISSILE_HIT",
-	"EV_MISSILE_MISS",
-	"EV_MISSILE_MISS_METAL",
-	"EV_MISSILE_MISS_AIR",
 	"EV_FALL_SHORT",
 	"EV_FALL_MEDIUM",
 	"EV_FALL_FAR",
-	"EV_JUMP_PAD",			// boing sound at origin", jump sound on player
+	"EV_JUMP_PAD",			// boing sound at origin, jump sound on player
 	"EV_HIGHJUMP",
 	"EV_JUMP",
-	"EV_WATER_TOUCH",	// foot touches
-	"EV_WATER_LEAVE",	// foot leaves
-	"EV_WATER_UNDER",	// head touches
-	"EV_WATER_CLEAR",	// head leaves
+	"EV_WATER_TOUCH",		// foot touches
+	"EV_WATER_LEAVE",		// foot leaves
+	"EV_WATER_UNDER",		// head touches
+	"EV_WATER_CLEAR",		// head leaves
+	"EV_WATER_SPLASH",		// something hits water fast
 	"EV_CHANGE_WEAPON",
 	"EV_FIRE_WEAPON",
+	"EV_CRASH",
+	"EV_NULL",
 	"EV_DETONATE_WEAPON",
 	"EV_ALTFIRE_WEAPON",
-	"EV_TIERCHECK",
 	"EV_TIERUP_FIRST",
 	"EV_TIERUP",
 	"EV_TIERDOWN",
@@ -281,30 +321,55 @@ char *eventnames[] = {
 	"EV_BOOST_START",
 	"EV_BALLFLIP",
 	"EV_MELEE_SPEED",
+	"EV_MELEE_MISS",
 	"EV_MELEE_KNOCKBACK",
+	"EV_MELEE_BREAKER",
 	"EV_MELEE_STUN",
 	"EV_MELEE_CHECK",
+	"EV_MELEE_KNOCKOUT",
 	"EV_ZANZOKEN_END",
 	"EV_ZANZOKEN_START",
-	"EV_DRAIN",
+	"EV_POWER_STRUGGLE_START",
 	"EV_PLAYER_TELEPORT_IN",
 	"EV_PLAYER_TELEPORT_OUT",
 	"EV_GENERAL_SOUND",
 	"EV_GLOBAL_SOUND",		// no attenuation
+	"EV_GLOBAL_TEAM_SOUND",
+	"EV_BULLET_HIT_FLESH",
+	"EV_BULLET_HIT_WALL",
+	"EV_MISSILE_HIT",
+	"EV_MISSILE_MISS",
+	"EV_MISSILE_MISS_METAL",
+	"EV_MISSILE_MISS_AIR",
+	"EV_SHOTGUN",
+	"EV_BULLET",			// otherEntity is the shooter
+	"EV_AIRBRAKE",
 	"EV_PAIN",
+	"EV_PAIN1",
+	"EV_PAIN2",
+	"EV_PAIN3",
+	"EV_PAIN4",
+	"EV_PAIN5",
 	"EV_DEATH",
 	"EV_DEATH1",
 	"EV_DEATH2",
 	"EV_DEATH3",
 	"EV_UNCONCIOUS",
 	"EV_OBITUARY",
-	"EV_SCOREPLUM",			// score plum
 	"EV_DEBUG_LINE",
 	"EV_STOPLOOPINGSOUND",
 	"EV_LOCKON_START",
-	"EV_MELEE_CHECK",
+	"EV_LOCKON_RESTART",
 	"EV_LOCKON_END",
-	"EV_BEAM_FADE"
+	"EV_STUNNED",
+	"EV_BLOCK",
+	"EV_PUSH",
+	"EV_SWAT",
+	"EV_HOVER",
+	"EV_HOVER_FAST",
+	"EV_HOVER_LONG",
+	"EV_BEAM_FADE",
+	"EV_EARTHQUAKE"
 };
 
 /*

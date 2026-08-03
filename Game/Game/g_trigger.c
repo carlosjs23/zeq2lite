@@ -341,6 +341,7 @@ void hurt_touch( gentity_t *self, gentity_t *other, trace_t *trace ) {
 	// is the activator a client ?
 	if(other->client){
 		other->client->ps.powerLevel[plDamageGeneric] += 8000000;
+		if(other->client->ps.powerLevel[plDamageGeneric] > POWERLEVEL_MAX){other->client->ps.powerLevel[plDamageGeneric] = POWERLEVEL_MAX;}
 		trap_SendServerCommand(-1, va("cp \"%s^7 Was Put Knock Out\n\"", other->client->pers.netname));
 		trap_SendConsoleCommand( EXEC_APPEND,"map_restart 5\n");
 		if(other->pain){other->pain(other,other,8000000);}
