@@ -27,15 +27,27 @@
 // targets: the only inputs are scroll and close. Anything that needs a control
 // belongs in the action vocabulary the rule engine already has.
 
-// The status palette is the toast palette from cg_draw.c, for the same reason
-// the tracker borrows the HUD's bar width: a completion is green here because a
-// completion is green there.
-static vec4_t	journalDone		= {0.588f,1.0f,0.0f,1.0f};
-static vec4_t	journalAvailable	= {1.0f,0.85f,0.4f,1.0f};
-static vec4_t	journalLocked		= {0.45f,0.50f,0.55f,0.8f};
-static vec4_t	journalHeading		= {1.0f,1.0f,1.0f,0.9f};
-static vec4_t	journalQuiet		= {0.7f,0.75f,0.8f,0.8f};
-static vec4_t	journalBackdrop		= {0.0f,0.0f,0.0f,0.94f};
+// The status palette is the tracker's palette from cg_draw.c, for the same
+// reason the tracker borrows the HUD's bar width: a completion is jade here
+// because a completion is jade there.
+//
+// Each state is a tag block with a word in it rather than a colour alone. The
+// word is what a player scans down the column, and it is what keeps the three
+// states apart for the colour vision deficiencies that would otherwise flatten
+// jade and blue into one.
+static vec4_t	journalDone		= {0.475f,0.839f,0.651f,1.0f};
+static vec4_t	journalAvailable	= {0.310f,0.639f,0.890f,1.0f};
+static vec4_t	journalLocked		= {1.0f,1.0f,1.0f,0.16f};
+static vec4_t	journalDoneInk		= {0.027f,0.153f,0.102f,1.0f};
+static vec4_t	journalAvailableInk	= {0.016f,0.071f,0.122f,1.0f};
+static vec4_t	journalLockedInk	= {1.0f,1.0f,1.0f,0.55f};
+static vec4_t	journalSlab		= {0.549f,0.745f,0.941f,0.10f};
+static vec4_t	journalSlabLocked	= {0.549f,0.745f,0.941f,0.045f};
+static vec4_t	journalHeading		= {1.0f,1.0f,1.0f,1.0f};
+static vec4_t	journalQuiet		= {1.0f,1.0f,1.0f,0.50f};
+static vec4_t	journalDim		= {1.0f,1.0f,1.0f,0.34f};
+static vec4_t	journalSashInk		= {0.165f,0.102f,0.024f,1.0f};
+static vec4_t	journalBackdrop		= {0.027f,0.043f,0.082f,0.94f};
 
 /*================
 CG_JournalRequest
@@ -210,20 +222,20 @@ static float *CG_JournalStatusColor(int status){
 	return journalLocked;
 }
 
-/*================
-CG_JournalLine
+static float *CG_JournalStatusInk(int status){
+	switch(status){
+	case jrDone:		return journalDoneInk;
+	case jrAvailable:	return journalAvailableInk;
+	}
+	return journalLockedInk;
+}
 
-The shadow pass exists for the same reason CG_DrawTrainingLine's does:
-CG_DrawStringExt draws its own shadow at a fixed half alpha whatever colour it
-is handed, so a dimmed row keeps a full-strength black outline and reads as
-damaged rather than as quiet.
-================*/
-static void CG_JournalLine(int x,int y,const char *text,const vec4_t color){
-	vec4_t	shadow = {0.0f,0.0f,0.0f,0.5f};
-
-	shadow[3] = 0.5f * color[3];
-	CG_DrawStringExt(-1,x+1,y+1,text,shadow,qtrue,qfalse,SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,0);
-	CG_DrawStringExt(-1,x,y,text,color,qfalse,qfalse,SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,0);
+static const char *CG_JournalStatusWord(int status){
+	switch(status){
+	case jrDone:		return "DONE";
+	case jrAvailable:	return "OPEN";
+	}
+	return "LOCK";
 }
 
 /*================
@@ -232,23 +244,34 @@ CG_JournalLive
 The only part of the page that is not a snapshot. persistant[] carries the
 active objective and its percent every frame for free, so the line that moves
 reads the snapshot and the list around it does not.
+
+It wears the tracker's gold sash, which is what makes "now" outrank every row
+below it: the same object, in the same colour, saying the same thing.
 ================*/
 static void CG_JournalLive(void){
 	const char	*text;
+	vec4_t		white = {1.0f,1.0f,1.0f,1.0f};
 	int		active,progress;
 
 	active = cg.snap->ps.persistant[PERS_TRAINING_OBJECTIVE];
 	if(!active){
-		CG_JournalLine(JOURNAL_LEFT,JOURNAL_LIVE_Y,"no objective in hand",journalQuiet);
+		CG_TextDraw(TEXTFACE_BODY,JOURNAL_LEFT,JOURNAL_LIVE_Y+6,TRAINING_BODY_SIZE,
+			journalQuiet,"no objective in hand",0,TEXTF_SHADOW);
 		return;
 	}
 	progress = cg.snap->ps.persistant[PERS_TRAINING_PROGRESS];
 	if(progress < 0){progress = 0;}
 	if(progress > 100){progress = 100;}
+	CG_DrawTrainingPic(JOURNAL_LEFT,JOURNAL_LIVE_Y,JOURNAL_RIGHT-JOURNAL_LEFT,JOURNAL_NOW_H,
+		white,cgs.media.trainingSashShader);
+	CG_TextDraw(TEXTFACE_BODY,JOURNAL_LEFT+12,JOURNAL_LIVE_Y+7,TRAINING_CAPS_SIZE,
+		journalSashInk,"NOW",TRAINING_CAPS_TRACK,0);
 	text = cg.trainingObjective[0] && cg.trainingObjectiveId == active ?
-		va("now: %s  -  %i%%",cg.trainingObjective,progress) :
-		va("now: training objective  -  %i%%",progress);
-	CG_JournalLine(JOURNAL_LEFT,JOURNAL_LIVE_Y,text,journalAvailable);
+		cg.trainingObjective : "training objective";
+	CG_TextDraw(TEXTFACE_BODY,JOURNAL_LEFT+56,JOURNAL_LIVE_Y+5,TRAINING_BODY_SIZE,
+		journalHeading,text,0,TEXTF_SHADOW);
+	CG_TextDraw(TEXTFACE_DISPLAY,JOURNAL_RIGHT-12,JOURNAL_LIVE_Y+2,17,journalHeading,
+		va("%i%%",progress),0,TEXTF_RIGHT|TEXTF_SHADOW);
 }
 
 /*================
@@ -262,6 +285,7 @@ static void CG_JournalBody(void){
 	const journalSection_t	*section;
 	const journalLesson_t	*lesson;
 	const char		*text;
+	qboolean		locked;
 	int			s,l,row,y;
 
 	row = 0;
@@ -273,7 +297,8 @@ static void CG_JournalBody(void){
 			text = section->masterId && section->name[0] ?
 				va("%s",section->name) :
 				(section->masterId ? "a master" : "solo drills");
-			CG_JournalLine(JOURNAL_LEFT,y,text,journalHeading);
+			CG_TextDraw(TEXTFACE_BODY,JOURNAL_LEFT,y+3,TRAINING_CAPS_SIZE,journalQuiet,
+				CG_TextCaps(text),TRAINING_CAPS_TRACK,TEXTF_SHADOW);
 		}
 		row++;
 		for(l=0;l<section->count;l++){
@@ -281,13 +306,20 @@ static void CG_JournalBody(void){
 			if(row < cg.journal.scroll){row++;continue;}
 			lesson = &cg.journal.lessons[section->first + l];
 			y = JOURNAL_BODY_Y + (row - cg.journal.scroll) * JOURNAL_ROW;
-			// The glyph is what a player scans down the column, so it is a
-			// character rather than a colour alone: colour blindness would
-			// otherwise flatten three states into one.
-			text = lesson->status == jrDone ? va("[x] %s",lesson->label) :
-				lesson->status == jrAvailable ? va("[ ] %s",lesson->label) :
-				va("[-] %s",lesson->label);
-			CG_JournalLine(JOURNAL_LEFT+JOURNAL_INDENT,y,text,CG_JournalStatusColor(lesson->status));
+			locked = lesson->status == jrLocked ? qtrue : qfalse;
+			// Every row is the same sheared slab the tracker's plate is cut
+			// from, and a locked one is that slab at a third of its fill: the
+			// state is in the object as well as in the tag.
+			CG_DrawShearedSlab(JOURNAL_LEFT+JOURNAL_INDENT,y,JOURNAL_SLAB_W,JOURNAL_SLAB_H,
+				locked ? journalSlabLocked : journalSlab);
+			CG_DrawShearedSlab(JOURNAL_LEFT+JOURNAL_INDENT+6,y+1,JOURNAL_TAG_W,JOURNAL_TAG_H,
+				CG_JournalStatusColor(lesson->status));
+			CG_TextDraw(TEXTFACE_BODY,JOURNAL_LEFT+JOURNAL_INDENT+13,y+2,7,
+				CG_JournalStatusInk(lesson->status),CG_JournalStatusWord(lesson->status),
+				0.16f,0);
+			CG_TextDraw(TEXTFACE_BODY,JOURNAL_LEFT+JOURNAL_INDENT+JOURNAL_TAG_W+16,y+1,
+				TRAINING_BODY_SIZE,locked ? journalDim : journalHeading,lesson->label,0,
+				TEXTF_SHADOW);
 			row++;
 		}
 	}
@@ -303,32 +335,33 @@ CLAUDE.md's screen-space section is about.
 ================*/
 void CG_DrawJournal(void){
 	const char	*hint;
-	int		rows,width;
+	int		rows;
 
 	if(!cg.journal.open){return;}
 	CG_FillRect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,journalBackdrop);
-	CG_JournalLine(JOURNAL_LEFT,JOURNAL_TITLE_Y,"TRAINING JOURNAL",journalHeading);
+	CG_TextDraw(TEXTFACE_DISPLAY,JOURNAL_LEFT,JOURNAL_TITLE_Y,26,journalHeading,
+		"TRAINING JOURNAL",0,TEXTF_SHADOW);
 	// The key hint shares the title's line rather than sitting under the list.
 	// A footer at the bottom of a 640x480 page lands on top of the status panel,
 	// which is drawn first and owns that corner.
 	rows = cg.journal.numSections + cg.journal.numLessons;
 	hint = rows > JOURNAL_ROWS ? "escape closes    arrows scroll" : "escape closes";
-	width = CG_DrawStrlen(hint) * SMALLCHAR_WIDTH / 2;
-	CG_DrawStringExt(-1,JOURNAL_RIGHT-width,JOURNAL_TITLE_Y+SMALLCHAR_HEIGHT/4,hint,
-		journalQuiet,qfalse,qfalse,SMALLCHAR_WIDTH/2,SMALLCHAR_HEIGHT/2,0);
+	CG_TextDraw(TEXTFACE_BODY,JOURNAL_RIGHT,JOURNAL_TITLE_Y+10,TRAINING_CAPS_SIZE,journalDim,
+		CG_TextCaps(hint),TRAINING_CAPS_TRACK,TEXTF_RIGHT|TEXTF_SHADOW);
 	if(!cg.journal.valid){
 		// A page that has asked and heard nothing says so. Drawing the empty
 		// arrays instead would be a screen full of nothing that looks settled.
-		CG_JournalLine(JOURNAL_LEFT,JOURNAL_HEAD_Y,"fetching...",journalQuiet);
+		CG_TextDraw(TEXTFACE_BODY,JOURNAL_LEFT,JOURNAL_HEAD_Y,TRAINING_CAPS_SIZE,journalQuiet,
+			"FETCHING...",TRAINING_CAPS_TRACK,TEXTF_SHADOW);
 		if(cg.journal.requestTime && cg.time - cg.journal.requestTime > JOURNAL_RETRY_TIME){
 			CG_JournalRequest();
 		}
 		return;
 	}
-	CG_JournalLine(JOURNAL_LEFT,JOURNAL_HEAD_Y,
-		va("tier ceiling %i    lessons %i of %i    tags held %i",
+	CG_TextDraw(TEXTFACE_BODY,JOURNAL_LEFT,JOURNAL_HEAD_Y,TRAINING_CAPS_SIZE,journalAvailable,
+		CG_TextCaps(va("tier ceiling %i   -   lessons %i of %i   -   tags held %i",
 		cg.journal.tierCeiling,CG_JournalDoneCount(),cg.journal.numLessons,
-		cg.journal.earnedTags),journalQuiet);
+		cg.journal.earnedTags)),TRAINING_CAPS_TRACK,TEXTF_SHADOW);
 	CG_JournalLive();
 	CG_JournalBody();
 }
