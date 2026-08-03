@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_tiers.h"
 #include "g_rules.h"
 #include "g_masters.h"
+#include "g_progress.h"
 // END ADDING
 #include "g_public.h"
 //==================================================================
@@ -302,6 +303,12 @@ typedef struct {
 	int			objectiveId;
 	qboolean	objectiveComplete;	// goal reached; latches the completion event
 	int			unlockedTier;
+	// Save-file key, derived once at ClientConnect from the userinfo guid.
+	// Empty means this client does not persist, which is a decision made once
+	// rather than re-derived at every write.
+	char		progressKey[MAX_PROGRESS_KEY];
+	qboolean	progressDirty;		// tags or ceiling changed since the last write
+	qboolean	progressLoaded;		// the file has been read once for this connection
 } clientPersistant_t;
 
 
@@ -795,6 +802,10 @@ void G_CheckSkills(playerState_t *ps );
 /// g_training.c
 ///
 void		G_TrainingInit( void );
+void		G_TrainingShutdown( void );
+void		G_TrainingClientConnect( int clientNum, const char *userinfo );
+void		G_TrainingClientBegin( int clientNum );
+void		G_TrainingClientDisconnect( int clientNum );
 void		G_TrainingEndFrame( gentity_t *ent );
 qboolean	G_TrainingTierUnlocked( gclient_t *client, int tier );
 qboolean	G_TrainingConsoleCommand( const char *cmd );

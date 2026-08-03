@@ -786,6 +786,9 @@ char *ClientConnect( int clientNum, qboolean firstTime ) {
 	// get and distribute relevent paramters
 	G_LogPrintf( "ClientConnect: %i\n", clientNum );
 	ClientUserinfoChanged( clientNum );
+	// After the userinfo pass, because the fallback save key is built from the
+	// netname that pass sets.
+	G_TrainingClientConnect( clientNum, userinfo );
 
 	// don't do the "xxx connected" messages if they were caried over from previous level
 	if ( firstTime ) {
@@ -854,6 +857,11 @@ void ClientBegin( int clientNum ) {
 	client->ps.powerLevel[plLimit] = g_powerlevelMaximum.value;
 	client->ps.bitFlags |= isUnsafe;
 	// END ADDING
+
+	// Saved tags and tier ceiling, restored before the spawn so a returning
+	// player spawns with the ceiling their training earned rather than gaining
+	// it a frame later.
+	G_TrainingClientBegin( clientNum );
 
 	// locate ent at a spawn point
 	ClientSpawn( ent );
@@ -1114,6 +1122,10 @@ void ClientDisconnect( int clientNum ) {
 		// They don't get to take powerups with them!
 		// Especially important for stuff like CTF flags
 }
+	// Before the disconnect line, so a session's training events and the write
+	// that closes them read in order.
+	G_TrainingClientDisconnect( clientNum );
+
 	G_LogPrintf( "ClientDisconnect: %i\n", clientNum );
 
 	// if we are playing in tourney mode and losing, give a win to the other player

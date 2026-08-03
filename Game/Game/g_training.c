@@ -114,6 +114,114 @@ void G_TrainingInit(void){
 		G_RulesCount(),G_RulesTestCount(),G_TagCount());
 }
 
+// ----------------------------------------------------------------- events
+//
+// Every training event that changes what a player owns goes to games.log as one
+// line, in the shape the log already speaks - a label, a colon, then fields
+// (`ClientConnect: 3`). Fields are positional and the arity is fixed per event,
+// so a line parses by splitting on whitespace and the only quoted field is the
+// last one:
+//
+//   Training: <clientNum> <key> progress-load <tags> <tier> <dropped>
+//   Training: <clientNum> <key> progress-drop <tagName>
+//   Training: <clientNum> <key> progress-save <tags> <tier>
+//   Training: <clientNum> - progress-none
+//
+// The seam the plan asks for: the mod EMITS events and stores nothing beyond
+// the flat file, so a later backend reading games.log is a sidecar rather than
+// a change in here. `<key>` is `-` for a client that does not persist.
+static void trainingEvent(int clientNum,const char *text){
+	const char *key;
+
+	key = level.clients[clientNum].pers.progressKey;
+	G_LogPrintf("Training: %i %s %s\n",clientNum,key[0] ? key : "-",text);
+}
+
+// ------------------------------------------------------------ persistence
+
+// Writes are event-driven rather than periodic: the only moments a save file
+// can go stale are the edges where a rule granted something, and there are a
+// handful of those per session. Nothing is written when nothing changed, so a
+// player who trips no rule for an hour costs no writes at all.
+static void saveProgress(int clientNum){
+	gclient_t *client;
+	progress_t p;
+
+	client = level.clients + clientNum;
+	if(!trainingLive){return;}
+	if(!client->pers.progressKey[0]){return;}
+	if(!client->pers.progressDirty){return;}
+	memset(&p,0,sizeof(p));
+	p.tags = client->pers.tags;
+	p.unlockedTier = client->pers.unlockedTier;
+	// A failed write leaves the client dirty on purpose, so disconnect and
+	// shutdown try again rather than reporting a save that did not happen.
+	if(!G_ProgressWrite(client->pers.progressKey,&p)){return;}
+	client->pers.progressDirty = qfalse;
+	trainingEvent(clientNum,va("progress-save %i %i",G_ProgressTagCount(&p),p.unlockedTier));
+}
+
+// The key is derived once, here, from the userinfo the client connected with.
+// See g_progress.h for what keying on cl_guid is worth: it is trust-on-first-use
+// and a modified client can name any file it likes.
+void G_TrainingClientConnect(int clientNum,const char *userinfo){
+	gclient_t *client;
+
+	client = level.clients + clientNum;
+	client->pers.progressKey[0] = 0;
+	client->pers.progressDirty = qfalse;
+	client->pers.progressLoaded = qfalse;
+	if(!trainingLive){return;}
+	if(G_ProgressKey(Info_ValueForKey(userinfo,"cl_guid"),client->pers.netname,
+		client->pers.progressKey,sizeof(client->pers.progressKey))){
+		return;
+	}
+	// No guid and a name that cleans to nothing. Said once, at connect, rather
+	// than discovered as an absence of saves later.
+	G_LogPrintf("Training: %i - progress-none\n",clientNum);
+}
+
+// ClientBegin also runs on a team change, where pers is preserved and the tags
+// in it are newer than the file. Loading once per connection is what keeps a
+// team change from rolling a session back to its last write.
+void G_TrainingClientBegin(int clientNum){
+	gclient_t *client;
+	progress_t p;
+	progressLoad_t report;
+	int i;
+
+	client = level.clients + clientNum;
+	if(!trainingLive){return;}
+	if(client->pers.progressLoaded){return;}
+	client->pers.progressLoaded = qtrue;
+	if(!client->pers.progressKey[0]){return;}
+	if(!G_ProgressRead(client->pers.progressKey,&p,&report)){return;}
+	client->pers.tags = p.tags;
+	if(p.unlockedTier > client->pers.unlockedTier){
+		client->pers.unlockedTier = p.unlockedTier;
+	}
+	for(i=0;i<report.named;i++){
+		trainingEvent(clientNum,va("progress-drop %s",report.droppedNames[i]));
+	}
+	trainingEvent(clientNum,va("progress-load %i %i %i",report.restored,p.unlockedTier,report.dropped));
+	client->pers.progressDirty = qfalse;
+}
+
+void G_TrainingClientDisconnect(int clientNum){
+	saveProgress(clientNum);
+}
+
+// Called before G_ShutdownGame closes the log file, so the last writes of a
+// map still have their lines in games.log.
+void G_TrainingShutdown(void){
+	int i;
+
+	for(i=0;i<level.maxclients;i++){
+		if(level.clients[i].pers.connected != CON_CONNECTED){continue;}
+		saveProgress(i);
+	}
+}
+
 // ------------------------------------------------------------------ facts
 
 // Every fact is either a direct playerState read or an accumulator advanced in
@@ -187,11 +295,14 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 	clientNum = ent - g_entities;
 	switch(action->type){
 	case acGrant:
+		// World tags belong to the round, not to a player, so they are neither
+		// logged per client nor saved with one.
 		if(!Q_strncmp(G_TagName(action->tag),TRAINING_WORLD_PREFIX,(int)strlen(TRAINING_WORLD_PREFIX))){
 			G_TagSet(&g_worldTags,action->tag);
 			break;
 		}
 		G_TagSet(&client->pers.tags,action->tag);
+		client->pers.progressDirty = qtrue;
 		break;
 	case acRemove:
 		if(!Q_strncmp(G_TagName(action->tag),TRAINING_WORLD_PREFIX,(int)strlen(TRAINING_WORLD_PREFIX))){
@@ -199,6 +310,7 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 			break;
 		}
 		G_TagClear(&client->pers.tags,action->tag);
+		client->pers.progressDirty = qtrue;
 		break;
 	case acSay:
 		// One delivery. This also went out as a console print while the HUD had
@@ -223,6 +335,7 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 	case acUnlockTier:
 		if(action->value > client->pers.unlockedTier){
 			client->pers.unlockedTier = action->value;
+			client->pers.progressDirty = qtrue;
 		}
 		break;
 	}
@@ -290,6 +403,10 @@ void G_TrainingEndFrame(gentity_t *ent){
 		for(i=0;i<rule->numActions;i++){
 			runAction(ent,rule,&rule->actions[i]);
 		}
+		// The only frames a client can become dirty on are these, so the write
+		// hangs off the latch rather than off the frame: a crash then loses at
+		// most the lesson that was in flight.
+		saveProgress(ent - g_entities);
 	}
 	// After the actions, so an objective assigned this frame publishes its own
 	// first progress sample rather than the previous lesson's.
@@ -383,6 +500,9 @@ static void dumpRules(void){
 		if(client->pers.connected != CON_CONNECTED){continue;}
 		G_Printf("client %i (%s) tier ceiling %i, objective '%s'\n",i,client->pers.netname,
 			tierCeiling(client),client->pers.objectiveText);
+		G_Printf("  progress: %s%s\n",
+			client->pers.progressKey[0] ? G_ProgressPath(client->pers.progressKey) : "not persisted",
+			client->pers.progressDirty ? " (unwritten changes)" : "");
 		G_Printf("  pers: objective=%i progress=%i master=%i (%s)\n",
 			client->ps.persistant[PERS_TRAINING_OBJECTIVE],
 			client->ps.persistant[PERS_TRAINING_PROGRESS],

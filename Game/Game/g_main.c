@@ -518,6 +518,10 @@ G_ShutdownGame
 void G_ShutdownGame( int restart ) {
 	G_Printf ("==== ShutdownGame ====\n");
 
+	// Before the log file closes, so the closing writes are logged like every
+	// other one.
+	G_TrainingShutdown();
+
 	if ( level.logFile ) {
 		G_LogPrintf("ShutdownGame:\n" );
 		G_LogPrintf("------------------------------------------------------------\n" );
