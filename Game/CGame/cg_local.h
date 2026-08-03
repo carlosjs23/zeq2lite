@@ -100,23 +100,46 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // of. World-space lift is units, everything else is 640x480 virtual pixels.
 #define	MELEE_READOUT_LIFT	48
 #define	MELEE_READOUT_WIDTH	HUD_BAR_WIDTH
-#define	MELEE_READOUT_HEIGHT	5
+#define	MELEE_READOUT_HEIGHT	6
 #define	MELEE_READOUT_GAP	4
+// Ten ticks and no more. The charge is worth twelve, but at this size the gaps
+// between twelve segments eat the fill and it stops reading as a quantity - the
+// cap is the deck's agreed deviation for gauges at readout scale.
+#define	MELEE_READOUT_SEGMENTS	10
+#define	MELEE_READOUT_SEGGAP	2
+#define	MELEE_READOUT_WORD	19
 
-// The training surfaces: objective tracker, master line and toasts. Bottom
-// right, because every other corner is taken - the status panel owns bottom
-// left, the radar top right, the chat feed top left - and a persistent element
-// that overlaps any of them moves art that was placed first.
-// Aspect-correct like the panel, and it borrows the panel's bar width and inset
-// so a training bar reads as the same kind of object as a HUD gauge.
+// The training surfaces: objective tracker, master line and toasts. The tracker
+// keeps the bottom right corner, because every other one is taken - the status
+// panel owns bottom left, the radar top right - and a persistent element that
+// overlaps any of them moves art that was placed first. The toast queue sits
+// top left, where the approved treatment puts its sash.
+// Aspect-correct like the panel, so the two do not drift apart as the display
+// aspect changes.
 #define	TRAINING_MARGIN		8
-#define	TRAINING_BAR_WIDTH	(HUD_BAR_WIDTH*2)
-#define	TRAINING_BAR_HEIGHT	HUD_ROW_MINOR
-#define	TRAINING_RIGHT		(SCREEN_WIDTH-TRAINING_MARGIN)
-#define	TRAINING_LEFT		(TRAINING_RIGHT-TRAINING_BAR_WIDTH)
-#define	TRAINING_BAR_Y		(SCREEN_HEIGHT-TRAINING_MARGIN-TRAINING_BAR_HEIGHT-HUD_GAUGE_INSET)
-#define	TRAINING_TEXT_Y		(TRAINING_BAR_Y-SMALLCHAR_HEIGHT-4)
-#define	TRAINING_MASTER_Y	(TRAINING_TEXT_Y-SMALLCHAR_HEIGHT)
+#define	TRAINING_PLATE_W	344
+#define	TRAINING_PLATE_H	84
+#define	TRAINING_PLATE_X	(SCREEN_WIDTH-TRAINING_MARGIN-TRAINING_PLATE_W)
+#define	TRAINING_PLATE_Y	(SCREEN_HEIGHT-TRAINING_MARGIN-TRAINING_PLATE_H)
+// Everything in the tracker shares this right edge, the deck's own alignment.
+#define	TRAINING_RIGHT		(SCREEN_WIDTH-TRAINING_MARGIN-14)
+#define	TRAINING_MASTER_Y	(TRAINING_PLATE_Y+6)
+#define	TRAINING_TEXT_Y		(TRAINING_PLATE_Y+16)
+#define	TRAINING_LABEL_Y	(TRAINING_PLATE_Y+42)
+#define	TRAINING_BAR_Y		(TRAINING_PLATE_Y+63)
+#define	TRAINING_BAR_HEIGHT	9
+#define	TRAINING_PCT_W		42
+#define	TRAINING_BAR_X		(TRAINING_PLATE_X+52)
+#define	TRAINING_BAR_WIDTH	(TRAINING_RIGHT-TRAINING_PCT_W-6-TRAINING_BAR_X)
+// Em sizes, in virtual pixels. The display face is baked at 64 and every use
+// below minifies it.
+#define	TRAINING_TEXT_SIZE	25
+#define	TRAINING_TEXT_MIN	15
+#define	TRAINING_PCT_SIZE	21
+#define	TRAINING_CAPS_SIZE	8
+#define	TRAINING_BODY_SIZE	12
+// Letter spacing, in ems, matching the deck's tracked caps rows.
+#define	TRAINING_CAPS_TRACK	0.30f
 // Progress arrives quantized to whole percent, so the bar walks toward the last
 // value it was told instead of stepping: percent per millisecond.
 #define	TRAINING_PROGRESS_RATE	0.12f
@@ -125,13 +148,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	TRAINING_TOAST_SLOTS	3
 #define	TRAINING_TOAST_TIME	6000
 #define	TRAINING_TOAST_FADE	800
-#define	TRAINING_TOAST_STEP	(SMALLCHAR_HEIGHT+4)
-// Toasts run the width of the screen, so they stack above the status panel and
-// the weapon select rather than above the tracker: a line long enough to be
-// worth reading reaches across whatever is in the bottom-left corner.
-#define	TRAINING_TOAST_BOTTOM	(HUD_PANEL_Y-38-TRAINING_TOAST_STEP-4)
-// A toast is one line: long text is clamped rather than wrapped, since the
-// column it sits in is the width of the screen minus the two margins.
+// The sash, top left, stacking downward so the newest is nearest the play.
+#define	TRAINING_TOAST_X	26
+#define	TRAINING_TOAST_TOP	36
+#define	TRAINING_TOAST_W	364
+#define	TRAINING_TOAST_H	40
+#define	TRAINING_TOAST_STEP	46
+// A toast wraps to at most two lines and is clamped after that. The sash is a
+// fixed-width piece of art, so a third line would run off the end of it.
+#define	TRAINING_TOAST_LINES	2
 #define	TRAINING_TOAST_CHARS	76
 // The journal page. The backdrop is the one training element drawn stretched -
 // it has to cover every pixel - and everything on top of it is aspect-correct
@@ -139,15 +164,23 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	JOURNAL_LEFT		56
 #define	JOURNAL_RIGHT		(SCREEN_WIDTH-JOURNAL_LEFT)
 #define	JOURNAL_TITLE_Y		30
-#define	JOURNAL_HEAD_Y		56
-#define	JOURNAL_LIVE_Y		72
-#define	JOURNAL_BODY_Y		98
+#define	JOURNAL_HEAD_Y		66
+#define	JOURNAL_LIVE_Y		82
+#define	JOURNAL_BODY_Y		112
 // The list stops above the status panel rather than at the bottom of the
 // screen: the panel is drawn before the page and keeps its corner.
 #define	JOURNAL_BODY_BOTTOM	(HUD_PANEL_Y-8)
-#define	JOURNAL_ROW		14
+#define	JOURNAL_ROW		16
 #define	JOURNAL_INDENT		18
 #define	JOURNAL_ROWS		((JOURNAL_BODY_BOTTOM-JOURNAL_BODY_Y)/JOURNAL_ROW)
+// The row slab and the status tag cut into it. A tag is four characters in
+// every state - DONE, OPEN, LOCK - so the block is a fixed width and the
+// labels line up down the column instead of ragging with the word.
+#define	JOURNAL_SLAB_H		13
+#define	JOURNAL_TAG_W		34
+#define	JOURNAL_TAG_H		11
+#define	JOURNAL_SLAB_W		420
+#define	JOURNAL_NOW_H		22
 // The batch is small and lands within a frame or two on a listen server; this is
 // how long the page waits before asking again, which only matters on a real
 // connection that dropped the request.
@@ -1446,6 +1479,7 @@ typedef enum {
 
 void		CG_TextInit( void );
 qboolean	CG_TextValid( int faceIndex );
+const char	*CG_TextCaps( const char *text );
 float		CG_TextHeight( int faceIndex, float size );
 float		CG_TextWidth( int faceIndex, const char *text, float size, float tracking );
 void		CG_TextDraw( int faceIndex, float x, float y, float size, const vec4_t color,

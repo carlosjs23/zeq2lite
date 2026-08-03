@@ -860,6 +860,11 @@ a corner reading would be technically present and practically still unreadable.
 
 Aspect-correct, like the panel it borrows its bar from: mixing the two mappings
 inside one HUD makes the pieces drift apart as the display aspect changes.
+
+The one place the treatment is asked to whisper, and the one place it gives up
+its plate: the sheared word and the charge gauge sit straight on the scene so
+they never box off the fighter they are describing. That is the deck's own
+deviation, agreed with the layout.
 ================*/
 static void CG_DrawMeleeReadout(void){
 	const playerState_t	*ps;
@@ -867,11 +872,11 @@ static void CG_DrawMeleeReadout(void){
 	const char			*label;
 	vec3_t				anchor;
 	vec4_t				labelColor;
-	vec4_t				chargingColor = {0.9f,0.5f,0.0f,1.0f};
-	vec4_t				readyColor = {0.588f,1.0f,0.0f,1.0f};
-	vec4_t				emptyColor = {0.0f,0.0f,0.0f,0.5f};
-	float				x,y;
-	int					charge,cap,width;
+	vec4_t				litColor = {0.310f,0.639f,0.890f,1.0f};
+	vec4_t				tipColor = {0.749f,0.902f,1.0f,1.0f};
+	vec4_t				emptyColor = {1.0f,1.0f,1.0f,0.22f};
+	float				x,y,segment,left;
+	int					charge,cap,lit,i;
 
 	if(!cg_drawMeleeState.integer){return;}
 	ps = &cg.predictedPlayerState;
@@ -889,17 +894,40 @@ static void CG_DrawMeleeReadout(void){
 	else if(ps->stats[stMeleeState] == stMeleeChargingStun){cap = MELEE_STUN_CHARGE;}
 	if(cap){
 		if(charge > cap){charge = cap;}
-		CG_DrawHorGauge(x-MELEE_READOUT_WIDTH/2,y,MELEE_READOUT_WIDTH,MELEE_READOUT_HEIGHT,
-			charge >= cap ? readyColor : chargingColor,emptyColor,charge,cap,qfalse);
-		CG_DrawPic(qfalse,x-MELEE_READOUT_WIDTH/2-HUD_GAUGE_INSET,y-HUD_GAUGE_INSET,
-			MELEE_READOUT_WIDTH+2*HUD_GAUGE_INSET,MELEE_READOUT_HEIGHT+2*HUD_GAUGE_INSET,
-			cgs.media.gaugeMinorShader);
+		// Ten ticks, not one per unit of charge. A continuous fill at this size
+		// is four pixels of travel a player cannot read inside a 550ms window;
+		// ten is the most that still leaves a gap between the segments, which
+		// is why the deck's readout gauge caps there.
+		segment = (MELEE_READOUT_WIDTH - (MELEE_READOUT_SEGMENTS-1) * MELEE_READOUT_SEGGAP)
+			/ (float)MELEE_READOUT_SEGMENTS;
+		lit = (charge * MELEE_READOUT_SEGMENTS + cap - 1) / cap;
+		left = x - MELEE_READOUT_WIDTH / 2.0f;
+		for(i=0;i<MELEE_READOUT_SEGMENTS;i++){
+			// The leading segment takes the bar's white tip colour, which is
+			// what makes the gauge read as filling rather than as ten lamps.
+			CG_DrawTrainingPic(left + i * (segment + MELEE_READOUT_SEGGAP),y,segment,
+				MELEE_READOUT_HEIGHT,i >= lit ? emptyColor : (i == lit-1 ? tipColor : litColor),
+				cgs.media.whiteShader);
+			// Then the additive pass on top. Additive alone is the deck's note
+			// and it is right on the deck's dark stage; over sunlit desert it
+			// saturates to white and the blue stops meaning anything, so the
+			// colour is laid down blended first and the light added over it.
+			if(i < lit){
+				CG_DrawTrainingPic(left + i * (segment + MELEE_READOUT_SEGGAP),y,segment,
+					MELEE_READOUT_HEIGHT,i == lit-1 ? tipColor : litColor,
+					cgs.media.trainingSegmentShader);
+			}
+		}
 	}
 	label = CG_MeleeReadoutState(ps->lockonData[lkMeleeState],ps->lockonData[lkMeleeStatus],labelColor);
 	if(!label){return;}
-	width = CG_DrawStrlen(label) * SMALLCHAR_WIDTH;
-	CG_DrawStringExt(-1,(int)x-width/2,(int)y-SMALLCHAR_HEIGHT-MELEE_READOUT_GAP,label,labelColor,
-		qtrue,qtrue,SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,0);
+	// The white cut rather than the gold one, and this is the deviation the
+	// readout forces: threat, guard and opening are the whole point of the
+	// word, and a baked gold gradient multiplied by red leaves brown. It keeps
+	// the shear, which is what makes it the same voice as the tracker.
+	CG_TextDraw(TEXTFACE_DISPLAYW,
+		x,y-CG_TextHeight(TEXTFACE_DISPLAYW,MELEE_READOUT_WORD)-MELEE_READOUT_GAP,
+		MELEE_READOUT_WORD,labelColor,label,0,TEXTF_CENTER|TEXTF_SHADOW);
 }
 /*================
 CG_TrainingMasterName
@@ -919,6 +947,9 @@ Loaded on first use, so a server with training off never touches the file.
 static char		trainingMasterNames[TRAINING_MASTERS][32];
 static qboolean	trainingMastersLoaded;
 static char		trainingMasterBuffer[TRAINING_MASTERS_SIZE+1];
+// The toast wrap works on a copy, because it has to cut the string to measure
+// where the cut goes. Static rather than automatic: the QVM's stack is small.
+static char		trainingToastLine[MAX_SAY_TEXT];
 
 static const char *CG_TrainingMasterName(int id){
 	fileHandle_t	f;
@@ -1012,25 +1043,36 @@ void CG_TrainingComplete(const char *text,int objectiveId){
 	CG_TrainingToast(text,qtrue);
 }
 /*================
-CG_DrawTrainingLine
+CG_DrawTrainingBar
 
-CG_DrawStringExt draws its drop shadow at a fixed half alpha whatever colour it
-is handed, so a string that fades out loses its text and keeps its shadow: the
-last second of every toast is a smear of black with nothing in it. Issuing the
-two passes here is what makes a faded line fade whole.
+The charge bar: a sheared trough, an additive fill and a white leading edge.
+
+Additive because that is the language the auras and the ki gauges already speak
+- light added to the scene rather than a swatch masking it - and the fill is a
+sub-rectangle of its ramp rather than a squeezed copy, so the bright end of the
+ramp stays at the bright end of the bar however short the fill is.
 ================*/
-static void CG_DrawTrainingLine(int x,int y,int height,const char *text,const vec4_t color,int maxChars){
-	vec4_t	shadow = {0.0f,0.0f,0.0f,0.5f};
+static void CG_DrawTrainingBar(float x,float y,float width,float height,float fraction,
+	const vec4_t color){
+	vec4_t	white = {1.0f,1.0f,1.0f,1.0f};
+	float	tip;
 
-	shadow[3] = 0.5f * color[3];
-	CG_DrawStringExt(-1,x+1,y+1,text,shadow,qtrue,qfalse,SMALLCHAR_WIDTH,height,maxChars);
-	CG_DrawStringExt(-1,x,y,text,color,qfalse,qfalse,SMALLCHAR_WIDTH,height,maxChars);
+	white[3] = color[3];
+	CG_DrawTrainingPic(x,y,width,height,white,cgs.media.trainingBarTrackShader);
+	if(fraction <= 0){return;}
+	if(fraction > 1.0f){fraction = 1.0f;}
+	CG_DrawTrainingPicST(x,y,width*fraction,height,fraction,color,cgs.media.trainingBarFillShader);
+	// The tip stands proud of the trough top and bottom, which is what makes it
+	// read as the edge of something moving rather than as the end of a fill.
+	tip = height * 0.5f;
+	CG_DrawTrainingPic(x+width*fraction-tip*0.5f,y-height*0.5f,tip,height*2.0f,white,
+		cgs.media.trainingBarTipShader);
 }
 /*================
 CG_DrawTrainingTracker
 
-Objective text, then the bar it is measured on, sharing a right edge with the
-toasts above them.
+The plate, who is teaching, the objective in the display cut, and the bar it is
+measured on - all sharing the deck's right edge.
 
 The bar walks toward the percent instead of taking it. Progress is quantized to
 whole percent precisely so it can be sent in persistant[] every snapshot, and a
@@ -1038,16 +1080,16 @@ whole percent precisely so it can be sent in persistant[] every snapshot, and a
 walk is the other half of that decision, not decoration.
 ================*/
 static void CG_DrawTrainingTracker(void){
-	const char	*label;
-	vec4_t	trackColor = {0.110f,0.157f,0.204f,1.0f};
-	vec4_t	clearColor = {0.0f,0.0f,0.0f,0.0f};
-	vec4_t	barColor = {0.118f,0.588f,1.0f,1.0f};
-	vec4_t	doneColor = {0.588f,1.0f,0.0f,1.0f};
+	const char	*label,*name;
+	vec4_t	plateColor = {1.0f,1.0f,1.0f,1.0f};
+	vec4_t	masterColor = {0.310f,0.639f,0.890f,1.0f};
+	vec4_t	labelColor = {1.0f,1.0f,1.0f,0.55f};
+	vec4_t	barColor = {1.0f,1.0f,1.0f,1.0f};
+	vec4_t	doneColor = {0.475f,0.839f,0.651f,1.0f};
 	vec4_t	textColor = {1.0f,1.0f,1.0f,1.0f};
-	vec4_t	flashColor = {1.0f,1.0f,1.0f,1.0f};
 	qboolean	finishing;
-	float		target,step,flash;
-	int			active,width,textY;
+	float		target,step,flash,size,room,width;
+	int			active,face,master;
 
 	active = cg.snap->ps.persistant[PERS_TRAINING_OBJECTIVE];
 	finishing = cg.trainingDoneTime && cg.time - cg.trainingDoneTime < TRAINING_DONE_TIME ? qtrue : qfalse;
@@ -1075,74 +1117,105 @@ static void CG_DrawTrainingTracker(void){
 	// A tracker with no text is an objective assigned before this client was
 	// listening - the bar is still true, so say that rather than nothing.
 	label = cg.trainingObjective[0] && (finishing || cg.trainingObjectiveId == active) ? cg.trainingObjective : "training objective";
-	if(finishing){Vector4Copy(doneColor,textColor);}
-	width = CG_DrawStrlen(label) * SMALLCHAR_WIDTH;
-	if(width > TRAINING_RIGHT-TRAINING_MARGIN){width = TRAINING_RIGHT-TRAINING_MARGIN;}
-	CG_DrawTrainingLine(TRAINING_RIGHT-width,TRAINING_TEXT_Y,SMALLCHAR_HEIGHT,label,textColor,0);
-	CG_DrawHorGauge(TRAINING_LEFT,TRAINING_BAR_Y,TRAINING_BAR_WIDTH,TRAINING_BAR_HEIGHT,
-		trackColor,trackColor,1,1,qfalse);
-	if(cg.trainingProgress > 0){
-		CG_DrawHorGauge(TRAINING_LEFT,TRAINING_BAR_Y,TRAINING_BAR_WIDTH,TRAINING_BAR_HEIGHT,
-			finishing ? doneColor : barColor,clearColor,(int)cg.trainingProgress,100,qfalse);
+	CG_DrawTrainingPic(TRAINING_PLATE_X,TRAINING_PLATE_Y,TRAINING_PLATE_W,TRAINING_PLATE_H,
+		plateColor,cgs.media.trainingPlateShader);
+	// The master line lives inside the plate, because the rule engine sets
+	// masterNear from a radius and this line appearing is the player's only
+	// confirmation that they are standing close enough to be taught.
+	master = cg.snap->ps.persistant[PERS_TRAINING_MASTER];
+	if(master){
+		name = CG_TrainingMasterName(master);
+		CG_TextDraw(TEXTFACE_BODY,TRAINING_RIGHT,TRAINING_MASTER_Y,TRAINING_CAPS_SIZE,
+			masterColor,CG_TextCaps(name[0] ? va("training with %s",name) : "master nearby"),
+			TRAINING_CAPS_TRACK,TEXTF_RIGHT|TEXTF_SHADOW);
 	}
+	// The gold cut carries its gradient baked, so it is drawn at full white; a
+	// completion swaps to the white cut and takes the jade, which is the only
+	// way a baked gradient can change colour at all.
+	face = finishing ? TEXTFACE_DISPLAYW : TEXTFACE_DISPLAY;
+	if(finishing){Vector4Copy(doneColor,textColor);}
+	// A long objective is set smaller rather than allowed off the plate. The
+	// deck wraps its example to two lines; one line that shrinks keeps the bar
+	// and the label on the rows they were placed on, which a second line would
+	// push down into them.
+	size = TRAINING_TEXT_SIZE;
+	room = TRAINING_RIGHT - TRAINING_PLATE_X - 20;
+	width = CG_TextWidth(face,label,size,0);
+	if(width > room){
+		size *= room / width;
+		if(size < TRAINING_TEXT_MIN){size = TRAINING_TEXT_MIN;}
+	}
+	CG_TextDraw(face,TRAINING_RIGHT,TRAINING_TEXT_Y+(TRAINING_TEXT_SIZE-size)*0.5f,size,
+		textColor,label,0,TEXTF_RIGHT|TEXTF_SHADOW);
+	CG_TextDraw(TEXTFACE_BODY,TRAINING_RIGHT,TRAINING_LABEL_Y,TRAINING_CAPS_SIZE,labelColor,
+		finishing ? "COMPLETE" : "OBJECTIVE",TRAINING_CAPS_TRACK,TEXTF_RIGHT|TEXTF_SHADOW);
 	// The completion flash is the same gesture the limit break reserve makes
 	// when it tops up: the bar itself says it filled.
 	if(finishing){
 		flash = 1.0f - (float)(cg.time - cg.trainingDoneTime) / TRAINING_DONE_TIME;
 		if(flash > 0 && flash <= 1.0f){
-			flashColor[3] = flash;
-			CG_DrawHorGauge(TRAINING_LEFT,TRAINING_BAR_Y,TRAINING_BAR_WIDTH,TRAINING_BAR_HEIGHT,
-				flashColor,clearColor,1,1,qfalse);
+			barColor[0] = 1.0f + flash;
+			barColor[1] = 1.0f + flash;
+			barColor[2] = 1.0f + flash;
 		}
 	}
-	CG_DrawPic(qfalse,TRAINING_LEFT-HUD_GAUGE_INSET,TRAINING_BAR_Y-HUD_GAUGE_INSET,
-		TRAINING_BAR_WIDTH+2*HUD_GAUGE_INSET,TRAINING_BAR_HEIGHT+2*HUD_GAUGE_INSET,
-		cgs.media.gaugeMinorShader);
-	// The number sits left of the bar rather than right of it: the right edge is
-	// what every training element is aligned to.
-	label = finishing ? "done" : va("%i%%",(int)cg.trainingProgress);
-	textY = TRAINING_BAR_Y + TRAINING_BAR_HEIGHT/2 - SMALLCHAR_HEIGHT/4;
-	CG_DrawSmallStringHalfHeight(TRAINING_LEFT-HUD_GAUGE_INSET-4-Q_PrintStrlen(label)*SMALLCHAR_WIDTH,
-		textY,label,1.0f);
+	CG_DrawTrainingBar(TRAINING_BAR_X,TRAINING_BAR_Y,TRAINING_BAR_WIDTH,TRAINING_BAR_HEIGHT,
+		cg.trainingProgress / 100.0f,barColor);
+	// The number is the deck's own: display cut, hard right, level with the bar.
+	label = finishing ? "DONE" : va("%i%%",(int)cg.trainingProgress);
+	CG_TextDraw(face,TRAINING_RIGHT,
+		TRAINING_BAR_Y+TRAINING_BAR_HEIGHT/2.0f-CG_TextHeight(face,TRAINING_PCT_SIZE)/2.0f,
+		TRAINING_PCT_SIZE,textColor,label,0,TEXTF_RIGHT|TEXTF_SHADOW);
 }
 /*================
-CG_DrawTrainingMaster
+CG_TrainingToastBreak
 
-Who is teaching, in the quietest form that still answers it. The rule engine
-sets masterNear from a radius, so this line appearing is also the player's only
-confirmation that they are standing close enough to be taught.
+Where a toast's one line has to become two, in characters. The sash is a fixed
+piece of art, so the text has to fit it rather than the other way round; the
+break goes at the last space that fits, and a run with no space in it is cut
+where it lands because a word that long is a key, not a sentence.
 ================*/
-static void CG_DrawTrainingMaster(void){
-	const char	*name,*line;
-	vec4_t		masterColor = {1.0f,0.85f,0.4f,0.7f};
-	int			id,width;
+static int CG_TrainingToastBreak(char *text,float width){
+	int		i,last;
 
-	id = cg.snap->ps.persistant[PERS_TRAINING_MASTER];
-	if(!id){return;}
-	name = CG_TrainingMasterName(id);
-	line = name[0] ? va("training with %s",name) : "master nearby";
-	width = CG_DrawStrlen(line) * SMALLCHAR_WIDTH;
-	CG_DrawTrainingLine(TRAINING_RIGHT-width,TRAINING_MASTER_Y,SMALLCHAR_HEIGHT/2,line,masterColor,0);
+	if(CG_TextWidth(TEXTFACE_BODY,text,TRAINING_BODY_SIZE,0) <= width){return 0;}
+	last = 0;
+	for(i=0;text[i];i++){
+		if(text[i] != ' '){continue;}
+		text[i] = 0;
+		if(CG_TextWidth(TEXTFACE_BODY,text,TRAINING_BODY_SIZE,0) <= width){last = i;}
+		text[i] = ' ';
+	}
+	return last;
 }
 /*================
 CG_DrawTrainingToasts
 
-Oldest at the top, newest nearest the tracker, each fading out on its own
-clock. A completion is coloured like the bar it just filled.
+Oldest at the top, newest below it, each fading out on its own clock - the
+queue's order and timings are untouched, only what it looks like changed.
+
+The gold sash, top left, is where the approved layout puts these. A completion
+takes the jade twin instead, so "you finished something" is a different object
+from "someone said something" rather than the same object in another colour.
 ================*/
 static void CG_DrawTrainingToasts(void){
 	trainingToast_t	*toast;
+	const char		*who,*name;
 	float			*fade;
-	vec4_t			sayColor = {1.0f,0.85f,0.4f,1.0f};
-	vec4_t			doneColor = {0.588f,1.0f,0.0f,1.0f};
+	vec4_t			whoColor = {0.165f,0.102f,0.024f,1.0f};
+	vec4_t			doneWhoColor = {0.027f,0.153f,0.102f,1.0f};
+	vec4_t			msgColor = {1.0f,1.0f,1.0f,1.0f};
+	vec4_t			sashColor = {1.0f,1.0f,1.0f,1.0f};
 	vec4_t			color;
-	int				i,live,row,x,y,width;
+	float			y,textWidth;
+	int				i,live,row,brk;
 
 	live = 0;
 	for(i=0;i<TRAINING_TOAST_SLOTS;i++){
 		if(cg.trainingToasts[i].time){live++;}
 	}
 	if(!live){return;}
+	textWidth = TRAINING_TOAST_W - 30 - 24;
 	row = 0;
 	for(i=0;i<TRAINING_TOAST_SLOTS;i++){
 		toast = &cg.trainingToasts[i];
@@ -1153,13 +1226,34 @@ static void CG_DrawTrainingToasts(void){
 			row++;
 			continue;
 		}
-		Vector4Copy(toast->completion ? doneColor : sayColor,color);
+		y = TRAINING_TOAST_TOP + row * TRAINING_TOAST_STEP;
+		sashColor[3] = fade[3];
+		CG_DrawTrainingPic(TRAINING_TOAST_X,y,TRAINING_TOAST_W,TRAINING_TOAST_H,sashColor,
+			toast->completion ? cgs.media.trainingSashDoneShader : cgs.media.trainingSashShader);
+		// Nothing on the wire says who spoke, so the sash names the master the
+		// player is standing with. That is the same answer the tracker gives
+		// and it is right whenever there is one to give.
+		name = CG_TrainingMasterName(cg.snap->ps.persistant[PERS_TRAINING_MASTER]);
+		who = toast->completion ? "COMPLETE" : (name[0] ? CG_TextCaps(name) : "TRAINING");
+		Vector4Copy(toast->completion ? doneWhoColor : whoColor,color);
 		color[3] = fade[3];
-		y = TRAINING_TOAST_BOTTOM - (live - 1 - row) * TRAINING_TOAST_STEP;
-		width = CG_DrawStrlen(toast->text) * SMALLCHAR_WIDTH;
-		x = TRAINING_RIGHT - width;
-		if(x < TRAINING_MARGIN){x = TRAINING_MARGIN;}
-		CG_DrawTrainingLine(x,y,SMALLCHAR_HEIGHT,toast->text,color,TRAINING_TOAST_CHARS);
+		CG_TextDraw(TEXTFACE_BODY,TRAINING_TOAST_X+14,y+5,TRAINING_CAPS_SIZE,color,who,
+			TRAINING_CAPS_TRACK,0);
+		Vector4Copy(msgColor,color);
+		color[3] = fade[3];
+		Q_strncpyz(trainingToastLine,toast->text,sizeof(trainingToastLine));
+		brk = CG_TrainingToastBreak(trainingToastLine,textWidth);
+		if(brk){
+			trainingToastLine[brk] = 0;
+			CG_TextDraw(TEXTFACE_BODY,TRAINING_TOAST_X+14,y+14,TRAINING_BODY_SIZE,color,
+				trainingToastLine,0,TEXTF_SHADOW);
+			CG_TextDraw(TEXTFACE_BODY,TRAINING_TOAST_X+14,y+14+TRAINING_BODY_SIZE,
+				TRAINING_BODY_SIZE,color,trainingToastLine+brk+1,0,TEXTF_SHADOW);
+		}
+		else{
+			CG_TextDraw(TEXTFACE_BODY,TRAINING_TOAST_X+14,y+18,TRAINING_BODY_SIZE,color,
+				trainingToastLine,0,TEXTF_SHADOW);
+		}
 		row++;
 	}
 }
@@ -1174,7 +1268,6 @@ player is earning progress on it teaches nothing.
 static void CG_DrawTraining(void){
 	if(!cg_drawTraining.integer){return;}
 	CG_DrawTrainingTracker();
-	CG_DrawTrainingMaster();
 	CG_DrawTrainingToasts();
 }
 static void CG_DrawStatusBar( void ) {

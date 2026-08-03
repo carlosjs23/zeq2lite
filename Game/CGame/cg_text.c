@@ -41,6 +41,9 @@ typedef struct {
 	int			sheetWidth,sheetHeight;
 	int			size;			// pixels per em the atlas was baked at
 	int			ascent,descent,cap;
+	// The deck sets the display faces in caps and bakes their gradient down the
+	// cap band; a lowercase run through them would only fill the pale top of it.
+	qboolean	caps;
 	qboolean	valid;
 	textGlyph_t	glyphs[TEXT_NUM_CHARS];
 } cgFace_t;
@@ -114,6 +117,7 @@ void CG_TextInit(void){
 		if(!Q_stricmp(token,"ascent")){face->ascent = atoi(COM_Parse(&parse));continue;}
 		if(!Q_stricmp(token,"descent")){face->descent = atoi(COM_Parse(&parse));continue;}
 		if(!Q_stricmp(token,"cap")){face->cap = atoi(COM_Parse(&parse));continue;}
+		if(!Q_stricmp(token,"caps")){face->caps = atoi(COM_Parse(&parse)) ? qtrue : qfalse;continue;}
 		if(!Q_stricmp(token,"glyph")){
 			code = atoi(COM_Parse(&parse));
 			if(code < TEXT_FIRST_CHAR || code > TEXT_LAST_CHAR){
@@ -138,6 +142,27 @@ void CG_TextInit(void){
 			CG_Printf("CG_TextInit: face %i incomplete\n",index);
 		}
 	}
+}
+/*================
+CG_TextCaps
+
+The deck's tracked label rows are set in caps as well, but the body face is not
+a caps face - it also carries the sentences, which have to keep their case. So
+the rows that are labels rather than prose uppercase what they were handed, and
+that is a property of the row, not of the face.
+
+One static buffer, like va(): a caller holding two of these at once is a caller
+building one string out of two labels, which none of them do.
+================*/
+const char *CG_TextCaps(const char *text){
+	static char	upper[128];
+	int		i;
+
+	Q_strncpyz(upper,text,sizeof(upper));
+	for(i=0;upper[i];i++){
+		if(upper[i] >= 'a' && upper[i] <= 'z'){upper[i] -= 'a' - 'A';}
+	}
+	return upper;
 }
 /*================
 CG_TextValid
@@ -181,6 +206,7 @@ float CG_TextWidth(int faceIndex,const char *text,float size,float tracking){
 	while(*text){
 		c = *(const unsigned char *)text++;
 		if(c == '^' && *text && *text != '^'){text++;continue;}
+		if(face->caps && c >= 'a' && c <= 'z'){c -= 'a' - 'A';}
 		if(c < TEXT_FIRST_CHAR || c > TEXT_LAST_CHAR){continue;}
 		glyph = &face->glyphs[c-TEXT_FIRST_CHAR];
 		width += glyph->advance * scale + tracking * size;
@@ -221,6 +247,7 @@ void CG_TextDraw(int faceIndex,float x,float y,float size,const vec4_t color,
 	while(*text){
 		c = *(const unsigned char *)text++;
 		if(c == '^' && *text && *text != '^'){text++;continue;}
+		if(face->caps && c >= 'a' && c <= 'z'){c -= 'a' - 'A';}
 		if(c < TEXT_FIRST_CHAR || c > TEXT_LAST_CHAR){continue;}
 		glyph = &face->glyphs[c-TEXT_FIRST_CHAR];
 		if(glyph->w > 0 && glyph->h > 0){

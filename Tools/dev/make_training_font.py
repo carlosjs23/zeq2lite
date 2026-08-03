@@ -628,7 +628,7 @@ def find_font(explicit, ofl_names, system_paths):
     raise FontError("no usable font found")
 
 
-def emit_face(out_dir, lines, tag, image, font, size, glyphs, width, height):
+def emit_face(out_dir, lines, tag, image, font, size, glyphs, width, height, caps):
     scale = float(size) / font.upem
     lines.append("face %s" % tag)
     lines.append("\timage %s" % image)
@@ -637,6 +637,10 @@ def emit_face(out_dir, lines, tag, image, font, size, glyphs, width, height):
     lines.append("\tascent %i" % int(round(font.ascent * scale)))
     lines.append("\tdescent %i" % int(round(-font.descent * scale)))
     lines.append("\tcap %i" % int(round(font.cap_height * scale)))
+    # The deck sets every display element in caps (text-transform:uppercase),
+    # and the gradient is baked down the cap band to suit that. Declaring it
+    # here rather than at each call site keeps the two from disagreeing.
+    lines.append("\tcaps %i" % (1 if caps else 0))
     for glyph in sorted(glyphs, key=lambda g: g.code):
         # code x y w h bearingX bearingY advance, all in atlas pixels at the
         # bake size. bearingY is baseline-up to the top of the cell.
@@ -670,16 +674,16 @@ def main(argv):
     plain = bake_face(body, BODY_SIZE, 0.0, False)
 
     written = []
-    for tag, image, font, size, glyphs, sheet_w in (
-            ("display", "trainingDisplay.png", display, DISPLAY_SIZE, gold, 1024),
-            ("displayw", "trainingDisplayW.png", display, DISPLAY_SIZE, white, 1024),
-            ("body", "trainingBody.png", body, BODY_SIZE, plain, 512)):
+    for tag, image, font, size, glyphs, sheet_w, caps in (
+            ("display", "trainingDisplay.png", display, DISPLAY_SIZE, gold, 1024, True),
+            ("displayw", "trainingDisplayW.png", display, DISPLAY_SIZE, white, 1024, True),
+            ("body", "trainingBody.png", body, BODY_SIZE, plain, 512, False)):
         height = pack(glyphs, sheet_w)
         sheet = compose(glyphs, sheet_w, height)
         path = os.path.join(args.output, image)
         size_bytes = write_png(path, sheet_w, height, sheet)
         emit_face(args.output, lines, tag, "interface/training/" + image,
-                  font, size, glyphs, sheet_w, height)
+                  font, size, glyphs, sheet_w, height, caps)
         written.append((image, sheet_w, height, size_bytes))
 
     def_path = os.path.join(args.output, args.def_name)
