@@ -113,6 +113,24 @@ Rules carry require/forbid sets. This supplies quest chains, prerequisites and
 one-shot events with no extra machinery — a rule that grants a tag it also
 forbids is self-terminating.
 
+### World facts and world tags
+
+Facts are per-client, but every mode beyond solo training needs state that is
+not attached to a player — round state, event timers, team scores, a shared
+clock.
+
+```c
+int      g_worldFacts[ fWorldFactCount ];   // round state, event timer, scores
+tagSet_t g_worldTags;                       // event.meteor.active, round.inProgress
+```
+
+Rules therefore match against `(clientFacts, worldFacts, clientTags, worldTags)`.
+
+**This goes in Phase 1 even though the training arc does not use it.** It is a
+handful of lines now and a painful retrofit later, because every rule, every
+test vector and every piece of authored content would have to be rewritten once
+content exists.
+
 ### Actions
 
 Deliberately closed. The moment `runScript` appears, we have built a language
@@ -302,13 +320,92 @@ The allocator also fits the workload exactly — rule content is fully known at
 load time, so `G_InitGame` counts, allocates once, parses, and never allocates
 again. Nothing is ever freed because nothing needs to be.
 
+## Generalizing to other modes
+
+The engine is worth building because the training arc is not the only thing it
+runs. ZEQ2 is already an open world — large maps, free flight, other players —
+with no content placed in it. The rule database is a system for placing content
+in that world, and masters are simply the first markers.
+
+With no new C, once the engine and world facts exist:
+
+- **Saga / story missions.** A mission is a tag-gated group of rules;
+  completing it grants the tag that opens the next. Structurally identical to a
+  training lesson.
+- **Time trials and checkpoint races.** Checkpoints are trigger volumes exactly
+  like masters; elapsed time is already a fact.
+- **Dynamic world events.** A rule fires on world facts and a timer, the
+  announcer calls a location, players converge.
+- **Ki-sense hide and seek.** `g_radar.c` already broadcasts position, power
+  level and charge state; rules define the win conditions.
+- **Budokai rules.** Ring-out is a trigger volume, round state is world facts,
+  the bracket is `GT_TOURNAMENT`, which is already wired.
+
+Where it stops, and what each would cost:
+
+- **New verbs need C** — spawning entities, carrying an object, awarding team
+  score. The action vocabulary is closed on purpose, so each is a small,
+  deliberate addition.
+- **Dragon Ball hunt needs a carry mechanic.** The rules half is free; there is
+  no item system and `PW_` was fully repurposed, so pickups do not exist.
+- **PvE needs the `else` branch** in `G_UserWeaponDamage`, plus the
+  `lockedPlayer` refactor to punch rather than only blast.
+
+**Ceiling:** without AI the world stays empty of *characters*. Objectives,
+events, races and missions are reachable now; traffic, wandering enemies and
+scripted actors are not. A master who stands still and talks is believable; a
+Frieza soldier who stands still is not. Bot AI remains the highest-value unlock
+in the codebase, and everything here composes with it later — an AI enemy is
+just another fact source.
+
+## Prior art: Fortnite Creative
+
+Worth studying because it is the same architecture at enormous scale, and its
+mistakes are already public.
+
+**A closed device vocabulary beat a scripting language for years.**
+[Fortnite Creative](https://dev.epicgames.com/documentation/en-us/fortnite/using-trigger-devices-in-fortnite-creative)
+shipped 100+ device types — spawners, triggers (timer, conditional, proximity),
+mutators — with no code at all, and non-programmers built millions of islands
+with it. [Verse](https://dev.epicgames.com/documentation/fortnite/verse-language-get-started-in-unreal-editor-for-fortnite)
+arrived years later, and took Epic a dedicated language team to produce. That
+is exactly the ordering chosen here: closed actions first, a language only if
+and when the vocabulary demonstrably runs out.
+
+**Do not build a numeric global bus.** Creative originally wired devices
+together with Channels numbered 1–9999 — a trigger on channel 5 fires an item
+granter on channel 5. It was replaced in v25.00 with direct function/event
+binding, because a numeric bus does not scale: nothing tells you what channel 47
+is for. Our named, declared tags are already the better design. Do not regress
+to integer IDs for convenience.
+
+**Mutators are a category we are missing.** Devices that modify attributes —
+damage, health, movement — across a region or a match. As an action verb
+(`mutate gravity 10g`, `mutate meleeDamage 0.5`) this is how mode variants get
+authored without C. Cheap to add, and it generalizes the `setGravity` action we
+already planned.
+
+**Modes are data on one engine.** Battle Royale, Zero Build, Creative, Festival
+and Racing run off shared systems rather than separate codebases. Same bet as
+the section above.
+
+**Bots fill lobbies.** Fortnite backfills matches with AI so a lobby is never
+empty. That is the same problem this project has, solved the same way — more
+evidence that bot AI is the highest-leverage work available.
+
+**Counter-lesson: do not copy the battle pass.** Time-limited progression that
+expires works for a company shipping seasons forever. For a hobbyist community
+it mostly converts lapsed players into permanently-gone ones. Progression here
+should never expire.
+
 ## Phases
 
 Each phase is independently playable or verifiable.
 
 **Phase 1 — rules engine, no UI.** `g_rules.c`: parser, matcher, tag system,
-`facts.def`/`tags.def` generation, `ruledump` and `ruletest` console commands.
-Verified by inline tests and console output. `POOLSIZE` bumped.
+world facts and world tags, `facts.def`/`tags.def` generation, `ruledump` and
+`ruletest` console commands. Verified by inline tests and console output.
+`POOLSIZE` bumped.
 
 **Phase 2 — the loop on screen.** Three `PERS_` slots, server command handling
 in `cg_servercmds.c`, objective tracker and progress gauge in `cg_draw.c`,
