@@ -494,6 +494,15 @@ static void publishState(gentity_t *ent){
 //
 // With g_training 0 none of it runs and the tournament is stock.
 
+// The bell and the crowd. Sent to everyone, once per moment, on the same
+// reliable-command path every other training event uses - nothing here is sent
+// per frame, because MAX_RELIABLE_COMMANDS is 64 and overflowing it drops the
+// client. The client owns which sound each cue is; the server owns when.
+static void budokaiCue(int cue){
+	trap_SendServerCommand(-1,va("bdk %i",cue));
+	G_LogPrintf("Budokai: cue %i\n",cue);
+}
+
 // Round state, driven from the tournament flow and read by content as the
 // roundState world fact. Only GT_TOURNAMENT drives it: in the other gametypes
 // the slot stays at its Phase 1 value of zero rather than acquiring a meaning
@@ -514,6 +523,15 @@ static void budokaiRoundFrame(void){
 	if(state == roundInProgress && g_worldFacts[wRoundState] != roundInProgress){
 		budokaiRoundStart = level.time;
 		G_LogPrintf("Budokai: round start\n");
+		budokaiCue(BDK_ROUND_START);
+	}
+	// A round that ended on a ring-out has already had its bell and its crowd,
+	// a fraction of a second earlier. Ringing again on the state change would
+	// be two gongs on one moment.
+	if(state == roundOver && g_worldFacts[wRoundState] != roundOver){
+		if(!budokaiRingOutTime || level.time - budokaiRingOutTime >= BUDOKAI_RINGOUT_COOLDOWN){
+			budokaiCue(BDK_ROUND_OVER);
+		}
 	}
 	if(state != g_worldFacts[wRoundState]){
 		G_LogPrintf("Budokai: roundState %i\n",state);
@@ -576,6 +594,7 @@ static void budokaiRingOut(gentity_t *ent){
 	trap_SendServerCommand(-1,va("cp \"RING OUT!\n%s" S_COLOR_WHITE " takes the round.\n\"",
 		winner->pers.netname));
 	G_LogPrintf("Budokai: ringout %i winner %i\n",loserNum,winnerNum);
+	budokaiCue(BDK_RING_OUT);
 	LogExit("Ring out.");
 }
 

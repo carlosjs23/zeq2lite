@@ -392,6 +392,49 @@ static void CG_ArenaPosts(int light){
 }
 
 /*================
+CG_ArenaAmbience
+
+The crowd bed, re-added every frame because that is what a looping sound IS in
+this engine: S_AddLoopingSound builds the loop list from scratch per frame and a
+sound not offered this frame stops. It is spatialised from the middle of the
+ring on ENTITYNUM_WORLD rather than played flat, so flying out over the desert
+takes the arena's noise with it - and no entity has to exist to carry it.
+================*/
+static void CG_ArenaAmbience(void){
+	vec3_t	origin;
+
+	if(!cgs.media.budokaiCrowdSound){return;}
+	VectorCopy(arena.center,origin);
+	origin[2] = arena.floor + 64;
+	trap_S_AddLoopingSound(ENTITYNUM_WORLD,origin,vec3_origin,cgs.media.budokaiCrowdSound);
+}
+
+/*================
+CG_ArenaCue
+
+The three moments a round has, arriving as one reliable server command each
+rather than as anything per-frame. The bell is a local sound on the announcer
+channel: it is the tournament speaking to the player and not a noise in the
+world, so it does not attenuate and it cannot be blocked by standing behind
+something. The ring-out swell is on CHAN_AUTO underneath it, which is what
+lets the two overlap instead of cutting each other off.
+================*/
+void CG_ArenaCue(int cue){
+	switch(cue){
+		case BDK_ROUND_START:
+		case BDK_ROUND_OVER:
+			trap_S_StartLocalSound(cgs.media.budokaiGongSound,CHAN_ANNOUNCER);
+			break;
+		case BDK_RING_OUT:
+			trap_S_StartLocalSound(cgs.media.budokaiGongSound,CHAN_ANNOUNCER);
+			trap_S_StartLocalSound(cgs.media.budokaiSwellSound,CHAN_AUTO);
+			break;
+		default:
+			break;
+	}
+}
+
+/*================
 CG_AddArena
 
 Called from the render list beside the other client-side scene builders, so the
@@ -405,6 +448,7 @@ void CG_AddArena(void){
 	CG_ArenaFloor(light);
 	CG_ArenaPosts(light);
 	CG_ArenaWall();
+	CG_ArenaAmbience();
 }
 
 /*================

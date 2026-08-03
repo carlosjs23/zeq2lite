@@ -1026,6 +1026,12 @@ typedef struct {
 	qhandle_t	trainingBarTipShader;
 	qhandle_t	trainingSegmentShader;
 
+	// The Budokai's own audio: the bell that opens and closes a round, the
+	// crowd bed the arena is heard through, and the swell a ring-out earns.
+	sfxHandle_t	budokaiGongSound;
+	sfxHandle_t	budokaiCrowdSound;
+	sfxHandle_t	budokaiSwellSound;
+
 	qhandle_t	RadarBlipShader;
 	qhandle_t	RadarBlipTeamShader;
 	qhandle_t	RadarBurstShader;
@@ -1699,6 +1705,7 @@ void	CG_ImpactMark( qhandle_t markShader,
 //
 void		CG_AddArena( void );
 void		CG_ArenaMapName( char *out, int size );
+void		CG_ArenaCue( int cue );
 qboolean	CG_ArenaRing( vec3_t center, float *radius, float *floor );
 
 //

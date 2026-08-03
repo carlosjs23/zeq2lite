@@ -1014,6 +1014,13 @@ static void CG_ServerCommand( void ) {
 		return;
 	}
 
+	// The Budokai's audio cues: bdk <budokaiCue_t>. One command per moment a
+	// round has, sent from the tournament flow in Game/Game/g_training.c.
+	if ( !strcmp( cmd, "bdk" ) ) {
+		CG_ArenaCue( atoi( CG_Argv(1) ) );
+		return;
+	}
+
 	if ( !strcmp( cmd, "trdone" ) ) {
 		char objective[MAX_SAY_TEXT];
 		int id;

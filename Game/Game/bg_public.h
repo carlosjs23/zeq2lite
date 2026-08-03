@@ -877,6 +877,17 @@ typedef enum {
 							// by setting eType to ET_EVENTS + eventNum
 							// this avoids having to set eFlags and eventNum
 } entityType_t;
+
+// The Budokai's audio cues. The game module names one of these in the `bdk`
+// server command and cgame plays the bell and the crowd from it. Not on the
+// delta wire - a reliable command carries the number as text - so this is an
+// ordinary enum and not one appends have to be careful with.
+typedef enum {
+	BDK_ROUND_START = 1,
+	BDK_RING_OUT,
+	BDK_ROUND_OVER
+} budokaiCue_t;
+
 void	BG_EvaluateTrajectory( entityState_t *es, const trajectory_t *tr, int atTime, vec3_t result );
 void	BG_EvaluateTrajectoryDelta( entityState_t *es, const trajectory_t *tr, int atTime, vec3_t result );
 // <-- RiO

@@ -507,6 +507,9 @@ static void CG_RegisterSounds( void ) {
 	}
 	// ADDING FOR ZEQ2
 
+	cgs.media.budokaiGongSound = trap_S_RegisterSound( "effects/budokai/gong.ogg", qfalse );
+	cgs.media.budokaiCrowdSound = trap_S_RegisterSound( "effects/budokai/crowd.ogg", qfalse );
+	cgs.media.budokaiSwellSound = trap_S_RegisterSound( "effects/budokai/crowdSwell.ogg", qfalse );
 	cgs.media.radarwarningSound = trap_S_RegisterSound( "interface/sense/warning.ogg", qfalse );
 	cgs.media.lightspeedSound1 = trap_S_RegisterSound( "effects/zanzoken/zanzoken1.ogg", qfalse );
 	cgs.media.lightspeedSound2 = trap_S_RegisterSound( "effects/zanzoken/zanzoken2.ogg", qfalse );
