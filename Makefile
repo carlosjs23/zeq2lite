@@ -1958,6 +1958,7 @@ GOBJ_ = \
   $(B)/Base/Game/g_rules.o \
   $(B)/Base/Game/g_masters.o \
   $(B)/Base/Game/g_training.o \
+  $(B)/Base/Game/g_progress.o \
   $(B)/Base/Game/g_radar.o \
   $(B)/Base/Game/g_weapPhysParser.o \
   $(B)/Base/Game/g_weapPhysScanner.o \
