@@ -991,10 +991,11 @@ static void CG_ServerCommand( void ) {
 	//   trobj   "<text>" <objectiveId> <trackFactKey> <goal>
 	//   trdone  "<text>" <objectiveId>
 	//
-	// Printing is all they do for now: the tracker, gauge and toast are the next
-	// task, and an unhandled command here would warn on every lesson.
+	// They are the only delivery: the chat copy the rule engine used to send
+	// alongside them was removed when these started drawing, so a line that is
+	// dropped here is a line the player never sees.
 	if ( !strcmp( cmd, "trtoast" ) ) {
-		CG_Printf( "^3%s\n", CG_Argv(1) );
+		CG_TrainingToast( CG_Argv(1), qfalse );
 		return;
 	}
 
@@ -1009,7 +1010,7 @@ static void CG_ServerCommand( void ) {
 		id = atoi( CG_Argv(2) );
 		track = atoi( CG_Argv(3) );
 		goal = atoi( CG_Argv(4) );
-		CG_Printf( "^2Objective %i: %s (fact %i, goal %i)\n", id, objective, track, goal );
+		CG_TrainingObjective( objective, id, track, goal );
 		return;
 	}
 
@@ -1019,7 +1020,7 @@ static void CG_ServerCommand( void ) {
 
 		Q_strncpyz( objective, CG_Argv(1), sizeof( objective ) );
 		id = atoi( CG_Argv(2) );
-		CG_Printf( "^2Objective %i complete: %s\n", id, objective );
+		CG_TrainingComplete( objective, id );
 		return;
 	}
 

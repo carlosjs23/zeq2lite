@@ -102,6 +102,33 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	MELEE_READOUT_WIDTH	HUD_BAR_WIDTH
 #define	MELEE_READOUT_HEIGHT	5
 #define	MELEE_READOUT_GAP	4
+
+// The training surfaces: objective tracker, master line and toasts. Bottom
+// right, because every other corner is taken - the status panel owns bottom
+// left, the radar top right, the chat feed top left - and a persistent element
+// that overlaps any of them moves art that was placed first.
+// Aspect-correct like the panel, and it borrows the panel's bar width and inset
+// so a training bar reads as the same kind of object as a HUD gauge.
+#define	TRAINING_MARGIN		8
+#define	TRAINING_BAR_WIDTH	(HUD_BAR_WIDTH*2)
+#define	TRAINING_BAR_HEIGHT	HUD_ROW_MINOR
+#define	TRAINING_RIGHT		(SCREEN_WIDTH-TRAINING_MARGIN)
+#define	TRAINING_LEFT		(TRAINING_RIGHT-TRAINING_BAR_WIDTH)
+#define	TRAINING_BAR_Y		(SCREEN_HEIGHT-TRAINING_MARGIN-TRAINING_BAR_HEIGHT-HUD_GAUGE_INSET)
+#define	TRAINING_TEXT_Y		(TRAINING_BAR_Y-SMALLCHAR_HEIGHT-4)
+#define	TRAINING_MASTER_Y	(TRAINING_TEXT_Y-SMALLCHAR_HEIGHT)
+// Progress arrives quantized to whole percent, so the bar walks toward the last
+// value it was told instead of stepping: percent per millisecond.
+#define	TRAINING_PROGRESS_RATE	0.12f
+// How long a completed objective stays on screen after its trdone.
+#define	TRAINING_DONE_TIME	1600
+#define	TRAINING_TOAST_SLOTS	3
+#define	TRAINING_TOAST_TIME	6000
+#define	TRAINING_TOAST_FADE	800
+#define	TRAINING_TOAST_STEP	(SMALLCHAR_HEIGHT+4)
+// A toast is one line: long text is clamped rather than wrapped, since the
+// column it sits in is the width of the screen minus the two margins.
+#define	TRAINING_TOAST_CHARS	64
 #define	ZOOM_TIME			150
 #define	ITEM_BLOB_TIME		200
 #define	MUZZLE_FLASH_TIME	80 //20
@@ -638,6 +665,16 @@ typedef struct {
 	int			endTime;
 } overlay2D;
 
+// One training message on screen. A dedicated queue rather than CG_CenterPrint:
+// that is a single slot with a single timer, shared with the warmup and the
+// announcer, so a lesson line would stomp "Fight!" and only one line could ever
+// be up - and a master handing out an objective says two things at once.
+typedef struct {
+	char		text[MAX_SAY_TEXT];
+	int			time;			// 0 = free slot
+	qboolean	completion;		// a trdone, which gets its own colour
+} trainingToast_t;
+
 typedef struct {
 	int			clientFrame;		// incremented each frame
 
@@ -810,6 +847,16 @@ typedef struct {
 	// ADDING FOR ZEQ2
 	int			PLBar_foldPct;	// Need to know how far we've folded in or out already
 	int			breakLimitReadyTime;	// when the limit break reserve last topped up
+	// training mode. The objective text, the tracked fact and the goal arrive
+	// once, on the trobj that assigns them; how far through it the player is
+	// arrives every snapshot in persistant[].
+	char		trainingObjective[MAX_SAY_TEXT];
+	int			trainingObjectiveId;
+	int			trainingTrackFact;
+	int			trainingGoal;
+	float		trainingProgress;		// interpolated toward the quantized percent
+	int			trainingDoneTime;		// when the active objective was completed
+	trainingToast_t	trainingToasts[TRAINING_TOAST_SLOTS];
 	// END ADDING
 
 	// blend blobs
@@ -1141,6 +1188,7 @@ extern	vmCvar_t		cg_scripted2D;
 extern	vmCvar_t		cg_scriptedCamera;
 extern	vmCvar_t		cg_drawStatus;
 extern	vmCvar_t		cg_drawMeleeState;
+extern	vmCvar_t		cg_drawTraining;
 extern	vmCvar_t		cg_draw2D;
 extern	vmCvar_t		cg_animSpeed;
 extern	vmCvar_t		cg_debugAnim;
@@ -1340,6 +1388,9 @@ extern  char teamChat2[256];
 
 void CG_DrawChat(char *text );
 void CG_CenterPrint( const char *str, int y, int charWidth );
+void CG_TrainingToast( const char *text, qboolean completion );
+void CG_TrainingObjective( const char *text, int objectiveId, int trackFact, int goal );
+void CG_TrainingComplete( const char *text, int objectiveId );
 void CG_DrawHead( float x, float y, float w, float h, int clientNum, vec3_t headAngles );
 void CG_DrawActive( stereoFrame_t stereoView );
 void CG_DrawFlagModel( float x, float y, float w, float h, int team, qboolean force2D );

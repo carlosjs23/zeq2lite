@@ -901,6 +901,270 @@ static void CG_DrawMeleeReadout(void){
 	CG_DrawStringExt(-1,(int)x-width/2,(int)y-SMALLCHAR_HEIGHT-MELEE_READOUT_GAP,label,labelColor,
 		qtrue,qtrue,SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,0);
 }
+/*================
+CG_TrainingMasterName
+
+Master ids are global - rules/masters.def states them rather than taking them
+from file order, so the same id means the same master on every map - but only
+the id travels in PERS_TRAINING_MASTER. Reading the vocabulary here is a lookup
+table for that id, not a second source of truth: the game module still owns
+placement, radius and everything a rule matches on.
+
+Loaded on first use, so a server with training off never touches the file.
+================*/
+#define	TRAINING_MASTERS		16
+#define	TRAINING_MASTERS_FILE	"rules/masters.def"
+#define	TRAINING_MASTERS_SIZE	8000
+
+static char		trainingMasterNames[TRAINING_MASTERS][32];
+static qboolean	trainingMastersLoaded;
+static char		trainingMasterBuffer[TRAINING_MASTERS_SIZE+1];
+
+static const char *CG_TrainingMasterName(int id){
+	fileHandle_t	f;
+	char			*token,*parse;
+	int				length,index;
+
+	if(!trainingMastersLoaded){
+		trainingMastersLoaded = qtrue;
+		length = trap_FS_FOpenFile(TRAINING_MASTERS_FILE,&f,FS_READ);
+		if(length > 0 && length <= TRAINING_MASTERS_SIZE){
+			trap_FS_Read(trainingMasterBuffer,length,f);
+			trainingMasterBuffer[length] = 0;
+			parse = trainingMasterBuffer;
+			while(1){
+				token = COM_Parse(&parse);
+				if(!token[0]){break;}
+				if(Q_stricmp(token,"master")){continue;}
+				token = COM_Parse(&parse);
+				index = atoi(token);
+				token = COM_Parse(&parse);
+				if(index > 0 && index < TRAINING_MASTERS){
+					Q_strncpyz(trainingMasterNames[index],token,sizeof(trainingMasterNames[index]));
+				}
+			}
+		}
+		if(length >= 0){trap_FS_FCloseFile(f);}
+	}
+	if(id <= 0 || id >= TRAINING_MASTERS){return "";}
+	return trainingMasterNames[id];
+}
+/*================
+CG_TrainingToast
+
+Newest last, so the queue reads downward toward the tracker. Live toasts are
+compacted before the insert: expiring in the push rather than in the draw keeps
+a burst of lines from spending slots on messages that are already gone.
+================*/
+void CG_TrainingToast(const char *text,qboolean completion){
+	int	i,live;
+
+	live = 0;
+	for(i=0;i<TRAINING_TOAST_SLOTS;i++){
+		if(!cg.trainingToasts[i].time){continue;}
+		if(cg.time - cg.trainingToasts[i].time >= TRAINING_TOAST_TIME){
+			cg.trainingToasts[i].time = 0;
+			continue;
+		}
+		if(live != i){memcpy(&cg.trainingToasts[live],&cg.trainingToasts[i],sizeof(trainingToast_t));}
+		live++;
+	}
+	for(i=live;i<TRAINING_TOAST_SLOTS;i++){cg.trainingToasts[i].time = 0;}
+	if(live == TRAINING_TOAST_SLOTS){
+		for(i=0;i<TRAINING_TOAST_SLOTS-1;i++){
+			memcpy(&cg.trainingToasts[i],&cg.trainingToasts[i+1],sizeof(trainingToast_t));
+		}
+		live = TRAINING_TOAST_SLOTS-1;
+	}
+	Q_strncpyz(cg.trainingToasts[live].text,text,sizeof(cg.trainingToasts[live].text));
+	// A zero time is the free-slot marker, so the one millisecond a level can
+	// start on has to be pushed off it.
+	cg.trainingToasts[live].time = cg.time ? cg.time : 1;
+	cg.trainingToasts[live].completion = completion;
+}
+/*================
+CG_TrainingObjective
+
+trobj carries what a snapshot cannot: the text, and the fact and goal it is
+measured against. The percent it fills to arrives in persistant[] afterwards.
+================*/
+void CG_TrainingObjective(const char *text,int objectiveId,int trackFact,int goal){
+	Q_strncpyz(cg.trainingObjective,text,sizeof(cg.trainingObjective));
+	cg.trainingObjectiveId = objectiveId;
+	cg.trainingTrackFact = trackFact;
+	cg.trainingGoal = goal;
+	cg.trainingProgress = 0;
+	cg.trainingDoneTime = 0;
+	CG_TrainingToast(va("objective: %s",text),qfalse);
+}
+/*================
+CG_TrainingComplete
+
+trdone and the snapshot that zeroes PERS_TRAINING_OBJECTIVE race, and either can
+land first. Taking the text from the command rather than from what is already
+stored makes both orders draw the same thing: the completed objective stays up
+for its own moment whether or not the tracker was cleared a frame earlier.
+================*/
+void CG_TrainingComplete(const char *text,int objectiveId){
+	Q_strncpyz(cg.trainingObjective,text,sizeof(cg.trainingObjective));
+	cg.trainingObjectiveId = objectiveId;
+	cg.trainingDoneTime = cg.time ? cg.time : 1;
+	CG_TrainingToast(text,qtrue);
+}
+/*================
+CG_DrawTrainingTracker
+
+Objective text, then the bar it is measured on, sharing a right edge with the
+toasts above them.
+
+The bar walks toward the percent instead of taking it. Progress is quantized to
+whole percent precisely so it can be sent in persistant[] every snapshot, and a
+20Hz integer percent stepped straight onto the screen visibly ratchets; the
+walk is the other half of that decision, not decoration.
+================*/
+static void CG_DrawTrainingTracker(void){
+	const char	*label;
+	vec4_t	trackColor = {0.110f,0.157f,0.204f,1.0f};
+	vec4_t	clearColor = {0.0f,0.0f,0.0f,0.0f};
+	vec4_t	barColor = {0.118f,0.588f,1.0f,1.0f};
+	vec4_t	doneColor = {0.588f,1.0f,0.0f,1.0f};
+	vec4_t	textColor = {1.0f,1.0f,1.0f,1.0f};
+	vec4_t	flashColor = {1.0f,1.0f,1.0f,1.0f};
+	qboolean	finishing;
+	float		target,step,flash;
+	int			active,width,textY;
+
+	active = cg.snap->ps.persistant[PERS_TRAINING_OBJECTIVE];
+	finishing = cg.trainingDoneTime && cg.time - cg.trainingDoneTime < TRAINING_DONE_TIME ? qtrue : qfalse;
+	if(!active && !finishing){
+		// Nothing tracked: drop the assignment so the next objective cannot
+		// inherit the last one's text between its trobj and its first snapshot.
+		cg.trainingObjective[0] = 0;
+		cg.trainingObjectiveId = 0;
+		cg.trainingProgress = 0;
+		cg.trainingDoneTime = 0;
+		return;
+	}
+	target = finishing ? 100.0f : (float)cg.snap->ps.persistant[PERS_TRAINING_PROGRESS];
+	if(target < 0){target = 0;}
+	if(target > 100.0f){target = 100.0f;}
+	step = cg.frametime * TRAINING_PROGRESS_RATE;
+	if(cg.trainingProgress < target){
+		cg.trainingProgress += step;
+		if(cg.trainingProgress > target){cg.trainingProgress = target;}
+	}
+	else if(cg.trainingProgress > target){
+		cg.trainingProgress -= step;
+		if(cg.trainingProgress < target){cg.trainingProgress = target;}
+	}
+	// A tracker with no text is an objective assigned before this client was
+	// listening - the bar is still true, so say that rather than nothing.
+	label = cg.trainingObjective[0] && (finishing || cg.trainingObjectiveId == active) ? cg.trainingObjective : "training objective";
+	if(finishing){Vector4Copy(doneColor,textColor);}
+	width = CG_DrawStrlen(label) * SMALLCHAR_WIDTH;
+	if(width > TRAINING_RIGHT-TRAINING_MARGIN){width = TRAINING_RIGHT-TRAINING_MARGIN;}
+	CG_DrawStringExt(-1,TRAINING_RIGHT-width,TRAINING_TEXT_Y,label,textColor,qfalse,qtrue,
+		SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,0);
+	CG_DrawHorGauge(TRAINING_LEFT,TRAINING_BAR_Y,TRAINING_BAR_WIDTH,TRAINING_BAR_HEIGHT,
+		trackColor,trackColor,1,1,qfalse);
+	if(cg.trainingProgress > 0){
+		CG_DrawHorGauge(TRAINING_LEFT,TRAINING_BAR_Y,TRAINING_BAR_WIDTH,TRAINING_BAR_HEIGHT,
+			finishing ? doneColor : barColor,clearColor,(int)cg.trainingProgress,100,qfalse);
+	}
+	// The completion flash is the same gesture the limit break reserve makes
+	// when it tops up: the bar itself says it filled.
+	if(finishing){
+		flash = 1.0f - (float)(cg.time - cg.trainingDoneTime) / TRAINING_DONE_TIME;
+		if(flash > 0 && flash <= 1.0f){
+			flashColor[3] = flash;
+			CG_DrawHorGauge(TRAINING_LEFT,TRAINING_BAR_Y,TRAINING_BAR_WIDTH,TRAINING_BAR_HEIGHT,
+				flashColor,clearColor,1,1,qfalse);
+		}
+	}
+	CG_DrawPic(qfalse,TRAINING_LEFT-HUD_GAUGE_INSET,TRAINING_BAR_Y-HUD_GAUGE_INSET,
+		TRAINING_BAR_WIDTH+2*HUD_GAUGE_INSET,TRAINING_BAR_HEIGHT+2*HUD_GAUGE_INSET,
+		cgs.media.gaugeMinorShader);
+	// The number sits left of the bar rather than right of it: the right edge is
+	// what every training element is aligned to.
+	label = finishing ? "done" : va("%i%%",(int)cg.trainingProgress);
+	textY = TRAINING_BAR_Y + TRAINING_BAR_HEIGHT/2 - SMALLCHAR_HEIGHT/4;
+	CG_DrawSmallStringHalfHeight(TRAINING_LEFT-HUD_GAUGE_INSET-4-Q_PrintStrlen(label)*SMALLCHAR_WIDTH,
+		textY,label,1.0f);
+}
+/*================
+CG_DrawTrainingMaster
+
+Who is teaching, in the quietest form that still answers it. The rule engine
+sets masterNear from a radius, so this line appearing is also the player's only
+confirmation that they are standing close enough to be taught.
+================*/
+static void CG_DrawTrainingMaster(void){
+	const char	*name,*line;
+	vec4_t		masterColor = {1.0f,0.85f,0.4f,0.7f};
+	int			id,width;
+
+	id = cg.snap->ps.persistant[PERS_TRAINING_MASTER];
+	if(!id){return;}
+	name = CG_TrainingMasterName(id);
+	line = name[0] ? va("training with %s",name) : "master nearby";
+	width = CG_DrawStrlen(line) * SMALLCHAR_WIDTH;
+	CG_DrawStringExt(-1,TRAINING_RIGHT-width,TRAINING_MASTER_Y,line,masterColor,qfalse,qtrue,
+		SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT/2,0);
+}
+/*================
+CG_DrawTrainingToasts
+
+Stacked upward from the tracker, oldest at the top, each fading out on its own
+clock. A completion is coloured like the bar it just filled.
+================*/
+static void CG_DrawTrainingToasts(void){
+	trainingToast_t	*toast;
+	float			*fade;
+	vec4_t			sayColor = {1.0f,0.85f,0.4f,1.0f};
+	vec4_t			doneColor = {0.588f,1.0f,0.0f,1.0f};
+	vec4_t			color;
+	int				i,live,row,x,y,width;
+
+	live = 0;
+	for(i=0;i<TRAINING_TOAST_SLOTS;i++){
+		if(cg.trainingToasts[i].time){live++;}
+	}
+	if(!live){return;}
+	row = 0;
+	for(i=0;i<TRAINING_TOAST_SLOTS;i++){
+		toast = &cg.trainingToasts[i];
+		if(!toast->time){continue;}
+		fade = CG_FadeColor(toast->time,TRAINING_TOAST_TIME,TRAINING_TOAST_FADE);
+		if(!fade){
+			toast->time = 0;
+			row++;
+			continue;
+		}
+		Vector4Copy(toast->completion ? doneColor : sayColor,color);
+		color[3] = fade[3];
+		y = TRAINING_MASTER_Y - (live - row) * TRAINING_TOAST_STEP;
+		width = CG_DrawStrlen(toast->text) * SMALLCHAR_WIDTH;
+		x = TRAINING_RIGHT - width;
+		if(x < TRAINING_MARGIN){x = TRAINING_MARGIN;}
+		CG_DrawStringExt(-1,x,y,toast->text,color,qfalse,qtrue,SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,
+			TRAINING_TOAST_CHARS);
+		row++;
+	}
+}
+/*================
+CG_DrawTraining
+
+Deliberately outside the branch that draws the status panel. That branch hides
+itself while soaring and while transforming, and the first lesson in the game is
+measured on time spent airborne - a tracker that vanishes exactly while the
+player is earning progress on it teaches nothing.
+================*/
+static void CG_DrawTraining(void){
+	if(!cg_drawTraining.integer){return;}
+	CG_DrawTrainingTracker();
+	CG_DrawTrainingMaster();
+	CG_DrawTrainingToasts();
+}
 static void CG_DrawStatusBar( void ) {
 	centity_t		*cent;
 	playerState_t	*ps;
@@ -1603,6 +1867,7 @@ static void CG_Draw2D( void ) {
 			}
 		}
 	}
+	CG_DrawTraining();
 	CG_DrawVote();
 	CG_DrawTeamVote();
 	CG_DrawUpperRight();
