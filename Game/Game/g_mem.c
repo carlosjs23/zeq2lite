@@ -28,7 +28,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 
 
-#define POOLSIZE	(256 * 1024)
+// The 256KB inherited from 1999 was a number people budgeted around rather than
+// a constraint: this is our own #define, and the pool is lazily-mapped bss.
+// 4MB so the rule database - counted, allocated once at load and never freed -
+// stops being a topic. QVM builds pay for it in the data segment, which vm.c
+// rounds up to the next power of two out of the hunk.
+#define POOLSIZE	(4 * 1024 * 1024)
 
 static char		memoryPool[POOLSIZE];
 static int		allocPoint;

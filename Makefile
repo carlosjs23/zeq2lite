@@ -1955,6 +1955,7 @@ GOBJ_ = \
   $(B)/Base/Game/g_usermissile.o \
   $(B)/Base/Game/g_userweapons.o \
   $(B)/Base/Game/g_tiers.o \
+  $(B)/Base/Game/g_rules.o \
   $(B)/Base/Game/g_radar.o \
   $(B)/Base/Game/g_weapPhysParser.o \
   $(B)/Base/Game/g_weapPhysScanner.o \

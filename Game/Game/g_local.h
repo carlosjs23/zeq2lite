@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "bg_userweapons.h"
 #include "g_userweapons.h"
 #include "g_tiers.h"
+#include "g_rules.h"
 // END ADDING
 #include "g_public.h"
 //==================================================================
@@ -282,6 +283,11 @@ typedef struct {
 									// the game module builds its usercmds itself
 	qboolean	aiActive;			// and builds them from g_ai.c rather than leaving
 									// them empty
+	// Rule engine tags. ClientSpawn preserves only pers and sess, and a tag like
+	// trained.roshi.flight has to survive dying - putting it in the wiped half
+	// would only break for players who die mid-arc, which is the worst possible
+	// discovery schedule.
+	tagSet_t	tags;
 } clientPersistant_t;
 
 
@@ -387,6 +393,10 @@ extern struct gclient_s {
 	char		*modelName;
 	tierConfig_g tiers[8];
 	int			tierTransformCount[8];	// transforms into each tier this life; repeats compound the subsequent scales
+	// Rule engine facts. Most are direct playerState reads; the accumulators
+	// belong on this side of ClientSpawn because resetting them on death is
+	// what a lesson means by "stay airborne for 45 seconds".
+	int			facts[fFactCount];
 
 
 	// END ADDING
