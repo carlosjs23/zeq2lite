@@ -1,7 +1,7 @@
-// Tournament ring for desert, written by arenasave.
+// Tournament ring for namek, written by arenasave.
 //
 // One ring per map: center x y z, horizontal radius, then the world height
 // of the ring floor. A fighter who touches down past the radius loses the
 // round; flying out over the edge is legal.
 
-ring  4239 37940 -6740  448  -6764
+ring  7104 864 320  192  296

@@ -1,7 +1,7 @@
-// Tournament ring for desert, written by arenasave.
+// Tournament ring for landing, written by arenasave.
 //
 // One ring per map: center x y z, horizontal radius, then the world height
 // of the ring floor. A fighter who touches down past the radius loses the
 // round; flying out over the edge is legal.
 
-ring  4239 37940 -6740  448  -6764
+ring  11712 96 -29088  384  -29112
