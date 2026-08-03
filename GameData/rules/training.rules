@@ -12,10 +12,27 @@
 // also what keeps rules of equal specificity mutually exclusive, which the
 // loader insists on.
 
-rule idle_nudge {
-	forbids  training.begun
+// The entry point, and the only rule in the file that states no criteria: it
+// matches a player who holds nothing, which is the definition of a new one. It
+// replaced a bare "get off the ground" nudge, because an arc whose first
+// instruction is a verb teaches a control, and an arc whose first instruction is
+// a PLACE teaches the world - the ki sense marks Rhogan the moment this fires,
+// and flying to him is how a player learns that the mark means something.
+//
+// `at rhogan` is what puts the destination mark on the radar. `track masterNear
+// goal rhogan` is the same statement as a progress measure: the fact reads 0
+// everywhere and rhogan's id inside his radius, so the tracker fills exactly
+// when the player arrives.
+//
+// It forbids the greeting tag as well as its own, so a save from before this
+// rule existed - one that already met Rhogan - is not sent to look for him.
+rule find_first_master {
+	forbids  quest.firstMaster
+	forbids  trained.rhogan.greeting
 
-	say  "Training starts in the air. Get off the ground."
+	grant      quest.firstMaster
+	say        "You have no teacher. Rhogan does. Your ki sense has his mark on it - go and stand in front of him."
+	objective  "Find your first master, Rhogan"  at  rhogan  track  masterNear  goal  rhogan
 }
 
 rule training_intro {
@@ -128,7 +145,11 @@ rule rhogan_greeting {
 	when  airborneTime  atMost  2s
 	when  fatigue       above   0pl
 
-	forbids  trained.rhogan.greeting
+	// Arrival closes the first quest, so the greeting is the tag the chain
+	// hangs off: find_first_master sends the player here, and every later
+	// Rhogan lesson already requires what this grants.
+	requires  quest.firstMaster
+	forbids   trained.rhogan.greeting
 
 	grant      trained.rhogan.greeting
 	say        "So you found me. Everyone starts the same way: stay off the ground."
@@ -203,12 +224,25 @@ rule oberak_gravity_fail {
 
 // ------------------------------------------------------------------- vectors
 
-test "an untrained player gets the fallback nudge" {
-	expect  idle_nudge
+test "a brand-new player is sent to find their first master" {
+	expect  find_first_master
+}
+
+// The entry point is self-terminating twice over: once on its own tag, and once
+// on the greeting, so a save that already met Rhogan is never sent back.
+test "a player Rhogan has already greeted is not sent to find him" {
+	given   tags    trained.rhogan.greeting
+	expect  none
+}
+
+test "the first quest is the only rule that matches nothing at all" {
+	given   tags    quest.firstMaster
+	expect  none
 }
 
 // The specific rule beating the general one is what buys free fallbacks: both
-// idle_nudge and training_intro match here, and the one with more criteria wins.
+// find_first_master and training_intro match here, and the one with more
+// criteria wins.
 test "one second airborne starts the arc and beats the nudge" {
 	given   airborneTime  1s
 	expect  training_intro
@@ -241,9 +275,12 @@ test "endurance stays out of reach until the hover tag is held" {
 	expect  flight_hover_pass
 }
 
+// quest.firstMaster is in every vector that expects 'none' from here on: the
+// entry point matches a player holding nothing, so leaving it out would test
+// that fallback rather than the rule under test.
 test "the aura lesson waits for the endurance tag" {
 	given   auraTime  25s
-	given   tags      training.begun  trained.flight.hover
+	given   tags      quest.firstMaster  training.begun  trained.flight.hover
 	expect  none
 }
 
@@ -270,7 +307,7 @@ test "a world fact gates the warmup line" {
 test "the warmup line is silent once the round is running" {
 	given   world roundState  inProgress
 	given   auraTime          2s
-	given   tags              training.begun
+	given   tags              quest.firstMaster  training.begun
 	expect  none
 }
 
@@ -285,7 +322,16 @@ test "the first ascension is noticed once" {
 test "rhogan greets a player who lands in front of him" {
 	given   masterNear  rhogan
 	given   fatigue     1000pl
+	given   tags        quest.firstMaster
 	expect  rhogan_greeting
+}
+
+// Standing on the mark before the quest is open is not the greeting: the arc
+// has an entry point and this is what makes it one.
+test "rhogan says nothing to a player the quest has not sent" {
+	given   masterNear  rhogan
+	given   fatigue     1000pl
+	expect  find_first_master
 }
 
 // The greeting is the interaction, so a player who never lands gets the solo
@@ -294,13 +340,13 @@ test "flying past rhogan is not landing in front of him" {
 	given   masterNear    rhogan
 	given   airborneTime  30s
 	given   fatigue       1000pl
-	given   tags          training.begun
+	given   tags          training.begun  quest.firstMaster
 	expect  flight_hover_pass
 }
 
 test "away from every master nothing greets anyone" {
 	given   fatigue  1000pl
-	expect  idle_nudge
+	expect  find_first_master
 }
 
 test "endurance in front of rhogan passes with ki left" {
@@ -332,7 +378,7 @@ test "rhogan's lesson beats the solo lesson on the same state" {
 test "oberak waits until rhogan is finished with you" {
 	given   masterNear  oberak
 	given   fatigue     1000pl
-	expect  idle_nudge
+	expect  find_first_master
 }
 
 test "oberak greets a player rhogan has passed" {

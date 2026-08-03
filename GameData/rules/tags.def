@@ -6,6 +6,10 @@
 // A prefix group is reserved whole, which makes the group size a per-prefix
 // content limit as well as the global one.
 
+// The entry point. A brand-new player holds nothing at all, and the one rule
+// that matches on nothing is what points them at their first master.
+tag  quest.firstMaster
+
 tag  training.begun
 
 tag  trained.flight.hover
