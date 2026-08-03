@@ -419,6 +419,82 @@ This is worth doing whether or not the training arc ships, and it is a
 prerequisite for writing melee lessons — a drill can only teach a mechanic the
 player can perceive.
 
+## Progression and PvP balance
+
+Both techniques and transformations are gated behind training. A player who
+joins today is at a disadvantage, and that is accepted. What follows is about
+keeping that disadvantage survivable.
+
+**What a new player has on day one:**
+
+- The **entire melee system** — all 19 states, charge timing, breakers, counters,
+  block, evade. No unlocks required, and it is the deepest system in the game.
+- A basic ki blast
+- Flight, boost, zanzoken
+- Tier 1
+
+**What they do not have:** named techniques and transformations.
+
+**Tiers follow the reward-shape decision.** Training unlocks the *ability* to
+ascend; `breakLimit` still earns the ascension in every fight. Goku learned Super
+Saiyan once and then had to power up in every battle afterwards.
+
+### Gate length is the real variable
+
+Whether to gate is settled. How long the gate lasts is what decides whether new
+players stay, and it matters here more than in most games because **there is no
+matchmaking** — no accounts, one small population, so newcomers and veterans
+share a server with no way to sort them.
+
+Tiers are raw stat multipliers, not sidegrades — `goku/tier2/tier.cfg` carries
+`percentMeleeAttack 1.4`, `percentEnergyAttackDamage 1.75`, `speed 1.16` plus
+better defense, compounding through tier 5. An untransformed player against a
+transformed one is in a different weight class, not merely behind.
+
+So:
+
+- Unlocking the first transformation in **20 hours** means weeks of being farmed.
+  With this population, those players do not come back.
+- Unlocking it in **30 minutes** makes it a tutorial. Nobody minds being weaker
+  on their first evening.
+
+**Content rule: the first transformation and two or three techniques must be
+reachable inside the first session — under an hour.** That is the "I can
+compete" threshold. Everything after it can be as slow as we like; higher tiers
+and exotic techniques are the long tail and slow is correct there.
+
+The failure to guard against is not the disadvantage on day one. It is the
+disadvantage still being there in week three.
+
+### Unlock breadth, not magnitude
+
+A technique must be a *different* tool, not a strictly better one. Kamehameha
+should be slow, chargeable, beam-struggle capable and punishable on whiff — not
+"ki blast with triple damage." If every unlock is simply stronger, option
+progression collapses back into power progression and the gate length stops
+mattering because the gap never closes.
+
+### Implementation
+
+No unlock infrastructure exists to inherit. `currentSkill[MAX_WEAPONS]` looks
+like a candidate but holds the *active* weapon's runtime state
+(`WPSTAT_CHANGED`, `WPSTAT_CHRGREADY`, `WPSTAT_BITFLAGS`), not ownership.
+
+So a technique unlock is a tag — `grant technique.kamehameha` — and weapon
+availability tests for it. Same machinery as everything else, no new system.
+
+### Risks
+
+**The benefit is subtle.** A wider roster and faster ascension are real
+advantages, but a player who cannot perceive them will not feel rewarded for
+training. This is the legibility problem for the third time, and it is why the
+melee pass comes first.
+
+**Open, and only playtesting settles it:** whether a small *permanent* edge —
+tier 2 unlocked outright, tiers 3+ earned in-match — feels rewarding without
+being oppressive. The rule engine makes this a config change, so both are cheap
+to try.
+
 ## Generalizing to other modes
 
 The engine is worth building because the training arc is not the only thing it
@@ -548,6 +624,9 @@ spectator ring. Mostly assembly. The canonical payoff: train, then test it.
    client slots and therefore have playerStates, so `lockedPlayer` works on them
    and no refactor is required. Partner drills work today; solo drills work on
    merge.
+6. **Progression gating** — techniques and transformations are both gated behind
+   training, with the first transformation and a few techniques reachable inside
+   the first session. See "Progression and PvP balance".
 
 ## Open decisions
 
