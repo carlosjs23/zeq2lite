@@ -351,9 +351,16 @@ void SetTeam( gentity_t *ent, char *s ) {
 	if ( (g_gametype.integer == GT_TOURNAMENT)
 		&& level.numNonSpectatorClients >= 2 ) {
 		team = TEAM_SPECTATOR;
-	} else if ( g_maxGameClients.integer > 0 && 
+	} else if ( g_maxGameClients.integer > 0 &&
 		level.numNonSpectatorClients >= g_maxGameClients.integer ) {
 		team = TEAM_SPECTATOR;
+	}
+
+	// Training mode gates the Budokai on what the player has been taught, so an
+	// untrained fighter is sat back down with a line telling him who to see.
+	if ( team != TEAM_SPECTATOR && !G_TrainingMayFight( client ) ) {
+		team = TEAM_SPECTATOR;
+		G_TrainingEntryRefused( clientNum );
 	}
 
 	//

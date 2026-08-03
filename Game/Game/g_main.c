@@ -600,8 +600,13 @@ void AddTournamentPlayer( void ) {
 			continue;
 		}
 		// never select the dedicated follow or scoreboard clients
-		if ( client->sess.spectatorState == SPECTATOR_SCOREBOARD || 
+		if ( client->sess.spectatorState == SPECTATOR_SCOREBOARD ||
 			client->sess.spectatorClient < 0  ) {
+			continue;
+		}
+		// The Budokai is entered, not queued into: an untrained spectator stays
+		// in his seat rather than being pulled into a title fight.
+		if ( !G_TrainingMayFight( client ) ) {
 			continue;
 		}
 
@@ -1639,6 +1644,10 @@ void G_RunFrame( int levelTime ) {
 
 		G_RunThink( ent );
 	}
+
+	// World facts before the per-client pass reads them, so a round that started
+	// this frame is already in progress by the time a rule matches on it.
+	G_TrainingWorldFrame();
 
 	// perform final fixups on the players
 	ent = &g_entities[0];

@@ -310,6 +310,11 @@ SelectSpectatorSpawnPoint
 ============
 */
 gentity_t *SelectSpectatorSpawnPoint( vec3_t origin, vec3_t angles ) {
+	// A defined tournament ring is a better seat than the intermission point,
+	// which was authored to show off the map rather than to watch a fight.
+	if ( G_TrainingSpectatorSpawn( origin, angles ) ) {
+		return NULL;
+	}
 	FindIntermissionPoint();
 
 	VectorCopy( level.intermission_origin, origin );

@@ -36,6 +36,23 @@
 #define TRAINING_FACTS_FILE	"rules/facts.def"
 #define TRAINING_MASTERS_FILE	"rules/masters.def"
 
+// A mode brings its own content. The tag vocabulary is shared - a tag earned in
+// training is the same bit in the tournament, which is what lets the Budokai
+// gate on it - but the rules are not: the solo arc talks to a player standing
+// in an empty map, and half of it would be firing over a fight.
+#define BUDOKAI_RULES_FILE	"rules/budokai.rules"
+
+// The tag a fighter needs to enter the tournament queue, and the world tag the
+// round state raises. Both are ordinary declarations in rules/tags.def; the C
+// looks them up by name and gates on nothing when the content omits them.
+#define BUDOKAI_ENTRY_TAG	"budokai.entry"
+#define BUDOKAI_ROUND_TAG	"world.round.inProgress"
+
+// One ring-out per round, and the round ends on the first one. The cooldown is
+// belt and braces for the frames between the decision and the intermission
+// actually starting, where both fighters are still being run.
+#define BUDOKAI_RINGOUT_COOLDOWN	3000
+
 // Tags under this prefix belong to the shared world set rather than to the
 // player who tripped the rule. The prefix is the only marker the language has,
 // and it is the one every world tag in the plan already carries.
@@ -47,6 +64,14 @@
 
 static qboolean	trainingLive;
 static char	trainingMapName[MAX_QPATH];
+
+// Budokai state. Statics rather than level_locals_t fields because a tournament
+// round ends in map_restart, which re-runs G_InitGame and therefore clears these
+// exactly when the round they describe is over.
+static int	budokaiEntryTag = -1;
+static int	budokaiRoundTag = -1;
+static int	budokaiRoundStart;
+static int	budokaiRingOutTime;
 
 // ---------------------------------------------------------------- loading
 
@@ -91,16 +116,41 @@ static void loadMasters(void){
 		G_MastersCount(),countPlaced(),trainingMapName);
 }
 
+// rules/arena_<mapname>.def, derived the same way the master placements are.
+static const char *arenaFile(void){
+	return va("rules/arena_%s.def",trainingMapName);
+}
+
+// The mode picks its content file. GT_TOURNAMENT is the Budokai, and its file is
+// required once it is the mode being played: falling back to the training arc
+// would put a master's lesson in the middle of a title fight, which is a louder
+// failure than refusing to start.
+static const char *contentFile(void){
+	return g_gametype.integer == GT_TOURNAMENT ? BUDOKAI_RULES_FILE : TRAINING_RULES_FILE;
+}
+
 void G_TrainingInit(void){
 	trainingLive = qfalse;
+	budokaiEntryTag = -1;
+	budokaiRoundTag = -1;
+	budokaiRoundStart = 0;
+	budokaiRingOutTime = 0;
 	G_RulesReset();
+	G_RingReset();
 	trap_Cvar_VariableStringBuffer("mapname",trainingMapName,sizeof(trainingMapName));
 	if(!g_training.integer){
 		G_Printf("Training mode: off (g_training 0).\n");
 		return;
 	}
 	loadMasters();
-	if(!G_RulesLoad(TRAINING_TAGS_FILE,TRAINING_RULES_FILE)){
+	// The ring is loaded in every gametype, not just the tournament, because
+	// arenaplace is authored from wherever the author is standing and reloading
+	// what is already on disk is what makes the editor's round trip visible.
+	if(!G_RingLoad(arenaFile())){
+		G_Printf("Training mode: %s did not load, no ring is defined.\n",arenaFile());
+		G_RingReset();
+	}
+	if(!G_RulesLoad(TRAINING_TAGS_FILE,contentFile())){
 		// The error text is the product here, so it is printed whole and the
 		// mode is switched off. A content typo must not take a server down;
 		// ruletest and the Criterion suite are where it stays a hard failure.
@@ -110,8 +160,18 @@ void G_TrainingInit(void){
 		return;
 	}
 	trainingLive = qtrue;
-	G_Printf("Training mode: %i rule(s), %i test vector(s), %i tag(s) declared.\n",
-		G_RulesCount(),G_RulesTestCount(),G_TagCount());
+	// Resolved once, here, so the per-frame paths never look a tag up by name.
+	// Content that declares neither gates nobody and raises nothing, which is
+	// what keeps the training arc's own tags.def working unchanged.
+	budokaiEntryTag = G_TagFind(BUDOKAI_ENTRY_TAG);
+	budokaiRoundTag = G_TagFind(BUDOKAI_ROUND_TAG);
+	G_Printf("Training mode: %i rule(s), %i test vector(s), %i tag(s) declared, from %s.\n",
+		G_RulesCount(),G_RulesTestCount(),G_TagCount(),contentFile());
+	if(G_RingDefined()){
+		const ring_t *r = G_RingGet();
+		G_Printf("Training mode: ring at %.0f %.0f, radius %.0f, floor %.0f (%s).\n",
+			r->center[0],r->center[1],r->radius,r->floor,arenaFile());
+	}
 }
 
 // ----------------------------------------------------------------- events
@@ -212,6 +272,24 @@ void G_TrainingClientBegin(int clientNum){
 	client->pers.progressDirty = qfalse;
 }
 
+void G_TrainingClientBegin(int clientNum){
+	gclient_t *client;
+
+	client = level.clients + clientNum;
+	if(!trainingLive){return;}
+	loadProgress(clientNum);
+	// The Budokai entry gate cannot live in G_InitSessionData, which runs at
+	// connect - before this function has read the player's tags off the disk.
+	// Here they are loaded and ClientSpawn has not picked a spawn point yet, so
+	// an untrained challenger is seated before he ever stands in the ring.
+	if(client->sess.sessionTeam != TEAM_SPECTATOR && !G_TrainingMayFight(client)){
+		client->sess.sessionTeam = TEAM_SPECTATOR;
+		client->sess.spectatorState = SPECTATOR_FREE;
+		AddTournamentQueue(client);
+		G_TrainingEntryRefused(clientNum);
+	}
+}
+
 void G_TrainingClientDisconnect(int clientNum){
 	saveProgress(clientNum);
 }
@@ -274,6 +352,11 @@ static void refreshFacts(gentity_t *ent){
 	// testing them here costs one distance per master per client per frame
 	// rather than a linked entity and a touch function.
 	facts[fMasterNear] = G_MastersNearest(ps->origin);
+	// The ring is the second trigger volume with no entity behind it, and both
+	// facts are zero on a map with no ring - so content that keys on being
+	// outside it stays silent rather than firing everywhere.
+	facts[fRingDistance] = (int)G_RingDistance(ps->origin);
+	facts[fRingHeight] = (int)G_RingHeight(ps->origin);
 }
 
 // ---------------------------------------------------------------- actions
@@ -397,12 +480,157 @@ static void publishState(gentity_t *ent){
 	}
 }
 
+// ---------------------------------------------------------------- budokai
+//
+// The Tenkaichi Budokai is GT_TOURNAMENT with three things added: a ring, a
+// round state the rule engine can read, and an entry requirement. None of them
+// is a new mode - the bracket, the queue and the round restart are the stock
+// tournament code, and everything here either feeds it facts or ends a round
+// through the same path a kill already does.
+//
+// With g_training 0 none of it runs and the tournament is stock.
+
+// Round state, driven from the tournament flow and read by content as the
+// roundState world fact. Only GT_TOURNAMENT drives it: in the other gametypes
+// the slot stays at its Phase 1 value of zero rather than acquiring a meaning
+// the mode does not have.
+static void budokaiRoundFrame(void){
+	int state;
+
+	if(g_gametype.integer != GT_TOURNAMENT){return;}
+	if(level.intermissiontime || level.intermissionQueued){
+		state = roundOver;
+	}else if(level.numPlayingClients != 2 || level.warmupTime != 0){
+		// warmupTime -1 is "waiting for players" and a positive value is the
+		// countdown; only zero is a round actually being fought.
+		state = roundWaiting;
+	}else{
+		state = roundInProgress;
+	}
+	if(state == roundInProgress && g_worldFacts[wRoundState] != roundInProgress){
+		budokaiRoundStart = level.time;
+		G_LogPrintf("Budokai: round start\n");
+	}
+	if(state != g_worldFacts[wRoundState]){
+		G_LogPrintf("Budokai: roundState %i\n",state);
+	}
+	g_worldFacts[wRoundState] = state;
+	if(state == roundInProgress){
+		g_worldFacts[wRoundTime] = level.time - budokaiRoundStart;
+	}else if(state == roundWaiting){
+		g_worldFacts[wRoundTime] = 0;
+	}
+	// The world tag is the same state said in the vocabulary rules gate on, so a
+	// rule can require it instead of restating the fact.
+	if(state == roundInProgress){
+		G_TagSet(&g_worldTags,budokaiRoundTag);
+	}else{
+		G_TagClear(&g_worldTags,budokaiRoundTag);
+	}
+}
+
+void G_TrainingWorldFrame(void){
+	if(!trainingLive){return;}
+	budokaiRoundFrame();
+}
+
+// A ring-out ends the round exactly where a kill ends it: the surviving fighter
+// takes the point, CalculateRanks sorts the loser to sortedClients[1], and
+// LogExit queues the intermission that ExitLevel turns into
+// RemoveTournamentLoser plus map_restart. The loser is never killed - being
+// rung out is a defeat, not a death, and the source material is emphatic.
+static void budokaiRingOut(gentity_t *ent){
+	gclient_t *winner;
+	int loserNum,winnerNum,award,i;
+
+	loserNum = ent - g_entities;
+	winnerNum = -1;
+	for(i=0;i<level.maxclients;i++){
+		if(i == loserNum){continue;}
+		if(level.clients[i].pers.connected != CON_CONNECTED){continue;}
+		if(level.clients[i].sess.sessionTeam == TEAM_SPECTATOR){continue;}
+		winnerNum = i;
+		break;
+	}
+	// Nobody to award the round to is not a round, so stepping off the edge
+	// alone in an empty arena costs nothing.
+	if(winnerNum < 0){return;}
+	budokaiRingOutTime = level.time;
+	winner = level.clients + winnerNum;
+	// A ring-out decides the round whatever the score was, so the award is at
+	// least one point clear of the loser rather than a bare increment - which
+	// would otherwise hand RemoveTournamentLoser the wrong client when the
+	// fighter who stepped out was ahead on kills.
+	award = winner->ps.persistant[PERS_SCORE] + 1;
+	if(award <= ent->client->ps.persistant[PERS_SCORE]){
+		award = ent->client->ps.persistant[PERS_SCORE] + 1;
+	}
+	winner->ps.persistant[PERS_SCORE] = award;
+	CalculateRanks();
+	trap_SendServerCommand(-1,va("print \"%s" S_COLOR_WHITE " was rung out by %s" S_COLOR_WHITE ".\n\"",
+		ent->client->pers.netname,winner->pers.netname));
+	trap_SendServerCommand(-1,va("cp \"RING OUT!\n%s" S_COLOR_WHITE " takes the round.\n\"",
+		winner->pers.netname));
+	G_LogPrintf("Budokai: ringout %i winner %i\n",loserNum,winnerNum);
+	LogExit("Ring out.");
+}
+
+// Grounded is read exactly as the fact pass reads airborne, jump and soar
+// included: a fighter carried over the edge by a boost has not landed, and the
+// whole point of the rule is that flying out is legal.
+static void budokaiRingCheck(gentity_t *ent){
+	playerState_t *ps;
+	qboolean grounded;
+
+	if(g_gametype.integer != GT_TOURNAMENT){return;}
+	if(!G_RingDefined()){return;}
+	if(g_worldFacts[wRoundState] != roundInProgress){return;}
+	if(ent->client->sess.sessionTeam == TEAM_SPECTATOR){return;}
+	if(ent->powerLevelTotal <= 0){return;}
+	if(budokaiRingOutTime && level.time - budokaiRingOutTime < BUDOKAI_RINGOUT_COOLDOWN){return;}
+	ps = &ent->client->ps;
+	grounded = ((ps->bitFlags & (usingJump | usingSoar)) || ps->groundEntityNum == ENTITYNUM_NONE) ? qfalse : qtrue;
+	if(!G_RingIsOut(ps->origin,grounded)){return;}
+	budokaiRingOut(ent);
+}
+
+// The gate the plan's payoff rests on: train, then test it. A server whose
+// content declares no entry tag gates nobody, so this costs nothing to a mode
+// that does not want it.
+qboolean G_TrainingMayFight(gclient_t *client){
+	if(!trainingLive){return qtrue;}
+	if(g_gametype.integer != GT_TOURNAMENT){return qtrue;}
+	if(budokaiEntryTag < 0){return qtrue;}
+	// A dummy is the sparring partner the mode is verified with, not an entrant.
+	if(client->pers.isDummy){return qtrue;}
+	return G_TagTest(&client->pers.tags,budokaiEntryTag);
+}
+
+void G_TrainingEntryRefused(int clientNum){
+	if(!trainingLive){return;}
+	trainingToast(clientNum,"Only trained fighters enter the Budokai.");
+}
+
+// Spectators watch from the ring rather than from the intermission point, which
+// was authored to show off a map and not to show a fight. Nothing free-floating:
+// this is one origin and one set of angles handed to the spawn selector.
+qboolean G_TrainingSpectatorSpawn(vec3_t origin,vec3_t angles){
+	if(!trainingLive){return qfalse;}
+	if(!G_RingDefined()){return qfalse;}
+	G_RingVantage(origin,angles);
+	return qtrue;
+}
+
 void G_TrainingEndFrame(gentity_t *ent){
 	const rule_t *rule;
 	int index,i;
 
 	if(!trainingLive){return;}
 	if(!ent->client){return;}
+	// Before the dummy bail: a dummy has no lessons to be taught but it is a
+	// fighter in the ring, and a sparring partner that could not be rung out
+	// would make the mode unverifiable with one player.
+	budokaiRingCheck(ent);
 	// A dummy is a client slot with nobody behind it, so a lesson aimed at one
 	// would talk to an empty seat.
 	if(ent->client->pers.isDummy){return;}
@@ -500,6 +728,13 @@ static void dumpRules(void){
 		}
 		G_Printf("  %2i %-16s at %.0f %.0f %.0f radius %.0f\n",master->id,master->name,
 			master->origin[0],master->origin[1],master->origin[2],master->radius);
+	}
+	if(G_RingDefined()){
+		const ring_t *r = G_RingGet();
+		G_Printf("ring: %.0f %.0f %.0f radius %.0f floor %.0f (file %s)\n",
+			r->center[0],r->center[1],r->center[2],r->radius,r->floor,arenaFile());
+	}else{
+		G_Printf("ring: none on %s (file %s)\n",trainingMapName,arenaFile());
 	}
 	G_Printf("world facts:");
 	for(i=0;i<fWorldFactCount;i++){
@@ -717,6 +952,61 @@ static void masterList_f(gentity_t *ent){
 	}
 }
 
+// ------------------------------------------------------------ arenaplace
+//
+// The ring editor, the same shape as masterplace and for the same reason: the
+// maps are not in this repository, so the arena is authored by standing in it.
+//
+//   1. Start the map with cheats on:  +set g_training 1 +set sv_cheats 1
+//   2. Stand in the middle of the ring, on its floor, and:  \arenaplace 1200
+//      (the radius is optional and defaults to RING_DEFAULT_RADIUS)
+//   3. \arenalist to check the radius against where you are standing
+//   4. \arenasave writes rules/arena_<mapname>.def under fs_homepath
+//   5. Copy that file into GameData/rules/ so zeq2build.sh stages it
+//
+// The floor comes from where the author is standing rather than from a trace:
+// ps.origin sits at the middle of the bounding box, so the feet are one mins[2]
+// below it, and an author who places the ring while flying is stating a floor
+// in the air on purpose.
+
+static void arenaPlace_f(gentity_t *ent){
+	char arg[MAX_TOKEN_CHARS];
+	vec3_t origin;
+	float radius;
+
+	trap_Argv(1,arg,sizeof(arg));
+	radius = arg[0] ? atof(arg) : RING_DEFAULT_RADIUS;
+	VectorCopy(ent->client->ps.origin,origin);
+	if(!G_RingPlace(origin,radius,origin[2] - RING_PLACE_FLOOR_DROP)){
+		trap_SendServerCommand(ent-g_entities,va("print \"arenaplace: %s\n\"",G_RingError()));
+		return;
+	}
+	trap_SendServerCommand(ent-g_entities,va("print \"arenaplace: ring at %.0f %.0f %.0f radius %.0f floor %.0f - arenasave to keep it\n\"",
+		origin[0],origin[1],origin[2],radius,origin[2] - RING_PLACE_FLOOR_DROP));
+}
+
+static void arenaSave_f(gentity_t *ent){
+	if(!G_RingWrite(arenaFile(),trainingMapName)){
+		trap_SendServerCommand(ent-g_entities,va("print \"arenasave: %s\n\"",G_RingError()));
+		return;
+	}
+	trap_SendServerCommand(ent-g_entities,va("print \"arenasave: wrote %s\n\"",arenaFile()));
+}
+
+static void arenaList_f(gentity_t *ent){
+	const ring_t *r;
+
+	if(!G_RingDefined()){
+		trap_SendServerCommand(ent-g_entities,va("print \"no ring on %s (%s)\n\"",trainingMapName,arenaFile()));
+		return;
+	}
+	r = G_RingGet();
+	trap_SendServerCommand(ent-g_entities,va("print \"ring at %.0f %.0f %.0f radius %.0f floor %.0f\n\"",
+		r->center[0],r->center[1],r->center[2],r->radius,r->floor));
+	trap_SendServerCommand(ent-g_entities,va("print \"  you are %.0f past the edge, %.0f above the floor\n\"",
+		G_RingDistance(ent->client->ps.origin),G_RingHeight(ent->client->ps.origin)));
+}
+
 // Authoring commands are cheat-gated for the same reason setviewpos is: they
 // move the world, and a public server is not an editing session.
 qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
@@ -733,7 +1023,8 @@ qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
 		sendJournal(ent);
 		return qtrue;
 	}
-	if(Q_stricmp(cmd,"masterplace") && Q_stricmp(cmd,"mastersave") && Q_stricmp(cmd,"masterlist")){
+	if(Q_stricmp(cmd,"masterplace") && Q_stricmp(cmd,"mastersave") && Q_stricmp(cmd,"masterlist") &&
+		Q_stricmp(cmd,"arenaplace") && Q_stricmp(cmd,"arenasave") && Q_stricmp(cmd,"arenalist")){
 		return qfalse;
 	}
 	if(!g_cheats.integer){
@@ -748,7 +1039,19 @@ qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
 		masterSave_f(ent);
 		return qtrue;
 	}
-	masterList_f(ent);
+	if(!Q_stricmp(cmd,"masterlist")){
+		masterList_f(ent);
+		return qtrue;
+	}
+	if(!Q_stricmp(cmd,"arenaplace")){
+		arenaPlace_f(ent);
+		return qtrue;
+	}
+	if(!Q_stricmp(cmd,"arenasave")){
+		arenaSave_f(ent);
+		return qtrue;
+	}
+	arenaList_f(ent);
 	return qtrue;
 }
 
