@@ -276,6 +276,82 @@ intent - its plant range, its held rolls, its tendency counters - stays
 server-side on the fight line, because putting it on screen would mean
 networking it.
 
+## Holding an input from a script (`testinput`)
+
+Three of this game's mechanics are only reachable by *holding* a key: staying
+airborne, keeping the melee lock button down, and charging an attack. A usercmd
+is built from key state in `CL_CreateCmd`, so `+moveup` issued as a script line
+has no key behind it and nothing downstream can tell a held button from a
+one-frame press. `testinput` folds the hold in where every other input source
+reaches the usercmd, so prediction, networking and pmove see exactly what a
+human press produces.
+
+```
+testinput <name>[,<name>...] <ms>
+testinput clear
+```
+
+Names: `jump attack altattack lock block boost powerup up down forward back
+left right`. `lock` is the melee lock-on — `BUTTON_GESTURE`, which `default.cfg`
+binds to `g` as `+button3`.
+
+**The separator is a comma, not a plus.** `Com_ParseCommandLine` breaks the
+command line on every `+`, so `+testinput lock+altattack 8000` would arrive as
+two console lines.
+
+A second invocation replaces the first outright, `testinput clear` stops
+everything, and the hold expires on its own after `<ms>`. While nothing is held
+the usercmd path is byte for byte what it was before.
+
+**Gated** on `cl_connectedToCheatServer` — the flag the client already uses to
+decide whether `CVAR_CHEAT` cvars may keep their values — or on `com_developer`
+for a run that never connects to a cheat server. There is no client-side
+equivalent of the game module's `g_cheats.integer` test, so that is the nearest
+idiom the engine has.
+
+Two things worth knowing before writing a run:
+
+- **`jump` alone does not lift you.** `BUTTON_JUMP` starts a jump from the
+  ground; sustained flight is `upmove`. Use `jump,up`.
+- **`lock` is a toggle**, not a state. Holding it acquires on the first frame
+  and `PMF_LOCK_HELD` swallows the rest, so `lock,altattack` for the whole
+  window is right and re-issuing `lock` would drop the target.
+
+```bash
+# 45 seconds airborne - the objective that could not be scripted before
+testinput jump,up 90000
+
+# lock onto the nearest target and charge, both held at once
+dummy goku 200
+testinput lock,altattack 12000
+```
+
+Read the result out of `ruledump` (objective, PERS progress, tags), `games.log`
+(`Training: … objective-complete <id>`) or `g_debugFight` (`lock`, `buttons`,
+`charge`).
+
+Still not scriptable: **Escape**. It is handled in engine key handling
+(`CL_KeyEvent` and the key catcher) rather than in the usercmd, so menus and the
+journal page still need a person or a `bind`-driven command.
+
+## `setviewpos` and the "set" prefix
+
+`+setviewpos x y z yaw` on the command line used to do nothing at all, silently:
+no cheat refusal, no usage line, no `unknown cmd`. `Com_AddStartupCommands`
+skipped every startup line matching `Q_stricmpn( line, "set", 3 )` on the
+grounds that `Com_StartupVariable` had already applied it — but that function
+consumes exactly `set`, so the three-character prefix test also ate
+`setviewpos` (and `seta`, `sets`, `setu`) before it ever reached the command
+buffer. It now compares the whole command name, so `+setviewpos` behaves like
+the same line typed at the console.
+
+`Cmd_SetViewpos_f` also clears the velocity and the `PMF_TIME_KNOCKBACK` hold
+that `TeleportPlayer` applies. A teleporter is meant to spit the player out
+along its exit angles; a debug pin is not, and a scripted run asking for a
+coordinate has to land on it.
+
+Check arrival with `masterlist` (`… radius 768, 32 away`) or `where`.
+
 ## Why the smoke test drives the client, not the dedicated server
 
 The dedicated build excludes `cl_cgame.o`, so it never loads the cgame module.
@@ -343,6 +419,23 @@ a polluted config can be repaired by hand:
 `ARCH_STRING` in `Shared/q_platform.h`, which is `arm64`. It therefore loads
 `ZEQ2/cgamearm64.dylib`. Skip the copy and you test a stale module and conclude,
 wrongly, that your fix did nothing. `zeq2build.sh` always stages both names.
+
+**A killed run blocks the next launch.** `Com_Init` writes a pid file and only
+`Sys_Exit` removes it, so a run killed at a deadline — which is what every
+script here does — leaves a pid that is not running. The next launch reads it,
+decides the last session crashed and opens the modal "Abnormal Exit" NSAlert,
+which nobody is there to answer: the run hangs forever with its log stopping
+right after `Hunk_Clear`. `zeq2_require_bin` now clears a stale one, so every
+launcher gets the guard.
+
+The path is not the obvious one. `Sys_TempPath` is
+`FSFindFolder( kTemporaryFolderType )` on macOS, which resolves to
+`$TMPDIR/TemporaryItems`, *not* `$TMPDIR` — and that directory is mode 700 and
+cannot be listed from a sandboxed shell even though a file in it can be read and
+removed by name. `getconf DARWIN_USER_TEMP_DIR` reaches the same per-user
+domain, so the path is derived rather than hardcoded; a `/var/folders/...`
+literal would be wrong on any other account. A pid that is still running is left
+alone, because a concurrent session writes the same file.
 
 **Stale objects across checkouts.** The `.d` dependency files record absolute
 paths. If the object files were produced in a different checkout (a clone, a

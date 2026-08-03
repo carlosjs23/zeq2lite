@@ -35,12 +35,52 @@ zeq2_base_args() {
 		+set com_hunkMegs "${ZEQ2_HUNKMEGS:-256}"
 }
 
+# Drop the pid file a killed run left behind.
+#
+# Com_Init calls Sys_WritePIDFile, and a run that is killed rather than quit
+# never reaches the remove() in Sys_Exit. The next launch therefore sees a pid
+# that is not running, decides the last session crashed and opens the
+# "Abnormal Exit" NSAlert - a modal nobody is there to answer, so the run hangs
+# forever with its log stopping right after "Hunk_Clear". Every script here
+# kills the engine at a deadline, so this is the normal state of things rather
+# than an edge case.
+#
+# The path is Sys_TempPath()/zeq2lite.pid, and on macOS Sys_TempPath is
+# FSFindFolder( kTemporaryFolderType ) - which is $TMPDIR/TemporaryItems, not
+# $TMPDIR. Removing the obvious path fixes nothing. That directory is mode 700
+# and a sandboxed shell cannot list it, but it can still read and remove a file
+# in it by name. Hardcoding /var/folders/... would be wrong on another account,
+# so derive it: getconf resolves to the same per-user domain FSFindFolder uses.
+zeq2_clear_stale_pid() {
+	local dir file pid
+	if [[ "$(uname)" == Darwin ]]; then
+		dir="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || echo "${TMPDIR:-/tmp}")"
+		dir="${dir%/}/TemporaryItems"
+	else
+		dir="${TMPDIR:-/tmp}"
+		dir="${dir%/}"
+	fi
+	for file in "$dir/zeq2lite.pid" "$dir/zeq2lite_server.pid"; do
+		pid="$(cat "$file" 2>/dev/null || true)"
+		[[ -n "$pid" ]] || continue
+		# Never touch a live one: a concurrent session writes the same file.
+		if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+			continue
+		fi
+		rm -f "$file"
+		echo "  cleared stale pid file (pid $pid) at $file"
+	done
+}
+
 zeq2_require_bin() {
 	if [[ ! -x "$ZEQ2_BIN" ]]; then
 		echo "error: engine binary not found at $ZEQ2_BIN" >&2
 		echo "       build it first: Tools/dev/zeq2build.sh" >&2
 		return 1
 	fi
+	# Every launcher calls this before it starts the engine, so the guard hangs
+	# off it rather than being repeated in each script.
+	zeq2_clear_stale_pid
 }
 
 # Surface the markers that mean "this run died badly" rather than exited cleanly.
