@@ -983,6 +983,46 @@ static void CG_ServerCommand( void ) {
 		return;
 	}
 
+	// Training mode events. State - which objective, how far through it, which
+	// master - arrives in persistant[] every snapshot; these carry only the text
+	// a snapshot cannot, and only on the frame it changes.
+	//
+	//   trtoast "<text>"
+	//   trobj   "<text>" <objectiveId> <trackFactKey> <goal>
+	//   trdone  "<text>" <objectiveId>
+	//
+	// Printing is all they do for now: the tracker, gauge and toast are the next
+	// task, and an unhandled command here would warn on every lesson.
+	if ( !strcmp( cmd, "trtoast" ) ) {
+		CG_Printf( "^3%s\n", CG_Argv(1) );
+		return;
+	}
+
+	// CG_Argv returns one static buffer, so every argument has to be taken
+	// before the next call overwrites it - reading four of them inside one
+	// printf prints the last one four times.
+	if ( !strcmp( cmd, "trobj" ) ) {
+		char objective[MAX_SAY_TEXT];
+		int id, track, goal;
+
+		Q_strncpyz( objective, CG_Argv(1), sizeof( objective ) );
+		id = atoi( CG_Argv(2) );
+		track = atoi( CG_Argv(3) );
+		goal = atoi( CG_Argv(4) );
+		CG_Printf( "^2Objective %i: %s (fact %i, goal %i)\n", id, objective, track, goal );
+		return;
+	}
+
+	if ( !strcmp( cmd, "trdone" ) ) {
+		char objective[MAX_SAY_TEXT];
+		int id;
+
+		Q_strncpyz( objective, CG_Argv(1), sizeof( objective ) );
+		id = atoi( CG_Argv(2) );
+		CG_Printf( "^2Objective %i complete: %s\n", id, objective );
+		return;
+	}
+
 	if ( !strcmp( cmd, "scores" ) ) {
 		CG_ParseScores();
 		return;

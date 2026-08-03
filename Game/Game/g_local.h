@@ -295,6 +295,11 @@ typedef struct {
 	char		objectiveText[MAX_ACTION_TEXT];
 	int			objectiveTrack;		// fact key; meaningful only with text set
 	int			objectiveGoal;
+	// Index of the rule that assigned the objective, plus one, so zero means
+	// "no objective" on the wire as well as here. This is what travels in
+	// PERS_TRAINING_OBJECTIVE and what the completion command names.
+	int			objectiveId;
+	qboolean	objectiveComplete;	// goal reached; latches the completion event
 	int			unlockedTier;
 } clientPersistant_t;
 

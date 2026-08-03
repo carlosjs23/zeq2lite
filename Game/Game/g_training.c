@@ -24,6 +24,12 @@
 // g_training 0 has to leave no trace. Nothing here is reached with the mode off
 // and the tier ceiling reports every tier unlocked, so a server that does not
 // want the mode plays exactly as it did before.
+//
+// Transport is split the way the plan splits it: STATE travels in persistant[]
+// - three appended slots the client reads every snapshot for free - and EVENTS
+// travel as server commands. MAX_RELIABLE_COMMANDS is 64 and overflowing it
+// disconnects the client, so nothing here sends a command per frame; every
+// command below is sent from the edge-triggered action pass or from a latch.
 
 #define TRAINING_TAGS_FILE	"rules/tags.def"
 #define TRAINING_RULES_FILE	"rules/training.rules"
@@ -116,7 +122,21 @@ static void trainingSay(int clientNum,const char *text){
 	trap_SendServerCommand(clientNum,va("print \"%s\n\"",text));
 }
 
-static void runAction(gentity_t *ent,const action_t *action){
+// The three event-shaped messages. Text is quoted so it survives tokenizing as
+// one argument; everything else is a small integer.
+//
+//   trtoast "<text>"
+//   trobj   "<text>" <objectiveId> <trackFactKey> <goal>
+//   trdone  "<text>" <objectiveId>
+//
+// The client keeps the running numbers - which objective, how far through it,
+// which master - out of persistant[], so none of these carry state a late
+// joiner or a reconnecting client would miss.
+static void trainingToast(int clientNum,const char *text){
+	trap_SendServerCommand(clientNum,va("trtoast \"%s\"",text));
+}
+
+static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 	gclient_t *client;
 	int clientNum;
 
@@ -138,15 +158,21 @@ static void runAction(gentity_t *ent,const action_t *action){
 		G_TagClear(&client->pers.tags,action->tag);
 		break;
 	case acSay:
+		// Two commands per line: the toast the HUD will draw, and the console
+		// print that has carried this loop since Phase 1. The print stays until
+		// the toast is on screen, because a lesson nobody can read is the
+		// failure this whole mode exists to fix.
+		trainingToast(clientNum,action->text);
 		trainingSay(clientNum,action->text);
 		break;
 	case acObjective:
 		Q_strncpyz(client->pers.objectiveText,action->text,sizeof(client->pers.objectiveText));
 		client->pers.objectiveTrack = action->track;
 		client->pers.objectiveGoal = action->value;
-		// The HUD tracker is Phase 2. Saying it as well keeps the loop playable
-		// through chat in the meantime, and costs one reliable command per
-		// objective rather than per frame.
+		client->pers.objectiveId = G_RulesIndexOf(rule) + 1;
+		client->pers.objectiveComplete = qfalse;
+		trap_SendServerCommand(clientNum,va("trobj \"%s\" %i %i %i",action->text,
+			client->pers.objectiveId,action->track,action->value));
 		trainingSay(clientNum,va("Objective: %s",action->text));
 		break;
 	case acSetGravity:
@@ -164,6 +190,51 @@ static void runAction(gentity_t *ent,const action_t *action){
 
 // ------------------------------------------------------------- evaluation
 
+// Percent of the way to the objective's goal, quantized on the server. The
+// plan's rule: milliseconds change every frame and would mark persistant[]
+// dirty on every snapshot, while a percent changes about a hundred times per
+// lesson and the bar interpolates locally.
+static int objectiveProgress(const gclient_t *client){
+	int key,value,goal;
+
+	if(!client->pers.objectiveId || client->pers.objectiveGoal <= 0){return 0;}
+	key = client->pers.objectiveTrack;
+	goal = client->pers.objectiveGoal;
+	if(key & RULE_WORLD_KEY){
+		key &= ~RULE_WORLD_KEY;
+		if(key < 0 || key >= fWorldFactCount){return 0;}
+		value = g_worldFacts[key];
+	}else{
+		if(key < 0 || key >= fFactCount){return 0;}
+		value = client->facts[key];
+	}
+	if(value <= 0){return 0;}
+	if(value >= goal){return 100;}
+	return (int)(100.0f * value / goal);
+}
+
+// The three state slots, written once per client per frame. Nothing here sends
+// anything: persistant[] is delta-compressed by the engine, so a value that has
+// not changed costs no bytes at all.
+static void publishState(gentity_t *ent){
+	gclient_t *client;
+	int progress;
+
+	client = ent->client;
+	progress = objectiveProgress(client);
+	client->ps.persistant[PERS_TRAINING_OBJECTIVE] = client->pers.objectiveId;
+	client->ps.persistant[PERS_TRAINING_PROGRESS] = progress;
+	client->ps.persistant[PERS_TRAINING_MASTER] = client->facts[fMasterNear];
+
+	// Completion is an event, so it is latched rather than resent: the goal is
+	// met once and the objective stays met until another one replaces it.
+	if(progress >= 100 && !client->pers.objectiveComplete){
+		client->pers.objectiveComplete = qtrue;
+		trap_SendServerCommand(ent - g_entities,va("trdone \"%s\" %i",
+			client->pers.objectiveText,client->pers.objectiveId));
+	}
+}
+
 void G_TrainingEndFrame(gentity_t *ent){
 	const rule_t *rule;
 	int index,i;
@@ -177,10 +248,14 @@ void G_TrainingEndFrame(gentity_t *ent){
 	refreshFacts(ent);
 	rule = G_RulesMatch(ent->client->facts,g_worldFacts,&ent->client->pers.tags,&g_worldTags);
 	index = rule ? G_RulesIndexOf(rule) : -1;
-	if(!G_RulesLatch(&ent->client->ruleLatched,index)){return;}
-	for(i=0;i<rule->numActions;i++){
-		runAction(ent,&rule->actions[i]);
+	if(G_RulesLatch(&ent->client->ruleLatched,index)){
+		for(i=0;i<rule->numActions;i++){
+			runAction(ent,rule,&rule->actions[i]);
+		}
 	}
+	// After the actions, so an objective assigned this frame publishes its own
+	// first progress sample rather than the previous lesson's.
+	publishState(ent);
 }
 
 // ------------------------------------------------------------ tier ceiling

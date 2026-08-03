@@ -505,7 +505,19 @@ typedef enum {
 	PERS_SPAWN_COUNT,				// incremented every respawn
 	PERS_PLAYEREVENTS,				// 16 bits that can be flipped for events
 	PERS_ATTACKER,					// clientnum of last damage inflicter
-	PERS_KILLED					// count of the number of times you died
+	PERS_KILLED,					// count of the number of times you died
+	// Training mode state, appended because PERS_SCORE above is not the only
+	// index the engine and the game agree on by number - a demo and an older
+	// client agree on all of them.
+	//
+	// persistant[] is 16 bits on the wire: msg.c writes it with MSG_WriteShort
+	// and reads it with MSG_ReadShort, so anything stored here is capped at
+	// +-32767 whatever the int in the struct says, and truncates SILENTLY. All
+	// three values below are small by construction. A power level or a
+	// timestamp put here later would not be.
+	PERS_TRAINING_OBJECTIVE,		// rule index + 1 of the active objective, 0 for none
+	PERS_TRAINING_PROGRESS,			// percent 0..100 toward its goal, never milliseconds
+	PERS_TRAINING_MASTER			// id of the master in whose radius the player stands, 0 for none
 } persEnum_t;
 
 
