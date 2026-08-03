@@ -20,10 +20,10 @@ melee-targetable objects, a graph editor.
 
 The mode was chosen by elimination against what the tree can actually support.
 
-- **No bot AI.** `Game/Game/ai_*.c` does not exist — the Q3 bot code was
-  stripped from this fork. `GT_SINGLE_PLAYER` is in the gametype enum
-  (`bg_public.h:116`) with nothing to fill a server with. Any design needing
-  enemies is a bot port first.
+- **No bot AI on this branch.** The Q3 bot code was stripped from this fork, and
+  `GT_SINGLE_PLAYER` (`bg_public.h:116`) has nothing to fill a server with. This
+  is a *merge dependency*, not a permanent constraint — see "Relationship to
+  combat-and-ai" below.
 - **No item system.** There is no `g_items.c` and no `bg_itemlist`; `ET_ITEM`
   is a vestigial enum value. World pickups and drops do not exist as a concept.
 - **Melee cannot target non-players.** Melee locks onto
@@ -225,6 +225,12 @@ what protocol 71 actually is — is untouched.
 **Decision:** three `PERS_` slots for active objective ID, progress percent and
 master ID; server commands for toasts, completion events and journal sync.
 
+This stands even though protocol compatibility is *not* a requirement — the fork
+is free to break 71, and `combat-and-ai` is already on 72. Free `persistant[]`
+slots are chosen here because they are the cheapest correct answer, not because
+the wire format forces it. Adding a dedicated `playerState_t` field is available
+whenever it is genuinely the better fit.
+
 Two rules:
 
 - **Append, never renumber.** `PERS_SCORE` carries
@@ -320,6 +326,82 @@ The allocator also fits the workload exactly — rule content is fully known at
 load time, so `G_InitGame` counts, allocates once, parses, and never allocates
 again. Nothing is ever freed because nothing needs to be.
 
+## Relationship to combat-and-ai
+
+`origin/combat-and-ai` is where AI and training dummies are being built, and it
+changes several assumptions here. Measured against `master`: **+3622 lines**,
+including `g_ai.c` (1330 lines), `g_dummy.c` (398), `bg_pmove.c` (+667),
+`g_combat.c` (+81). It is already on **`PROTOCOL_VERSION 72`**.
+
+What that means for this plan:
+
+- **Solo melee training is free there.** `G_SpawnDummy( owner, model, distance,
+  fights )` takes a client slot via `G_DummySlot()`, so a dummy has a
+  playerState and `lockedPlayer` works on it unchanged. The 105-reference
+  refactor is not needed — that was only ever required for melee against
+  *objects*. `Cmd_Dummy_f`, `Cmd_AI_f` and `Cmd_DummyClear_f` already exist.
+- **PvE modes become reachable**, which lifts the ceiling described below.
+- **Protocol 72 is already taken there.** Since this fork has no obligation to
+  stay wire-compatible, training work should target 72 rather than carefully
+  preserving 71.
+- **`hud-stat-gauges` is already merged into it** — "Split the HUD power bar into
+  one gauge per value", "Give each player their own limit break accumulator". The
+  melee legibility pass below builds on that work rather than duplicating it.
+
+**Sequencing:** the rules engine (Phase 1) touches none of the same files and can
+proceed in parallel. Phases 2+ should land after the merge, or be written
+against `combat-and-ai` directly.
+
+## Melee legibility
+
+The melee system is far deeper than it plays. There are **19 states**
+(`bg_public.h:450–467`) driven by aggress/degress, charge timing, breakers,
+block, evade, boost and directional knockback, resolving as a genuine
+rock-paper-scissors:
+
+| Attacker | Defender | Result |
+|---|---|---|
+| Charge breaker | Speed melee | **Backfires** — 950ms freeze plus fatigue |
+| Breaker | Breaker | Clash, both frozen 500ms |
+| Breaker | anything not evade | Hit, defender frozen, their charge cancelled |
+| Attack | Block | Damage ×0.3 |
+| Attack | Evade | No damage; attacker pays 0.8× fatigue, defender 0.4× |
+| Attack | enemy in knockback | Auto power melee — juggle continuation |
+
+None of this is visible. Five feedback events are commented out — and they are
+exactly the payoff moments, the ones that would teach a player the system
+exists:
+
+```c
+//PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);   // bg_pmove.c 2493, 2521
+//PM_AddEvent(EV_MELEE_BREAKER_CLASH);      // 2499
+//PM_AddEvent(EV_MELEE_CLASH);              // 2527, 2559
+```
+
+(Still commented on `combat-and-ai` at 2730/2736/2765/2771/2831, so this is not
+duplicate work.)
+
+On top of that, the HUD shows none of the 19 states, and the charge caps —
+550ms for power, 1000ms for stun — have no meter.
+
+**This is the same defect as `breakLimit`: implemented, invisible.** Two systems
+now with that shape, which is worth naming as a pattern — this codebase's
+problem is not missing depth, it is *unteachable* depth. That also answers the
+retention question: mastery is the retention engine for a fighting game, and
+ours is already built and hidden.
+
+The pass:
+
+1. Restore the five commented events with sounds and effects.
+2. Melee state and charge meter on the HUD, following the gauge work already on
+   `combat-and-ai`.
+3. Only then judge whether melee needs redesigning. It may already be the system
+   we wanted.
+
+This is worth doing whether or not the training arc ships, and it is a
+prerequisite for writing melee lessons — a drill can only teach a mechanic the
+player can perceive.
+
 ## Generalizing to other modes
 
 The engine is worth building because the training arc is not the only thing it
@@ -351,12 +433,14 @@ Where it stops, and what each would cost:
 - **PvE needs the `else` branch** in `G_UserWeaponDamage`, plus the
   `lockedPlayer` refactor to punch rather than only blast.
 
-**Ceiling:** without AI the world stays empty of *characters*. Objectives,
-events, races and missions are reachable now; traffic, wandering enemies and
+**Ceiling:** on this branch alone the world stays empty of *characters* —
+objectives, events, races and missions are reachable, but wandering enemies and
 scripted actors are not. A master who stands still and talks is believable; a
-Frieza soldier who stands still is not. Bot AI remains the highest-value unlock
-in the codebase, and everything here composes with it later — an AI enemy is
-just another fact source.
+Frieza soldier who stands still is not.
+
+That ceiling lifts on merge with `combat-and-ai`, and everything here composes
+with it: an AI enemy is just another fact source, and a dummy is a client slot
+that rules can already reason about.
 
 ## Prior art: Fortnite Creative
 
@@ -407,9 +491,17 @@ world facts and world tags, `facts.def`/`tags.def` generation, `ruledump` and
 `ruletest` console commands. Verified by inline tests and console output.
 `POOLSIZE` bumped.
 
+**Phase 1b — melee legibility.** Restore the five commented feedback events, add
+melee state and charge meter to the HUD. Independent of the rules engine, valuable
+on its own, and a prerequisite for melee lessons. Best done on or after
+`combat-and-ai`, which carries the gauge work.
+
 **Phase 2 — the loop on screen.** Three `PERS_` slots, server command handling
 in `cg_servercmds.c`, objective tracker and progress gauge in `cg_draw.c`,
-master triggers placed from a per-map file. Playable end to end.
+master triggers placed from a per-map file — with an in-game `masterplace`
+command following the JUHOX lens-flare editor pattern (`cgs.editMode`,
+`CG_SaveLensFlareEntities_f`, `cg_consolecmds.c:121`) rather than hand-typed
+coordinates. Playable end to end.
 
 **Phase 3 — persistence.** Per-player files, tag gating across sessions,
 structured event lines to `games.log`.
@@ -420,29 +512,38 @@ structured event lines to `games.log`.
 `g_cmds.c`, `g_main.c`, `g_arenas.c`) — add ring-out as a trigger volume and a
 spectator ring. Mostly assembly. The canonical payoff: train, then test it.
 
+## Decisions made
+
+1. **Master placement** — per-map config file, written by an in-game
+   `masterplace` command following the existing lens-flare editor pattern.
+   Maps are not in this repo, and re-BSP'ing to move a trigger is a bad
+   authoring loop; hand-typing coordinates is barely better.
+2. **Lesson granularity** — one goal per rule. This does not cap lesson
+   complexity: a multi-step lesson is chained rules, where each step grants the
+   tag the next one requires. That also keeps each step independently testable.
+3. **Reward shape** — **lessons unlock the ability; `breakLimit` still earns the
+   ascension in-match.** Training is what teaches you the transformation; you
+   still have to power up in every fight afterward. Keeps both systems
+   meaningful and matches the source material.
+4. **Protocol** — no obligation to keep 71; break it when something needs it.
+   `combat-and-ai` is already on 72, so that is the target.
+5. **Melee training** — resolved by `g_dummy.c` on `combat-and-ai`. Dummies take
+   client slots and therefore have playerStates, so `lockedPlayer` works on them
+   and no refactor is required. Partner drills work today; solo drills work on
+   merge.
+
 ## Open decisions
 
-Things to iterate on. Current leaning noted, none of them settled.
-
-1. **Master placement** — per-map config file read at `G_InitGame`, or entities
-   in the `.bsp`? *Leaning: config file.* Maps are not in this repo and
-   re-BSP'ing every map to move a trigger is a bad authoring loop.
-2. **Lesson granularity** — one goal per rule with environment as a modifier, or
-   multi-goal lessons? *Leaning: one goal.* Two goals forces nested blocks, and
-   the format has none.
-3. **Reward shape** — do lessons unlock tiers directly, or feed the existing
-   `breakLimit` rate? *Undecided.* Direct unlocks are legible; feeding
-   breakLimit reuses a mechanic that already exists.
-4. **Protocol 71** — worth keeping? Nothing in this plan needs 72. But if the
-   fork is self-contained, moving to 72 would allow quest state directly in
-   `playerState_t` with free prediction. *Leaning: stay on 71* while it costs
-   nothing.
-5. **Melee training** — punching a target needs the `lockedPlayer` refactor.
-   Deferred, but it is the most DB-authentic objective type we cannot yet
-   express.
 6. **Rule bucketing** — scanning all rules per client per frame is ~2.6M
    comparisons/sec at 16 players. Fine, but wasteful. Bucket by first criterion
-   when rule count passes a few hundred, not before.
+   when rule count passes a few hundred, not before. Pure engineering, deferred
+   until a profile says otherwise.
+7. **Merge order** — does the rules engine land on `master` and wait for
+   `combat-and-ai`, or get built directly on that branch? Phase 1 shares no
+   files with it, so either works. Undecided.
+8. **Do AI opponents become fact sources?** An AI enemy's state (its power level,
+   whether it is charging) could be exposed as facts, which would let rules
+   author PvE encounters without new C. Attractive, unscoped.
 
 ## Traps
 
