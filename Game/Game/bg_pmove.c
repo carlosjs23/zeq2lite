@@ -738,13 +738,20 @@ void PM_CheckPowerLevel(void){
 	float statScale;
 	float fatigueScale;
 	float check;
-	static float fractionPool = 0;
+	float *fractionPool;
 	int pushLimit;
 	int newValue;
 	int idleScale;
 	int smaller;
 	timers = pm->ps->timers;
 	powerLevel = pm->ps->powerLevel;
+	// Per player and on the wire, not a function static. One accumulator shared
+	// by every client the server runs pmove for lets them spend each other's
+	// charge, and a client copy that is never re-derived from the snapshot
+	// accumulates again on every prediction pass. buffers[] exists for this -
+	// see bfZanzokenCost - and costs nothing to extend: its delta mask is a
+	// fixed MAX_RBUFFERS bits wide however many entries are in use.
+	fractionPool = &pm->ps->buffers[bfBreakLimit];
 	timers[tmPowerAuto] += pml.msec;
 	limit = powerLevel[plLimit];
 	while(timers[tmPowerAuto] >= 100){
@@ -832,8 +839,8 @@ void PM_CheckPowerLevel(void){
 				if(powerLevel[plCurrent] == powerLevel[plMaximum]){
 					if(!(pm->ps->bitFlags & isBreakingLimit)){PM_AddEvent(EV_POWERINGUP_START);}
 					pm->ps->bitFlags |= isBreakingLimit;
-					fractionPool += pm->ps->breakLimitRate;
-					pushLimit = powerLevel[plCurrent] + (int)fractionPool;
+					*fractionPool += pm->ps->breakLimitRate;
+					pushLimit = powerLevel[plCurrent] + (int)*fractionPool;
 					if(pushLimit > limit){pushLimit = limit;}
 					if((pm->ps->options & canOverheal) && powerLevel[plHealth] < powerLevel[plMaximum] && powerLevel[plHealthPool] > 0){
 						smaller = (powerLevel[plHealth] + raise * 0.3) < powerLevel[plMaximum] ? (raise * 0.3) : (powerLevel[plMaximum] - powerLevel[plHealth]);
@@ -856,9 +863,9 @@ void PM_CheckPowerLevel(void){
 					else{
 						powerLevel[plUseFatigue] += raise * 0.75;
 					}
-					powerLevel[plMaximumPool] -= raise * 0.3 * (int)fractionPool;
+					powerLevel[plMaximumPool] -= raise * 0.3 * (int)*fractionPool;
 					if(powerLevel[plMaximumPool] < 0){powerLevel[plMaximumPool] = 0;}
-					fractionPool -= (int)fractionPool;
+					*fractionPool -= (int)*fractionPool;
 				}
 				if(pm->ps->bitFlags & isBreakingLimit){
 					if(powerLevel[plCurrent] < ((float)powerLevel[plMaximum] * 0.95)){
