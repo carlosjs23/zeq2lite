@@ -5,7 +5,11 @@ database. Written to be iterated on — every decision below records *why*, so
 changing it is a knowing choice rather than a guess.
 
 Every source fact in this document was measured from the tree, not estimated.
-File:line references are given so they can be re-checked when the code moves.
+
+**Anchor on symbol names; treat line numbers as hints.** An earlier revision of
+this document drifted by roughly seven lines against a later checkout, uniformly
+— ordinary decay, but a document that promises re-checkability should not depend
+on it. Cite the function, macro or enum member, with the line as a convenience.
 
 ## Scope
 
@@ -44,11 +48,11 @@ tracked:
 |---|---|
 | power level, fatigue, health | `ps->powerLevel[plCurrent/plFatigue/plHealth]` |
 | tier | `ps->powerLevel[plTierCurrent/plTierTotal]` |
-| gravity | `ps->gravity[2]` (`bg_pmove.c:1193`) |
+| gravity | `ps->gravity[2]` (set in `PM_*` movement, `bg_pmove.c` ~1200) |
 | beam struggle | `ps->timers[tmStruggleEnergy]` |
 | aura | `ps->eFlags & EF_AURA` |
 | flight | `ps->bitFlags & (usingJump\|usingSoar)` |
-| break limit | fraction pool, `bg_pmove.c:835` |
+| break limit | fraction pool in `PM_CheckLimitBreak`, `bg_pmove.c` ~842 |
 
 Two existing systems make this more attractive than it looks:
 
@@ -71,9 +75,25 @@ database (Ruskin, GDC 2012) with gameplay tags borrowed from Unreal's GAS.
 
 ### Facts
 
-A fixed `int` array per client, refreshed once per frame from playerState. Most
-entries are direct reads; accumulators (`airborneTime`, `auraTime`) live in the
-client struct and are advanced in the same pass.
+A fixed `int` array per client. Most entries are direct reads from playerState;
+accumulators (`airborneTime`, `auraTime`) are advanced in the same pass.
+
+**Refresh and evaluation run from `G_RunFrame`/`ClientEndFrame`, never from
+`ClientThink`.** `ClientThink` is called once per usercmd, not once per server
+frame — `sv_fps` is 20 while `cl_maxpackets` defaults to 30 and is archived and
+client-settable. Evaluating there would let a client raise the server's
+per-client rule cost by raising its own packet rate.
+
+**Storage, against `ClientSpawn`.** `g_client.c` preserves only `client->pers`,
+`client->sess` and `ps.persistant[]` across a spawn and clears the rest. So:
+
+| Data | Lives in | Because |
+|---|---|---|
+| `airborneTime`, `auraTime` | wiped part of `gclient_t` | resetting on death is correct |
+| **tag set** | **`client->pers`** | `trained.roshi.flight` must survive dying |
+
+Tags in the wrong half is a bug that only appears when someone dies mid-arc —
+the worst possible discovery schedule.
 
 ```c
 typedef enum {
@@ -107,12 +127,29 @@ Matching returns the rule with the **most criteria** that fully matches. That
 single rule gives free fallbacks: author the specific and generic cases side by
 side and the specific one wins whenever it applies.
 
+**Ties are a load-time error, not a runtime coin-flip.** If two rules can match
+the same state with equal specificity, the loader rejects the file and names both
+rules. First-in-file-wins would be a silent no-op by another route, and the whole
+language design exists to convert quiet failures into loud ones.
+
 ### Tags
 
-A bitfield of hierarchical labels (`trained.roshi.flight`, `seen.firstAscension`).
-Rules carry require/forbid sets. This supplies quest chains, prerequisites and
-one-shot events with no extra machinery — a rule that grants a tag it also
-forbids is self-terminating.
+A bitfield of labels (`trained.roshi.flight`, `seen.firstAscension`). Rules carry
+require/forbid sets. This supplies quest chains, prerequisites and one-shot
+events with no extra machinery — a rule that grants a tag it also forbids is
+self-terminating.
+
+**A bitfield is flat; dots are not hierarchy for free.** `trained.roshi.flight`
+is just a name containing dots. For `requires trained.roshi.*` to work, bits must
+be **allocated by prefix at declaration time in `tags.def`**, so a prefix becomes
+a contiguous mask. That is a constraint to design in now, not to retrofit — the
+same argument the plan makes for world facts.
+
+**State the cap.** `MAX_TAG_BITS` bounds total declared tags, and since
+undeclared tags are a load error, the cap is a hard content limit. It must fail
+with "tag budget exhausted (N of MAX_TAG_BITS used)", never with something
+confusing. Prefix-grouped allocation also means a *prefix* can exhaust its group
+while bits remain elsewhere; that error needs its own wording.
 
 ### World facts and world tags
 
@@ -183,9 +220,9 @@ Design rules:
    rules/roshi.rules:14: unknown fact 'airbornTime' - did you mean 'airborneTime'?
    rules/roshi.rules:19: tag 'trained.roshi.fligth' not declared in tags.def
    ```
-6. **Inline tests.** The matcher is a pure function of `(facts, tags) → rule`,
-   so content carries its own vectors and is verifiable without launching the
-   game:
+6. **Inline tests, executed by Criterion.** The matcher is a pure function of
+   `(facts, tags) → rule`, so content carries its own vectors and is verifiable
+   without launching the game:
    ```
    test "fatigued out gets the failure line, not the pass" {
        given   masterNear    roshi
@@ -196,13 +233,22 @@ Design rules:
    }
    ```
 
+**These run as a Criterion suite, not only as a console command.** `tests/` already
+builds game-module sources against stubs — `SUITES` includes `tiers` and
+`usermissile`, with `SRC_tiers := Game/Game/g_tiers.c …` and a comment calling
+`g_tiers.c` "the best-isolated unit in the game module." A `g_rules` suite is a
+three-line addition to that Makefile and then runs under `make test` and
+`Tools/dev/zeq2linux.sh test` with ASan and UBSan armed. A `ruletest` console
+command is a convenience for authors; it runs in nobody's CI and must not be the
+only gate.
+
 Not JSON: no comments, no parser in this tree, and `COM_Parse` already
 tokenizes this shape. What makes a format model-friendly is the validator and
 the error messages, not the punctuation.
 
-Parser follows the house pattern at `g_tiers.c:253` — `COM_Parse` loop,
+Parser follows the house pattern of `parseTier` (`g_tiers.c`) — `COM_Parse` loop,
 `if(!token[0]){break;}` guards, defaults-then-override layering as at
-`g_tiers.c:239`.
+`loadTierConfigs` building `players/%s/tier%i/tier.cfg`.
 
 ## Transport
 
@@ -226,19 +272,38 @@ what protocol 71 actually is — is untouched.
 **Decision:** three `PERS_` slots for active objective ID, progress percent and
 master ID; server commands for toasts, completion events and journal sync.
 
-This stands even though protocol compatibility is *not* a requirement — the fork
-is free to break 71, and `combat-and-ai` is already on 72. Free `persistant[]`
-slots are chosen here because they are the cheapest correct answer, not because
-the wire format forces it. Adding a dedicated `playerState_t` field is available
-whenever it is genuinely the better fit.
+**Which protocol does this target?** `master` is on 71 and `combat-and-ai` is on
+72. This work builds on `master`, so **Phase 2 ships on 71** — not because
+compatibility is required, but because nothing here needs a wire change. 72
+arrives with the `combat-and-ai` merge and costs this plan nothing either way.
 
-Two rules:
+Free `persistant[]` slots are chosen because they are the cheapest correct
+answer, not because the wire format forces it. A dedicated `playerState_t` field
+is available whenever it is genuinely the better fit — the project has no
+obligation to stay wire-compatible.
+
+**CLAUDE.md is stale on this point.** It states "The protocol is stock 71, so
+this tree stays wire-compatible… keep [72] off this branch." That reflected an
+earlier decision; wire compatibility is no longer a goal. CLAUDE.md should be
+corrected separately.
+
+Three rules:
 
 - **Append, never renumber.** `PERS_SCORE` carries
   `// !!! MUST NOT CHANGE, SERVER AND GAME BOTH REFERENCE !!!`.
 - **Quantize.** Progress is a percent `0..100`, not elapsed milliseconds.
   Milliseconds change every frame; percent changes ~100 times per lesson and the
   bar interpolates locally.
+- **`persistant[]` is 16-bit on the wire.** `msg.c` writes with `MSG_WriteShort`
+  and reads with `MSG_ReadShort`, so values are capped at ±32767 whatever the
+  `int` in the struct says. Objective ID, progress percent and master ID all fit
+  easily — but a power level or a timestamp put here later truncates *silently*.
+  (The change mask is genuinely 32 bits: `MSG_WriteBits(msg, persistantbits,
+  MAX_PERSISTANT)`.)
+
+Precedent, and a caution: `g_rankings.c` already references `PERS_MATCH_RATING`
+and `PERS_MATCH_TIME`, neither of which is in the enum. The file is not in the
+Makefile, so it is dead — but reviving it would want two slots back.
 
 `MAX_RELIABLE_COMMANDS` is 64 (`qcommon.h:141`) and overflow disconnects the
 client, so server commands are for events only — never per-frame.
@@ -266,7 +331,7 @@ Four surfaces, all in cgame:
    is a separate VM that receives no server commands, and with per-server
    progression the data is on the server anyway. cgame can take input —
    `CG_KEY_EVENT`, `CG_MOUSE_EVENT`, `CG_EVENT_HANDLING` are dispatched at
-   `cg_main.c:57–63`.
+   `vmMain` in `cg_main.c`.
 
 **Trap:** all 2D is authored in a 640x480 virtual space with two mappings. The
 HUD is aspect-correct; a new element must use the same mapping as its
@@ -288,9 +353,28 @@ file on the player's own disk (`cl_main.c:1330`) — a machine identifier, not
 authentication — and `cl_guidServerUniq` defaults to `1` (`cl_main.c:3429`),
 deliberately hashing a *different* GUID per server.
 
-Global accounts are deferred, and the blocker is not the database. Any server
-that can report progress can lie about it, so global progression means deciding
-who is allowed to host. That is community governance, not engineering.
+**Phase 3 has a local trust problem, and it is the one that actually ships.**
+`cl_guid` is `CVAR_USERINFO | CVAR_ROM`. ROM stops the *stock* client changing
+it, but userinfo is client-supplied, so a modified client sends whatever guid it
+likes. Nothing in `Game/` or `Engine/server/` reads it today — grep is empty —
+so there is no existing scheme to inherit.
+
+Keying save files on guid therefore means **any player can load any other
+player's progress by editing one userinfo string.** Two honest options:
+
+- **Trust-on-first-use.** Key on guid, accept that it is forgeable, and say so.
+  Fine for a co-op community where progress is personal and nothing competitive
+  rides on it. This is the v1 default.
+- **Server-side name plus password.** A real login the server verifies. Needed the
+  moment progress gates anything a player would want to steal — which, given the
+  progression design, it does.
+
+Pick before Phase 3 ships, not after someone notices.
+
+Global accounts are a separate, later problem, and the blocker there is not the
+database: any server that can report progress can lie about it, so global
+progression means deciding who is allowed to host. That is community governance,
+not engineering.
 
 **Emit structured events from day one** via `G_LogPrintf` → `games.log`
 (`g_main.c:1024`). Keeping the seam at "the mod emits events, something else
@@ -356,10 +440,10 @@ against `combat-and-ai` rather than merged blind.
 
 ## Melee legibility
 
-The melee system is far deeper than it plays. There are **19 states**
-(`bg_public.h:450–467`) driven by aggress/degress, charge timing, breakers,
-block, evade, boost and directional knockback, resolving as a genuine
-rock-paper-scissors:
+The melee system is far deeper than it plays. There are **18 states**
+(`stMeleeInactive` … `stMeleeChargingStun`, `bg_public.h:454–471`) driven by
+aggress/degress, charge timing, breakers, block, evade, boost and directional
+knockback, resolving as a genuine rock-paper-scissors:
 
 | Attacker | Defender | Result |
 |---|---|---|
@@ -370,20 +454,33 @@ rock-paper-scissors:
 | Attack | Evade | No damage; attacker pays 0.8× fatigue, defender 0.4× |
 | Attack | enemy in knockback | Auto power melee — juggle continuation |
 
-None of this is visible. Five feedback events are commented out — and they are
-exactly the payoff moments, the ones that would teach a player the system
-exists:
+None of this is visible. Five `PM_AddEvent` calls in `PM_Melee` are commented
+out, and they are exactly the payoff moments — the ones that would teach a
+player the system exists:
 
 ```c
-//PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);   // bg_pmove.c 2493, 2521
-//PM_AddEvent(EV_MELEE_BREAKER_CLASH);      // 2499
-//PM_AddEvent(EV_MELEE_CLASH);              // 2527, 2559
+//PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);   // bg_pmove.c ~2500, ~2528
+//PM_AddEvent(EV_MELEE_BREAKER_CLASH);      // ~2506
+//PM_AddEvent(EV_MELEE_CLASH);              // ~2534, ~2566
 ```
 
-(Still commented on `combat-and-ai` at 2730/2736/2765/2771/2831, so this is not
-duplicate work.)
+**These are not five lines to uncomment.** The three events they name do not
+exist in `entity_event_t` — it has only `EV_MELEE_SPEED`, `MISS`, `KNOCKBACK`,
+`BREAKER`, `STUN`, `CHECK`, `KNOCKOUT`, and `cg_event.c` handles five of those.
+Uncommenting the calls does not compile.
 
-On top of that, the HUD shows none of the 19 states, and the charge caps —
+Actual work:
+
+1. Three new `entity_event_t` values. **Append** — these go on the wire as
+   `es.event`. Capacity is fine: the field is 8 bits and ~91 of 256 values are
+   used.
+2. Three `cg_event.c` cases.
+3. Sounds and effects, whose **assets are not in this repository** — they live in
+   the ~324MB data set. This is the part most likely to be underestimated.
+
+Still commented on `combat-and-ai` too, so this is not duplicate work either way.
+
+On top of that, the HUD shows none of the 18 states, and the charge caps —
 550ms for power, 1000ms for stun — have no meter.
 
 **This is the same defect as `breakLimit`: implemented, invisible.** Two systems
@@ -394,7 +491,7 @@ ours is already built and hidden.
 
 The pass:
 
-1. Restore the five commented events with sounds and effects.
+1. Add the three events, wire them through `cg_event.c`, author the assets.
 2. Melee state and charge readout, borrowing the gauge vocabulary already on
    `master` (`HUD_BAR_WIDTH`, `HUD_GAUGE_INSET`, the row heights).
 3. Only then judge whether melee needs redesigning. It may already be the system
@@ -580,9 +677,14 @@ should never expire.
 Each phase is independently playable or verifiable.
 
 **Phase 1 — rules engine, no UI.** `g_rules.c`: parser, matcher, tag system,
-world facts and world tags, `facts.def`/`tags.def` generation, `ruledump` and
-`ruletest` console commands. Verified by inline tests and console output.
-`POOLSIZE` bumped.
+world facts and world tags, `facts.def`/`tags.def` generation, a `g_rules`
+Criterion suite, and `ruledump`/`ruletest` console commands. `POOLSIZE` bumped.
+
+**Phase 1 content must not use `masterNear`** — master triggers arrive in Phase
+2, so a rule keyed on them cannot be exercised here. Build Phase 1 vectors from
+facts that exist at this point: `airborneTime`, `auraTime`, `fatigue`,
+`tierCurrent`, `gravity`. The Roshi and King Kai examples elsewhere in this
+document are Phase 2 content.
 
 **Phase 1b — melee legibility.** Restore the five commented feedback events, add
 melee state and charge meter to the HUD. Independent of the rules engine, valuable
@@ -593,7 +695,7 @@ on its own, and a prerequisite for melee lessons. Best done on or after
 in `cg_servercmds.c`, objective tracker and progress gauge in `cg_draw.c`,
 master triggers placed from a per-map file — with an in-game `masterplace`
 command following the JUHOX lens-flare editor pattern (`cgs.editMode`,
-`CG_SaveLensFlareEntities_f`, `cg_consolecmds.c:121`) rather than hand-typed
+`CG_SaveLensFlareEntities_f` in `cg_consolecmds.c`; `MAPLENSFLARES` is 1, so it is live code) rather than hand-typed
 coordinates. Playable end to end.
 
 **Phase 3 — persistence.** Per-player files, tag gating across sessions,
@@ -630,10 +732,16 @@ spectator ring. Mostly assembly. The canonical payoff: train, then test it.
 
 ## Open decisions
 
-6. **Rule bucketing** — scanning all rules per client per frame is ~2.6M
-   comparisons/sec at 16 players. Fine, but wasteful. Bucket by first criterion
-   when rule count passes a few hundred, not before. Pure engineering, deferred
-   until a profile says otherwise.
+6. **Rule bucketing** — the matcher scans every rule for every client each server
+   frame. At the budget the memory section implies (~500 rules in ~108KB) and
+   `sv_fps` 20, that is small. Bucket rules by first criterion when a profile
+   says to, not on a predicted threshold.
+
+   *(An earlier draft claimed "~2.6M comparisons/sec at 16 players". It stated no
+   rule count, implied roughly 2,700 rules, and so contradicted both the memory
+   sizing and the bucketing threshold by an order of magnitude. Removed — per the
+   repo's commit convention, a number earns its place only when it justifies a
+   constant.)*
 7. **Do AI opponents become fact sources?** An AI enemy's state (its power level,
    whether it is charging) could be exposed as facts, which would let rules
    author PvE encounters without new C. Attractive, unscoped.
@@ -647,7 +755,7 @@ Live constraints that have bitten this tree before.
 - **QVM has no libc.** `Game/` compiles to bytecode on Linux; only `bg_lib.c`
   and the syscalls in `g_syscalls.asm` exist. Code can build clean on arm64 and
   break in the container.
-- **Booleans are the string `True`** — `g_tiers.c:619` tests `strlen(token) == 4`.
+- **Booleans are the string `True`** — `parseTier` tests `strlen(token) == 4`.
 - **Build via `Tools/dev/zeq2build.sh`, never bare `make`** — bare `make` writes
   `cgamearm.dylib` while the engine loads `cgamearm64.dylib`, so fixes appear to
   do nothing.
