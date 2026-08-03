@@ -155,24 +155,40 @@ static qboolean ParseVector( char **text, int count, float *v ) {
 	char	*token;
 	int		i;
 
-	// FIXME: spaces are currently required after parens, should change parseext...
+	// A paren is not a token separator in COM_ParseExt, so "(0.1 0.1 0.15)"
+	// arrives as "(0.1" and "0.15)" while "( 0.1 0.1 0.15 )" arrives as five
+	// tokens. Both spellings appear in shipped content and neither is wrong, so
+	// the parens are consumed here rather than demanded as separate tokens. The
+	// cost of refusing one was never a vector: ParseStage fails the whole shader
+	// and the renderer substitutes tr.defaultImage, a black box with a white
+	// border, over whatever the shader was meant to cover.
 	token = COM_ParseExt( text, qfalse );
-	if ( strcmp( token, "(" ) ) {
+	if ( token[0] != '(' ) {
 		ri.Printf( PRINT_WARNING, "WARNING: missing parenthesis in shader '%s'\n", shader.name );
 		return qfalse;
 	}
+	token++;
 
 	for ( i = 0 ; i < count ; i++ ) {
-		token = COM_ParseExt( text, qfalse );
 		if ( !token[0] ) {
+			token = COM_ParseExt( text, qfalse );
+		}
+		if ( !token[0] || token[0] == ')' ) {
 			ri.Printf( PRINT_WARNING, "WARNING: missing vector element in shader '%s'\n", shader.name );
 			return qfalse;
 		}
 		v[i] = atof( token );
+
+		// step over the number; a ')' glued to it closes the vector
+		while ( token[0] && token[0] != ')' ) {
+			token++;
+		}
 	}
 
-	token = COM_ParseExt( text, qfalse );
-	if ( strcmp( token, ")" ) ) {
+	if ( !token[0] ) {
+		token = COM_ParseExt( text, qfalse );
+	}
+	if ( token[0] != ')' ) {
 		ri.Printf( PRINT_WARNING, "WARNING: missing parenthesis in shader '%s'\n", shader.name );
 		return qfalse;
 	}
