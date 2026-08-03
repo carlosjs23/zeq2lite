@@ -1,0 +1,14 @@
+// Master vocabulary. GLOBAL: these names and ids are the same on every map, so
+// `masterNear is roshi` means the same thing wherever the content is loaded and
+// a lesson either validates everywhere or nowhere.
+//
+// Where each master stands is per-map and lives in rules/masters_<mapname>.def,
+// written by the in-game masterplace command.
+//
+// The id is stated rather than taken from file order, because it is what
+// travels to the client in PERS_TRAINING_MASTER and what a rule compiles to.
+// Reordering this file must not renumber a master out from under content.
+// Ids are 1-based; 0 is the masterNear value 'none'.
+
+master  1  roshi
+master  2  kingKai

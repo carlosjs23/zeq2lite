@@ -29,6 +29,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_userweapons.h"
 #include "g_tiers.h"
 #include "g_rules.h"
+#include "g_masters.h"
 // END ADDING
 #include "g_public.h"
 //==================================================================
@@ -797,6 +798,7 @@ void		G_TrainingInit( void );
 void		G_TrainingEndFrame( gentity_t *ent );
 qboolean	G_TrainingTierUnlocked( gclient_t *client, int tier );
 qboolean	G_TrainingConsoleCommand( const char *cmd );
+qboolean	G_TrainingClientCommand( gentity_t *ent, const char *cmd );
 
 ///
 /// g_tiers.c

@@ -26,11 +26,17 @@ typedef struct {
 // Stock Quake III gravity is 800, and that is the 1g the movement code means.
 #define GRAVITY_PER_G	800
 
+// The masterNear vocabulary is the one fact table that is not fixed at compile
+// time: it comes from rules/masters.def so that adding a master is content work
+// rather than a C change. The built-in table below is the fallback for a tree
+// with no masters.def and MUST agree with the shipped ids, since a rule
+// compiles `masterNear is roshi` to the index in this table.
 static const char *const masterValues[] = {"none","roshi","kingKai"};
 static const char *const roundValues[] = {"waiting","inProgress","over"};
 
-// Indexed by factKey_t.
-static const factDef_t factDefs[fFactCount] = {
+// Indexed by factKey_t. Not const: G_RulesSetMasterVocabulary rewrites the
+// masterNear entry's value table before content is parsed.
+static factDef_t factDefs[fFactCount] = {
 	{"powerCurrent",	"pl",	1,		NULL,	0,	NULL,		0},
 	{"powerPercent",	"%",	1,		NULL,	0,	NULL,		0},
 	{"fatigue",		"pl",	1,		NULL,	0,	NULL,		0},
@@ -1040,6 +1046,30 @@ static qboolean validateRules(const char *path){
 }
 
 // ---------------------------------------------------------------- public API
+
+// Called with the names loaded from masters.def, BEFORE content is parsed, so
+// that `masterNear is roshi` validates against the masters this server actually
+// has. Deliberately not cleared by G_RulesReset: the vocabulary is loaded once
+// per map and the rules are reloaded inside it.
+void G_RulesSetMasterVocabulary(const char *const *names,int count){
+	if(!names || count < 2){
+		factDefs[fMasterNear].values = masterValues;
+		factDefs[fMasterNear].numValues = ARRAY_LEN(masterValues);
+		return;
+	}
+	factDefs[fMasterNear].values = names;
+	factDefs[fMasterNear].numValues = count;
+}
+
+// Percent of the way from nothing to the goal, clamped. Quantizing here rather
+// than at the call site is the plan's transport rule: what travels to the
+// client is a percent, never an elapsed time, because a percent changes about a
+// hundred times per lesson and milliseconds change every frame.
+int G_RulesProgress(int value,int goal){
+	if(goal <= 0 || value <= 0){return 0;}
+	if(value >= goal){return 100;}
+	return (int)(100.0f * value / goal);
+}
 
 void G_RulesReset(void){
 	memset(tagNames,0,sizeof(tagNames));

@@ -26,7 +26,7 @@ BUILD             := bin
 # Adding a suite: create suites/test_<name>.c, add <name> here, and give it an
 # SRC_<name> line listing the engine translation units it needs. Keep that list
 # minimal - a short list is a sign the unit under test is well isolated.
-SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers g_rules
+SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers g_rules g_masters
 
 SHARED_CORE := $(ROOT)/Shared/q_shared.c $(ROOT)/Shared/q_math.c
 SUPPORT     := support/engine_stubs.c
@@ -66,7 +66,12 @@ SRC_snd      := $(ROOT)/Engine/client/snd_dma.c $(SHARED_CORE) $(SUPPORT) \
                 support/sound_stubs.c
 # g_rules.c is a leaf: COM_Parse, the FS traps and G_Alloc. g_mem.c is linked for
 # real so the suite runs against the actual bump allocator and its POOLSIZE.
-SRC_g_rules  := $(ROOT)/Game/Game/g_rules.c $(ROOT)/Game/Game/g_mem.c \
+SRC_g_rules  := $(ROOT)/Game/Game/g_rules.c $(ROOT)/Game/Game/g_masters.c \
+                $(ROOT)/Game/Game/g_mem.c \
+                $(SHARED_CORE) $(SUPPORT) support/fake_fs.c support/rules_stubs.c
+# g_masters.c is the same shape of leaf: COM_Parse, the FS traps and vector math,
+# with no allocation at all, so the suite needs no pool.
+SRC_g_masters := $(ROOT)/Game/Game/g_masters.c $(ROOT)/Game/Game/g_mem.c \
                 $(SHARED_CORE) $(SUPPORT) support/fake_fs.c support/rules_stubs.c
 
 # The renderer sources reach SDL2's SDL_opengl.h through qgl.h, so the PNG

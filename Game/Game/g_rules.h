@@ -117,6 +117,12 @@ const char	*G_RulesFactName(int key);
 const char	*G_RulesFactUnit(int key);
 const char	*G_RulesFactValue(int key,int index);
 
+// masterNear's named values come from rules/masters.def, so they are installed
+// before content parses rather than compiled in. NULL restores the built-in
+// table.
+void		G_RulesSetMasterVocabulary(const char *const *names,int count);
+int		G_RulesProgress(int value,int goal);
+
 void		G_RulesReset(void);
 qboolean	G_RulesLoad(const char *tagsPath,const char *rulesPath);
 const char	*G_RulesError(void);

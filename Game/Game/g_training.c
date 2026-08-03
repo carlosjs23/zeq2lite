@@ -34,6 +34,7 @@
 #define TRAINING_TAGS_FILE	"rules/tags.def"
 #define TRAINING_RULES_FILE	"rules/training.rules"
 #define TRAINING_FACTS_FILE	"rules/facts.def"
+#define TRAINING_MASTERS_FILE	"rules/masters.def"
 
 // Tags under this prefix belong to the shared world set rather than to the
 // player who tripped the rule. The prefix is the only marker the language has,
@@ -45,16 +46,60 @@
 #define TRAINING_BASE_TIER	1
 
 static qboolean	trainingLive;
+static char	trainingMapName[MAX_QPATH];
 
 // ---------------------------------------------------------------- loading
+
+// rules/masters_<mapname>.def. The name is derived rather than configured so
+// that a map either has placements or does not, with nothing to keep in step.
+static const char *placementsFile(void){
+	return va("rules/masters_%s.def",trainingMapName);
+}
+
+static int countPlaced(void){
+	const master_t *master;
+	int i,placed;
+	placed = 0;
+	for(i=0;i<G_MastersCount();i++){
+		master = G_MastersGet(i);
+		if(master->placed){placed++;}
+	}
+	return placed;
+}
+
+// Masters load BEFORE the rules, because the master names are what
+// `masterNear is roshi` is validated against - installing them afterwards would
+// mean every master name in the content was an unknown value at parse time.
+static void loadMasters(void){
+	const char *const *vocabulary;
+	int count;
+
+	G_MastersReset();
+	G_RulesSetMasterVocabulary(NULL,0);
+	if(!G_MastersLoadDef(TRAINING_MASTERS_FILE)){
+		G_Printf("Training mode: no master vocabulary, masterNear keeps its built-in values.\n");
+		return;
+	}
+	if(!G_MastersLoadPlacements(placementsFile())){
+		G_Printf("Training mode: %s did not load, no masters are placed.\n",placementsFile());
+		G_MastersReset();
+		return;
+	}
+	vocabulary = G_MastersVocabulary(&count);
+	G_RulesSetMasterVocabulary(vocabulary,count);
+	G_Printf("Training mode: %i master(s) declared, %i placed on %s.\n",
+		G_MastersCount(),countPlaced(),trainingMapName);
+}
 
 void G_TrainingInit(void){
 	trainingLive = qfalse;
 	G_RulesReset();
+	trap_Cvar_VariableStringBuffer("mapname",trainingMapName,sizeof(trainingMapName));
 	if(!g_training.integer){
 		G_Printf("Training mode: off (g_training 0).\n");
 		return;
 	}
+	loadMasters();
 	if(!G_RulesLoad(TRAINING_TAGS_FILE,TRAINING_RULES_FILE)){
 		// The error text is the product here, so it is printed whole and the
 		// mode is switched off. A content typo must not take a server down;
@@ -112,8 +157,10 @@ static void refreshFacts(gentity_t *ent){
 	gravity = ps->gravity[0] ? ps->gravity[0] : PLAYER_BASE_GRAVITY;
 	facts[fGravity] = gravity;
 	facts[fStruggleEnergy] = ps->timers[tmStruggleEnergy];
-	// Master triggers are Phase 2; until then nothing is ever near one.
-	facts[fMasterNear] = 0;
+	// A trigger volume without an entity: masters are a handful of spheres, and
+	// testing them here costs one distance per master per client per frame
+	// rather than a linked entity and a touch function.
+	facts[fMasterNear] = G_MastersNearest(ps->origin);
 }
 
 // ---------------------------------------------------------------- actions
@@ -208,9 +255,7 @@ static int objectiveProgress(const gclient_t *client){
 		if(key < 0 || key >= fFactCount){return 0;}
 		value = client->facts[key];
 	}
-	if(value <= 0){return 0;}
-	if(value >= goal){return 100;}
-	return (int)(100.0f * value / goal);
+	return G_RulesProgress(value,goal);
 }
 
 // The three state slots, written once per client per frame. Nothing here sends
@@ -324,6 +369,17 @@ static void dumpRules(void){
 		if(!G_TagName(i)[0]){continue;}
 		G_Printf("  %3i %s\n",i,G_TagName(i));
 	}
+	G_Printf("masters: %i declared, %i placed on %s (file %s)\n",
+		G_MastersCount(),countPlaced(),trainingMapName,placementsFile());
+	for(i=0;i<G_MastersCount();i++){
+		const master_t *master = G_MastersGet(i);
+		if(!master->placed){
+			G_Printf("  %2i %-16s not placed on this map\n",master->id,master->name);
+			continue;
+		}
+		G_Printf("  %2i %-16s at %.0f %.0f %.0f radius %.0f\n",master->id,master->name,
+			master->origin[0],master->origin[1],master->origin[2],master->radius);
+	}
 	G_Printf("world facts:");
 	for(i=0;i<fWorldFactCount;i++){
 		G_Printf(" %s=%i",G_RulesFactName(i | RULE_WORLD_KEY),g_worldFacts[i]);
@@ -334,6 +390,11 @@ static void dumpRules(void){
 		if(client->pers.connected != CON_CONNECTED){continue;}
 		G_Printf("client %i (%s) tier ceiling %i, objective '%s'\n",i,client->pers.netname,
 			tierCeiling(client),client->pers.objectiveText);
+		G_Printf("  pers: objective=%i progress=%i master=%i (%s)\n",
+			client->ps.persistant[PERS_TRAINING_OBJECTIVE],
+			client->ps.persistant[PERS_TRAINING_PROGRESS],
+			client->ps.persistant[PERS_TRAINING_MASTER],
+			G_MastersName(client->ps.persistant[PERS_TRAINING_MASTER]));
 		G_Printf("  facts:");
 		for(j=0;j<fFactCount;j++){
 			G_Printf(" %s=%i",G_RulesFactName(j),client->facts[j]);
@@ -368,6 +429,106 @@ static void runRuleTests(void){
 		G_Printf("  FAIL  %s\n        %s\n",test->name,err);
 	}
 	G_Printf("ruletest: %i passed, %i failed, %i total\n",passed,failed,G_RulesTestCount());
+}
+
+// ------------------------------------------------------------ masterplace
+
+// The in-game master editor, following the lens-flare editor's shape
+// (CG_SaveLensFlareEntities_f in cg_consolecmds.c): stand where the thing
+// belongs, drop it there, write the per-map file. Maps are not in this
+// repository and re-BSP'ing to move a trigger is a bad authoring loop, so
+// placement is authored from inside the running game.
+//
+// It lives in the game module rather than in cgame, which is the one deviation
+// from that pattern and it is deliberate: the server is what reads the
+// placements and what knows the authoritative player origin, so writing the
+// file from the client would write it to the wrong side of a listen server and
+// leave the server's own copy stale until a map restart.
+//
+// End to end, for an author:
+//
+//   1. Declare the master once in GameData/rules/masters.def:  master 1 roshi
+//   2. Start the map with cheats on:  +set g_training 1 +set sv_cheats 1
+//   3. Fly to where the master belongs and:  \masterplace roshi 320
+//      (the radius is optional and defaults to MASTER_DEFAULT_RADIUS)
+//   4. \masterlist to check what is placed and how far away you are
+//   5. \mastersave writes rules/masters_<mapname>.def under fs_homepath
+//   6. Copy that file into GameData/rules/ so zeq2build.sh stages it, and it
+//      loads on the next map start.
+//
+// masterplace only moves a master that masters.def already declares, because
+// the name is also the rule vocabulary: a master this command could invent
+// would be a name no rule is allowed to mention.
+
+static void masterPlace_f(gentity_t *ent){
+	char name[MAX_MASTER_NAME],arg[MAX_TOKEN_CHARS];
+	vec3_t origin;
+	float radius;
+
+	trap_Argv(1,name,sizeof(name));
+	if(!name[0]){
+		trap_SendServerCommand(ent-g_entities,"print \"usage: masterplace <name> [radius]\n\"");
+		return;
+	}
+	trap_Argv(2,arg,sizeof(arg));
+	radius = arg[0] ? atof(arg) : MASTER_DEFAULT_RADIUS;
+	VectorCopy(ent->client->ps.origin,origin);
+	if(!G_MastersPlace(name,origin,radius)){
+		trap_SendServerCommand(ent-g_entities,va("print \"masterplace: %s\n\"",G_MastersError()));
+		return;
+	}
+	trap_SendServerCommand(ent-g_entities,va("print \"masterplace: %s at %.0f %.0f %.0f radius %.0f - mastersave to keep it\n\"",
+		name,origin[0],origin[1],origin[2],radius));
+}
+
+static void masterSave_f(gentity_t *ent){
+	if(!G_MastersWrite(placementsFile(),trainingMapName)){
+		trap_SendServerCommand(ent-g_entities,va("print \"mastersave: %s\n\"",G_MastersError()));
+		return;
+	}
+	trap_SendServerCommand(ent-g_entities,va("print \"mastersave: wrote %s\n\"",placementsFile()));
+}
+
+static void masterList_f(gentity_t *ent){
+	const master_t *master;
+	vec3_t delta;
+	int i;
+
+	trap_SendServerCommand(ent-g_entities,va("print \"%i master(s) declared, %i placed on %s\n\"",
+		G_MastersCount(),countPlaced(),trainingMapName));
+	for(i=0;i<G_MastersCount();i++){
+		master = G_MastersGet(i);
+		if(!master->placed){
+			trap_SendServerCommand(ent-g_entities,va("print \"  %i %s: not placed\n\"",master->id,master->name));
+			continue;
+		}
+		VectorSubtract(ent->client->ps.origin,master->origin,delta);
+		trap_SendServerCommand(ent-g_entities,va("print \"  %i %s: %.0f %.0f %.0f radius %.0f, %.0f away\n\"",
+			master->id,master->name,master->origin[0],master->origin[1],master->origin[2],
+			master->radius,VectorLength(delta)));
+	}
+}
+
+// Authoring commands are cheat-gated for the same reason setviewpos is: they
+// move the world, and a public server is not an editing session.
+qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
+	if(Q_stricmp(cmd,"masterplace") && Q_stricmp(cmd,"mastersave") && Q_stricmp(cmd,"masterlist")){
+		return qfalse;
+	}
+	if(!g_cheats.integer){
+		trap_SendServerCommand(ent-g_entities,"print \"Cheats are not enabled on this server.\n\"");
+		return qtrue;
+	}
+	if(!Q_stricmp(cmd,"masterplace")){
+		masterPlace_f(ent);
+		return qtrue;
+	}
+	if(!Q_stricmp(cmd,"mastersave")){
+		masterSave_f(ent);
+		return qtrue;
+	}
+	masterList_f(ent);
+	return qtrue;
 }
 
 qboolean G_TrainingConsoleCommand(const char *cmd){

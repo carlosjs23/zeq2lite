@@ -662,4 +662,10 @@ void CG_InitConsoleCommands( void ) {
 	trap_AddCommand ("stats");
 	trap_AddCommand ("teamtask");
 	trap_AddCommand ("loaddefered");	// spelled wrong, but not changing for demo
+	// The master editor lives in the game module - see the masterplace banner in
+	// g_training.c - so these are forwarded like any other server command, and
+	// are listed here only so tab completion knows they exist.
+	trap_AddCommand ("masterplace");
+	trap_AddCommand ("mastersave");
+	trap_AddCommand ("masterlist");
 }

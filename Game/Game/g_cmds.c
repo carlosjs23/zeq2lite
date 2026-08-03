@@ -1457,6 +1457,10 @@ void ClientCommand( int clientNum ) {
 		Cmd_AI_f( ent );
 	else if (Q_stricmp (cmd, "dummyclear") == 0)
 		Cmd_DummyClear_f( ent );
+	// The master authoring commands, which the training mode owns. Checked
+	// before the fallback so an unknown-command reply still means unknown.
+	else if (G_TrainingClientCommand( ent, cmd ))
+		;
 	else
 		trap_SendServerCommand( clientNum, va("print \"unknown cmd %s\n\"", cmd ) );
 }
