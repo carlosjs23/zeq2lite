@@ -135,4 +135,14 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 	python3 "$ZEQ2_ROOT/Tools/dev/make_hud_gauge.py" \
 		"$ZEQ2_BUILD/$ZEQ2_GAME/interface/hud" >/dev/null
 	echo "ok: reserveGauge.png generated"
+
+	# The training UI's type and the art behind it. The atlases are baked from
+	# whatever font the generator finds, so this prints what it used - including
+	# the licence caveat when it had to fall back to a macOS system face.
+	mkdir -p "$ZEQ2_BUILD/$ZEQ2_GAME/interface/training"
+	python3 "$ZEQ2_ROOT/Tools/dev/make_training_font.py" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME/interface/training" | sed 's/^/    /'
+	python3 "$ZEQ2_ROOT/Tools/dev/make_training_art.py" \
+		"$ZEQ2_BUILD/$ZEQ2_GAME" >/dev/null
+	echo "ok: training atlases, support art and interfaceTraining.shader generated"
 fi
