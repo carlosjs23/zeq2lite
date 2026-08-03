@@ -26,7 +26,7 @@ BUILD             := bin
 # Adding a suite: create suites/test_<name>.c, add <name> here, and give it an
 # SRC_<name> line listing the engine translation units it needs. Keep that list
 # minimal - a short list is a sign the unit under test is well isolated.
-SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers g_rules g_masters g_progress
+SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers g_rules g_masters g_progress g_journal
 
 SHARED_CORE := $(ROOT)/Shared/q_shared.c $(ROOT)/Shared/q_math.c
 SUPPORT     := support/engine_stubs.c
@@ -76,6 +76,12 @@ SRC_g_masters := $(ROOT)/Game/Game/g_masters.c $(ROOT)/Game/Game/g_mem.c \
 # g_progress.c stores tags by NAME, so the suite links the real tag vocabulary
 # out of g_rules.c rather than a stand-in: what is under test is exactly that a
 # name still resolves after the vocabulary moves underneath it.
+# g_journal.c is a reading of the loaded rule set, so the suite links the real
+# parser and the real master vocabulary rather than hand-built rule_t values:
+# what is under test is that authored content produces the right page.
+SRC_g_journal := $(ROOT)/Game/Game/g_journal.c $(ROOT)/Game/Game/g_rules.c \
+                $(ROOT)/Game/Game/g_masters.c $(ROOT)/Game/Game/g_mem.c \
+                $(SHARED_CORE) $(SUPPORT) support/fake_fs.c support/rules_stubs.c
 SRC_g_progress := $(ROOT)/Game/Game/g_progress.c $(ROOT)/Game/Game/g_rules.c \
                 $(ROOT)/Game/Game/g_masters.c $(ROOT)/Game/Game/g_mem.c \
                 $(SHARED_CORE) $(SUPPORT) support/fake_fs.c support/rules_stubs.c

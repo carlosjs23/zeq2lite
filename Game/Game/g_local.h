@@ -31,6 +31,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_rules.h"
 #include "g_masters.h"
 #include "g_progress.h"
+#include "g_journal.h"
 // END ADDING
 #include "g_public.h"
 //==================================================================
@@ -309,6 +310,10 @@ typedef struct {
 	char		progressKey[MAX_PROGRESS_KEY];
 	qboolean	progressDirty;		// tags or ceiling changed since the last write
 	qboolean	progressLoaded;		// the file has been read once for this connection
+	// level.time of the last journal batch sent to this client. A journal open
+	// costs several reliable commands at once, so the rate limit lives here
+	// rather than trusting a client not to hold the bind down.
+	int			journalTime;
 } clientPersistant_t;
 
 

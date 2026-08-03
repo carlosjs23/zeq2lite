@@ -555,6 +555,90 @@ static void runRuleTests(void){
 	G_Printf("ruletest: %i passed, %i failed, %i total\n",passed,failed,G_RulesTestCount());
 }
 
+// -------------------------------------------------------------- journal
+//
+// The whole progression, sent to ONE client on request and never unasked. The
+// authority is here - the tags, the ceiling and the loaded rule set all live on
+// the server - so the client asks with `journal` and gets a batch back.
+//
+// Three commands, and a batch is bounded by the master count rather than by the
+// lesson count:
+//
+//   trjournal <tierCeiling> <earnedTags> <lessonCount>
+//   trjsec    <masterId> "<masterName>" "<lesson>|<lesson>|..."
+//   trjend
+//
+// A <lesson> is one status char - d done, a available, l locked - followed
+// immediately by the lesson's label. Master id 0 is the solo arc, the lessons no
+// master is standing next to, and it is sent as a section like any other.
+//
+//   trjournal 2 4 10
+//   trjsec 0 "" "dtraining.begun|dtrained.flight.hover|atrained.flight.endurance|ltrained.aura.sustain"
+//   trjsec 1 "roshi" "dtrained.roshi.greeting|atrained.roshi.flight"
+//   trjsec 2 "kingKai" "ltrained.kingKai.greeting|ltrained.kingKai.gravity"
+//   trjend
+//
+// trjournal resets the client's page and trjend marks it complete, so a client
+// drawing between the two knows it is looking at a partial batch. A master with
+// more lessons than one command holds is sent as consecutive trjsec commands
+// with the same id, which the client appends.
+//
+// MAX_RELIABLE_COMMANDS is 64 and overflow disconnects, so this is the one place
+// in training mode that sends more than one command at a time and it is bounded
+// twice: the request is rate limited per client, and the batch is capped at
+// JOURNAL_MAX_COMMANDS whatever the content does.
+#define JOURNAL_MAX_COMMANDS	24
+// A held-down bind must not be able to spend the reliable command budget. The
+// client asks once per open and retries only on silence, so this is generous.
+#define JOURNAL_MIN_INTERVAL	500
+
+static int earnedTagCount(const gclient_t *client){
+	int	i,count;
+
+	count = 0;
+	for(i=0;i<G_TagCount();i++){
+		if(G_TagTest(&client->pers.tags,i)){count++;}
+	}
+	return count;
+}
+
+// Sections are emitted in master order with the solo arc first, so the page
+// reads the way the content ladder does: what you can do alone, then who taught
+// you the rest.
+static void sendJournal(gentity_t *ent){
+	journalEntry_t	entries[MAX_JOURNAL_ENTRIES];
+	char		packed[JOURNAL_PACK_SIZE];
+	gclient_t	*client;
+	const master_t	*master;
+	const char	*name;
+	int		clientNum,count,commands,section,masterId,cursor;
+
+	client = ent->client;
+	clientNum = ent - g_entities;
+	count = G_JournalBuild(&client->pers.tags,client->pers.unlockedTier,entries,MAX_JOURNAL_ENTRIES);
+	trap_SendServerCommand(clientNum,va("trjournal %i %i %i",
+		tierCeiling(client),earnedTagCount(client),count));
+	commands = 1;
+	for(section=0;section<=G_MastersCount();section++){
+		if(section == 0){
+			masterId = JOURNAL_SOLO_MASTER;
+			name = "";
+		}
+		else{
+			master = G_MastersGet(section - 1);
+			masterId = master->id;
+			name = master->name;
+		}
+		cursor = 0;
+		while(commands < JOURNAL_MAX_COMMANDS - 1){
+			if(!G_JournalPack(entries,count,masterId,&cursor,packed,sizeof(packed))){break;}
+			trap_SendServerCommand(clientNum,va("trjsec %i \"%s\" \"%s\"",masterId,name,packed));
+			commands++;
+		}
+	}
+	trap_SendServerCommand(clientNum,"trjend");
+}
+
 // ------------------------------------------------------------ masterplace
 
 // The in-game master editor, following the lens-flare editor's shape
@@ -636,6 +720,19 @@ static void masterList_f(gentity_t *ent){
 // Authoring commands are cheat-gated for the same reason setviewpos is: they
 // move the world, and a public server is not an editing session.
 qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
+	// The journal is not authoring and is not cheat-gated: it reads back what
+	// this client already earned. Answered only while the mode is live, so a
+	// server with training off leaves the command unknown, as it is.
+	if(!Q_stricmp(cmd,"journal")){
+		if(!trainingLive){return qfalse;}
+		if(level.time - ent->client->pers.journalTime < JOURNAL_MIN_INTERVAL &&
+			ent->client->pers.journalTime){
+			return qtrue;
+		}
+		ent->client->pers.journalTime = level.time;
+		sendJournal(ent);
+		return qtrue;
+	}
 	if(Q_stricmp(cmd,"masterplace") && Q_stricmp(cmd,"mastersave") && Q_stricmp(cmd,"masterlist")){
 		return qfalse;
 	}
