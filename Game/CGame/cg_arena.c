@@ -33,22 +33,32 @@
 
 #define ARENA_FILE_SIZE		2000
 
-// Tessellation. The floor is a flat disc with planar texture coordinates, so
-// the mapping is exact however few radial bands it is cut into; the segment
-// count is the only number that matters, because it is what makes the edge of
-// the ring read as round rather than as a polygon.
+// Tessellation. The segment count is what makes the edge read as round; the
+// band count is what lets the floor follow the ground it is draped on, and two
+// of them turned a gentle mound on lastStand into a tent. Together they are
+// 288 quads a frame against a 16000-poly budget.
 #define ARENA_SEGMENTS		48
-#define ARENA_FLOOR_BANDS	2
+#define ARENA_FLOOR_BANDS	6
 
 // One texture repeat per this many world units. Eight tiles to the sheet, so
 // this is a 32-unit floor tile against a 56-unit fighter.
 #define ARENA_TILE_UNITS	256.0f
 
-// The floor plane sits this far above the authored height. It is a clearance
-// rather than a bias: on desert the ring is authored on flat ground, so a
-// coincident plane both z-fights and vanishes at grazing angles, and a hand's
-// width of lift reads as the low platform a Budokai ring actually is.
-#define ARENA_FLOOR_LIFT	8.0f
+// How far above the ground each floor vertex sits, and how far above and below
+// the authored height the drape looks for that ground. The lift is small
+// because fighters stand on the map's own surface rather than on this: every
+// unit of it is a unit of boot buried.
+#define ARENA_FLOOR_LIFT	2.0f
+#define ARENA_DRAPE_UP		512.0f
+#define ARENA_DRAPE_DOWN	1024.0f
+
+// How far below the authored floor a draped vertex may go. The ring is a
+// PLATFORM, and the author states its height by standing on it, so ground
+// above that height is a bump the ring is laid flat over and ground below it
+// is followed only this far - past which the surface stays level and a fighter
+// down in the dip is under it. A step's worth: enough for the fall-away the
+// shipped placements sit on, too little to read as a slope.
+#define ARENA_DROP_MAX		24.0f
 
 // The ki wall: how tall it stands, and how far inside the boundary a fighter
 // has to come before it starts answering him. The distance is deliberately
@@ -77,6 +87,9 @@ typedef struct {
 	qhandle_t	floorShader;
 	qhandle_t	postShader;
 	qhandle_t	wallShader;
+	// The ring surface, draped onto the map once. floorZ[band][segment] is the
+	// world height of the vertex at that radius and angle.
+	float		floorZ[ARENA_FLOOR_BANDS+1][ARENA_SEGMENTS];
 } cgArena_t;
 
 static cgArena_t	arena;
@@ -142,6 +155,45 @@ static void CG_ArenaLoad(void){
 }
 
 /*================
+CG_ArenaDrape
+
+The arena file states ONE floor height, taken where the author stood, and the
+ground under the rest of the ring is not at it - on desert the corners sit
+tens of units lower, which a flat disc buries a fighter's boots in. So the ring
+surface is traced onto the map instead, once, when the arena is registered:
+~100 traces at load against 100 a frame, and a ring that is authored by
+standing somewhere is drawn on the ground that is actually there.
+
+A vertex with nothing under it keeps the authored height, because a ring hung
+over open air is the author's business and not something to guess at.
+================*/
+static void CG_ArenaDrape(void){
+	trace_t	trace;
+	vec3_t	start,end;
+	float	r,a,ground;
+	int		band,i;
+
+	for(band=0;band<=ARENA_FLOOR_BANDS;band++){
+		r = arena.radius * band / (float)ARENA_FLOOR_BANDS;
+		for(i=0;i<ARENA_SEGMENTS;i++){
+			a = i * 2.0f * M_PI / ARENA_SEGMENTS;
+			start[0] = end[0] = arena.center[0] + r*cos(a);
+			start[1] = end[1] = arena.center[1] + r*sin(a);
+			start[2] = arena.floor + ARENA_DRAPE_UP;
+			end[2] = arena.floor - ARENA_DRAPE_DOWN;
+			// The WORLD, not CG_Trace: an entity standing on the ring - a
+			// fighter, a mover - would otherwise become part of its floor.
+			trap_CM_BoxTrace(&trace,start,end,NULL,NULL,0,MASK_SOLID);
+			ground = arena.floor;
+			if(trace.fraction < 1.0f && !trace.startsolid){ground = trace.endpos[2];}
+			if(ground > arena.floor){ground = arena.floor;}
+			if(ground < arena.floor - ARENA_DROP_MAX){ground = arena.floor - ARENA_DROP_MAX;}
+			arena.floorZ[band][i] = ground + ARENA_FLOOR_LIFT;
+		}
+	}
+}
+
+/*================
 CG_ArenaRegister
 
 Deferred to the first frame that wants the ring rather than done in
@@ -153,6 +205,7 @@ static void CG_ArenaRegister(void){
 	arena.floorShader = trap_R_RegisterShader("ringFloorTile");
 	arena.postShader = trap_R_RegisterShader("ringPost");
 	arena.wallShader = trap_R_RegisterShader("ringKiWall");
+	CG_ArenaDrape();
 }
 
 /*================
@@ -223,36 +276,33 @@ continuous across every quad and the seams the tessellation introduces are
 invisible. The innermost band's inner radius is zero, which collapses its quad
 to a triangle - correct, and cheaper than special-casing a fan at the middle.
 ================*/
-static void CG_ArenaFloorQuad(float r0,float r1,float a0,float a1,float z,int light){
+static void CG_ArenaFloorQuad(int band,int seg,int light){
 	polyVert_t	verts[4];
-	float		x[4],y[4];
-	int			i;
+	float		r[4],a[4],z[4],x,y;
+	int			next,i;
 
+	next = (seg+1) % ARENA_SEGMENTS;
 	// Wound clockwise seen from above. This engine culls GL_FRONT rather than
 	// GL_BACK (GL_Cull, tr_backend.c), so the counter-clockwise order that reads
 	// as up-facing everywhere else is the one that disappears here.
-	x[0] = arena.center[0] + r0*cos(a1);	y[0] = arena.center[1] + r0*sin(a1);
-	x[1] = arena.center[0] + r1*cos(a1);	y[1] = arena.center[1] + r1*sin(a1);
-	x[2] = arena.center[0] + r1*cos(a0);	y[2] = arena.center[1] + r1*sin(a0);
-	x[3] = arena.center[0] + r0*cos(a0);	y[3] = arena.center[1] + r0*sin(a0);
+	r[0] = arena.radius * band / (float)ARENA_FLOOR_BANDS;		a[0] = next;	z[0] = arena.floorZ[band][next];
+	r[1] = arena.radius * (band+1) / (float)ARENA_FLOOR_BANDS;	a[1] = next;	z[1] = arena.floorZ[band+1][next];
+	r[2] = r[1];							a[2] = seg;	z[2] = arena.floorZ[band+1][seg];
+	r[3] = r[0];							a[3] = seg;	z[3] = arena.floorZ[band][seg];
 	for(i=0;i<4;i++){
-		CG_ArenaVert(&verts[i],x[i],y[i],z,x[i]/ARENA_TILE_UNITS,y[i]/ARENA_TILE_UNITS,light);
+		x = arena.center[0] + r[i]*cos(a[i] * 2.0f * M_PI / ARENA_SEGMENTS);
+		y = arena.center[1] + r[i]*sin(a[i] * 2.0f * M_PI / ARENA_SEGMENTS);
+		CG_ArenaVert(&verts[i],x,y,z[i],x/ARENA_TILE_UNITS,y/ARENA_TILE_UNITS,light);
 	}
 	trap_R_AddPolyToScene(arena.floorShader,4,verts);
 }
 
 static void CG_ArenaFloor(int light){
-	float	a0,a1,r0,r1,z;
-	int		i,band;
+	int	i,band;
 
-	z = arena.floor + ARENA_FLOOR_LIFT;
 	for(band=0;band<ARENA_FLOOR_BANDS;band++){
-		r0 = arena.radius * band / (float)ARENA_FLOOR_BANDS;
-		r1 = arena.radius * (band+1) / (float)ARENA_FLOOR_BANDS;
 		for(i=0;i<ARENA_SEGMENTS;i++){
-			a0 = i * 2.0f * M_PI / ARENA_SEGMENTS;
-			a1 = (i+1) * 2.0f * M_PI / ARENA_SEGMENTS;
-			CG_ArenaFloorQuad(r0,r1,a0,a1,z,light);
+			CG_ArenaFloorQuad(band,i,light);
 		}
 	}
 }
@@ -269,8 +319,8 @@ fighter in the middle of the ring sees the boundary as a hint instead of a box.
 static void CG_ArenaWall(void){
 	polyVert_t	verts[4];
 	vec3_t		delta;
-	float		a0,a1,dist,closeness,facing,bright,px,py,len;
-	int			i,light;
+	float		a0,a1,z0,z1,dist,closeness,facing,bright,px,py,len;
+	int			i,next,light;
 
 	VectorSubtract(cg.predictedPlayerState.origin,arena.center,delta);
 	delta[2] = 0;
@@ -284,6 +334,9 @@ static void CG_ArenaWall(void){
 	if(len > 1.0f){px = delta[0]/len;py = delta[1]/len;}
 	else{px = 0;py = 0;}
 	for(i=0;i<ARENA_SEGMENTS;i++){
+		next = (i+1) % ARENA_SEGMENTS;
+		z0 = arena.floorZ[ARENA_FLOOR_BANDS][i];
+		z1 = arena.floorZ[ARENA_FLOOR_BANDS][next];
 		a0 = i * 2.0f * M_PI / ARENA_SEGMENTS;
 		a1 = (i+1) * 2.0f * M_PI / ARENA_SEGMENTS;
 		facing = 0.5f * ((cos(a0)+cos(a1)) * px + (sin(a0)+sin(a1)) * py);
@@ -293,13 +346,13 @@ static void CG_ArenaWall(void){
 		if(bright > 1){bright = 1;}
 		light = (int)(bright * 255);
 		CG_ArenaVert(&verts[0],arena.center[0]+arena.radius*cos(a0),arena.center[1]+arena.radius*sin(a0),
-			arena.floor,i,1,light);
+			z0,i,1,light);
 		CG_ArenaVert(&verts[1],arena.center[0]+arena.radius*cos(a1),arena.center[1]+arena.radius*sin(a1),
-			arena.floor,i+1,1,light);
+			z1,i+1,1,light);
 		CG_ArenaVert(&verts[2],arena.center[0]+arena.radius*cos(a1),arena.center[1]+arena.radius*sin(a1),
-			arena.floor+ARENA_WALL_HEIGHT,i+1,0,light);
+			z1+ARENA_WALL_HEIGHT,i+1,0,light);
 		CG_ArenaVert(&verts[3],arena.center[0]+arena.radius*cos(a0),arena.center[1]+arena.radius*sin(a0),
-			arena.floor+ARENA_WALL_HEIGHT,i,0,light);
+			z0+ARENA_WALL_HEIGHT,i,0,light);
 		trap_R_AddPolyToScene(arena.wallShader,4,verts);
 	}
 }
@@ -313,14 +366,16 @@ rest of the ring is polys: nothing about it survives a change of radius, and a
 crossed pair reads as round from every angle a fighter sees it from.
 ================*/
 static void CG_ArenaPosts(int light){
-	static const float	postAngle[4] = {0,90,180,270};
 	polyVert_t	verts[4];
 	float		yaw,cx,cy,dx,dy,z;
-	int			i,pass;
+	int			i,pass,seg;
 
-	z = arena.floor + ARENA_FLOOR_LIFT;
 	for(i=0;i<4;i++){
-		yaw = postAngle[i] * M_PI / 180.0f;
+		// The rim vertex nearest each quarter turn, so a post stands on the
+		// same draped height as the piece of floor it is planted in.
+		seg = (i * ARENA_SEGMENTS) / 4;
+		yaw = seg * 2.0f * M_PI / ARENA_SEGMENTS;
+		z = arena.floorZ[ARENA_FLOOR_BANDS][seg];
 		cx = arena.center[0] + arena.radius * cos(yaw);
 		cy = arena.center[1] + arena.radius * sin(yaw);
 		for(pass=0;pass<2;pass++){
