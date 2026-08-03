@@ -17,8 +17,8 @@ A player flies to a master (Roshi, King Kai), receives an objective, performs a
 measurable feat, and is rewarded with progress toward tier unlocks. Solo
 playable. No AI opponents, no new netcode, no external services.
 
-Explicitly **not** in scope for v1: PvE mobs, item drops, global accounts,
-melee-targetable objects, a graph editor.
+Explicitly **not** in scope for v1: PvE mobs, world-droppable items, consumables,
+cross-server travel, global accounts, melee-targetable objects, a graph editor.
 
 ## Why a training arc
 
@@ -591,6 +591,111 @@ melee pass comes first.
 tier 2 unlocked outright, tiers 3+ earned in-match — feels rewarding without
 being oppressive. The rule engine makes this a config change, so both are cheap
 to try.
+
+## Items
+
+Classify by *what an item changes* — it predicts both the cost and the balance
+risk.
+
+**Cost signal: if an item is a tag it is nearly free; if it is a fact it is
+cheap; if it needs a new C verb that is the real cost; if it needs an entity in
+the world that is a project.**
+
+### Access items — zero balance risk
+
+Items that change where you can go or what you can see, never how hard you hit.
+
+- **Dragon Radar.** `g_radar.c` already broadcasts position, `plCurrent`,
+  `plMax`, charge state (`RADAR_WARN`) and aura (`RADAR_BURST`). The item is a
+  tag that unlocks extra readout — nearby masters, hidden locations, exact power
+  level instead of a band. Pure information.
+- **Capsules** as keys: training-area access, a gravity chamber, a master's
+  introduction. A tag gating a trigger.
+
+Both are tags. The rule engine already grants, gates and persists them.
+
+### Handicap items — unexploitable by construction
+
+**Weighted clothing.** Slower and weaker now, faster progression later. This is
+the strongest item type for this design because an item that makes you weaker
+*cannot* be abused in PvP — nobody wears it into a fight. The balance safety is
+structural, not policed by rules.
+
+It also turns training into a choice with a cost rather than a timer.
+
+Needs the `mutate` verb (modify an attribute for a duration or region) borrowed
+from Fortnite's device system — worth having regardless.
+
+### Cosmetics — zero risk
+
+Aura colours, skins, transformation effects. No balance impact, and in a game
+where players watch each other's auras constantly, more motivating than it
+sounds. Also tags.
+
+### The seven Dragon Balls
+
+The reward for collecting them is a wish, which in this architecture is
+literally `grant <tag>` — a technique, a transformation, a cosmetic, a permanent
+fact change.
+
+**Build them as locations, not objects.** Seven triggers, seven tags, a
+summoning trigger requiring all seven. That uses exactly the Phase 2 machinery
+and nothing else. Pair with the Dragon Radar above and the most recognisable
+loop in the franchise is built entirely from triggers, tags and rules.
+
+The physical version — droppable, stealable from other players — is a better
+*game* and needs the carry mechanic that does not exist. Later, not first.
+
+### Travel between maps
+
+Wanted: the player earns the ability to teleport elsewhere — Instant
+Transmission. Three architectures, and only one is cheap.
+
+| Approach | Cost | Limitation |
+|---|---|---|
+| **Regions of one map** | free | Q3 world bounds; one BSP |
+| Server-side map change | free | moves *everyone*, not one player |
+| Cross-server travel | engine work | see below |
+
+**v1: fast travel within a large map.** `TeleportPlayer()` (`g_misc.c`),
+`trigger_teleport` (`g_trigger.c`) and `misc_teleporter_dest` all exist and work
+today. Instant Transmission becomes a tag-gated ability plus a destination
+picker.
+
+The fiction fits the mechanism exactly: canonically you teleport to a ki
+signature you have sensed before. So grant `location.kamehouse` when the player
+first visits, and let Instant Transmission target any location tag they hold.
+Visiting places *is* the unlock, with no extra system.
+
+**Cross-server travel is blocked at the engine.** `cl_cgame.c` acts on a fixed
+whitelist of server commands — `disconnect`, `bcs0/1/2`, `cs`, `map_restart`,
+`clientLevelShot` — and passes everything else to cgame. A server cannot
+redirect a client. Adding that means a new whitelisted command, and the
+whitelist exists precisely to stop servers sending clients wherever they like.
+
+More importantly: **cross-server travel and global accounts are the same
+project.** If a player moves between servers, their progression has to move too.
+Deferred with global accounts, and for the same reasons.
+
+### Consumables — deliberately deferred
+
+Senzu beans and similar restore items are **not in v1**, to reduce risk.
+
+The problem is that a consumable earned outside a match is power progression in
+disguise — exactly what the progression section rules out. Fixing it needs
+competitive modes to issue a fixed stock, plus a vulnerability window on use,
+plus a tuned heal fraction. That is three balance decisions for one item type,
+and none of the other categories need any.
+
+Recorded for later rather than dropped. If revisited, note that **fatigue** is
+the more interesting resource than health — it gates zanzoken, boost,
+air-braking and blocking, so restoring it restores *options* rather than
+survival, which fits the progression philosophy better.
+
+Also note that tournaments already restore health between matches:
+`GT_TOURNAMENT` kicks the loser and runs `map_restart`, and `ClientSpawn` sets
+`plCurrent = plHealth = plFatigue = plMaximum`. The gap is *within* a fight, not
+between them.
 
 ## Generalizing to other modes
 
