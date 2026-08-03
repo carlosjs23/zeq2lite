@@ -75,9 +75,10 @@ LAST_CHAR = 126
 ATLAS_PAD = 2                           # keeps bilinear taps out of the neighbour
 
 
-# Freely-licensed condensed faces worth having, in preference order. None of
-# these ship with macOS; the search is here so that dropping one into
-# ~/Library/Fonts upgrades the atlas on the next build with no code change.
+# Freely-licensed condensed faces worth having, in preference order. The two
+# the build actually lands on are checked in beside this script; the rest are
+# kept so that dropping one into ~/Library/Fonts overrides the atlas on the
+# next build with no code change.
 OFL_DISPLAY = (
     "Anton-Regular.ttf", "Anton.ttf",
     "Oswald-Bold.ttf", "Oswald-SemiBold.ttf", "Oswald-Regular.ttf",
@@ -104,7 +105,13 @@ SYSTEM_BODY = (
     "/System/Library/Fonts/Helvetica.ttc#Helvetica Bold",
 )
 
+# The checked-in faces come first, so a clean checkout bakes shippable atlases
+# with nothing installed. A same-named file in ~/Library/Fonts still wins over
+# the system faces but not over these - pass --display/--body to override.
+BUNDLED_FONTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+
 FONT_DIRS = (
+    BUNDLED_FONTS,
     os.path.expanduser("~/Library/Fonts"),
     "/Library/Fonts",
     "/System/Library/Fonts",
