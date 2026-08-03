@@ -1013,8 +1013,20 @@ static void masterList_f(gentity_t *ent){
 	vec3_t delta;
 	int i;
 
+	// The two empty cases are the ones a player actually hits, and a bare
+	// "0 master(s) declared, 0 placed" reads as a broken command rather than
+	// as an answer, so each says what is missing and which file holds it.
+	if(!G_MastersCount()){
+		trap_SendServerCommand(ent-g_entities,va("print \"masterlist: no masters declared - %s is missing or empty\n\"",
+			TRAINING_MASTERS_FILE));
+		return;
+	}
 	trap_SendServerCommand(ent-g_entities,va("print \"%i master(s) declared, %i placed on %s\n\"",
 		G_MastersCount(),countPlaced(),trainingMapName));
+	if(!countPlaced()){
+		trap_SendServerCommand(ent-g_entities,va("print \"  none placed on this map - %s was not loaded\n\"",
+			placementsFile()));
+	}
 	for(i=0;i<G_MastersCount();i++){
 		master = G_MastersGet(i);
 		if(!master->placed){
@@ -1196,7 +1208,8 @@ static void arenaList_f(gentity_t *ent){
 	const ring_t *r;
 
 	if(!G_RingDefined()){
-		trap_SendServerCommand(ent-g_entities,va("print \"no ring on %s (%s)\n\"",trainingMapName,arenaFile()));
+		trap_SendServerCommand(ent-g_entities,va("print \"arenalist: no ring on %s - %s was not loaded\n\"",
+			trainingMapName,arenaFile()));
 		return;
 	}
 	r = G_RingGet();
@@ -1206,9 +1219,64 @@ static void arenaList_f(gentity_t *ent){
 		G_RingDistance(ent->client->ps.origin),G_RingHeight(ent->client->ps.origin)));
 }
 
-// Authoring commands are cheat-gated for the same reason setviewpos is: they
-// move the world, and a public server is not an editing session.
+// ruledump and ruletest print through G_Printf, which is the SERVER console.
+// On a listen server that is the same console the player typed into, so a
+// player may run them there and read the answer. On a dedicated server the
+// output would go somewhere they cannot see, and relaying it is not an option
+// either: ruledump is hundreds of lines and 64 reliable commands disconnects
+// the client (MAX_RELIABLE_COMMANDS). Say where the output went instead.
+static void ruleDump_f(gentity_t *ent){
+	char arg[MAX_TOKEN_CHARS];
+
+	if(g_dedicated.integer){
+		trap_SendServerCommand(ent-g_entities,
+			"print \"ruledump: prints on the server console - run it there, not here\n\"");
+		return;
+	}
+	trap_Argv(1,arg,sizeof(arg));
+	if(!Q_stricmp(arg,"facts")){
+		writeFactsDef();
+		return;
+	}
+	dumpRules();
+}
+
+static void ruleTest_f(gentity_t *ent){
+	if(g_dedicated.integer){
+		trap_SendServerCommand(ent-g_entities,
+			"print \"ruletest: prints on the server console - run it there, not here\n\"");
+		return;
+	}
+	runRuleTests();
+}
+
+// Whether a command WRITES decides whether it is cheat-gated, and that is the
+// whole rule. masterplace, mastersave, arenaplace, arenasave and arenascan move
+// the world or the content files, so they are gated like setviewpos; masterlist
+// and arenalist only read back what the server already loaded, and a player who
+// cannot ask where the masters are cannot go and find one.
+typedef struct {
+	const char	*name;
+	void		(*handler)(gentity_t *ent);
+	qboolean	writes;
+} trainingCmd_t;
+
+static const trainingCmd_t trainingCommands[] = {
+	{ "masterlist",		masterList_f,	qfalse	},
+	{ "masterplace",	masterPlace_f,	qtrue	},
+	{ "mastersave",		masterSave_f,	qtrue	},
+	{ "arenalist",		arenaList_f,	qfalse	},
+	{ "arenaplace",		arenaPlace_f,	qtrue	},
+	{ "arenasave",		arenaSave_f,	qtrue	},
+	{ "arenascan",		arenaScan_f,	qtrue	},
+	{ "ruledump",		ruleDump_f,		qfalse	},
+	{ "ruletest",		ruleTest_f,		qfalse	}
+};
+
 qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
+	const trainingCmd_t *entry;
+	int i;
+
 	// The journal is not authoring and is not cheat-gated: it reads back what
 	// this client already earned. Answered only while the mode is live, so a
 	// server with training off leaves the command unknown, as it is.
@@ -1222,40 +1290,31 @@ qboolean G_TrainingClientCommand(gentity_t *ent,const char *cmd){
 		sendJournal(ent);
 		return qtrue;
 	}
-	if(Q_stricmp(cmd,"masterplace") && Q_stricmp(cmd,"mastersave") && Q_stricmp(cmd,"masterlist") &&
-		Q_stricmp(cmd,"arenaplace") && Q_stricmp(cmd,"arenasave") && Q_stricmp(cmd,"arenalist") &&
-		Q_stricmp(cmd,"arenascan")){
-		return qfalse;
+
+	entry = NULL;
+	for(i=0;i<(int)ARRAY_LEN(trainingCommands);i++){
+		if(!Q_stricmp(cmd,trainingCommands[i].name)){
+			entry = &trainingCommands[i];
+			break;
+		}
 	}
-	if(!g_cheats.integer){
-		trap_SendServerCommand(ent-g_entities,"print \"Cheats are not enabled on this server.\n\"");
+	if(!entry){return qfalse;}
+
+	// Every path out of here answers the player, and every refusal names the
+	// command and what would let it run. A command that reports nothing is
+	// indistinguishable from one that does not exist, and the person typing it
+	// has no other way to tell those apart.
+	if(!trainingLive){
+		trap_SendServerCommand(ent-g_entities,
+			va("print \"%s: training mode is off - the server needs g_training 1\n\"",entry->name));
 		return qtrue;
 	}
-	if(!Q_stricmp(cmd,"masterplace")){
-		masterPlace_f(ent);
+	if(entry->writes && !g_cheats.integer){
+		trap_SendServerCommand(ent-g_entities,
+			va("print \"%s: cheats required - start the map with devmap %s\n\"",entry->name,trainingMapName));
 		return qtrue;
 	}
-	if(!Q_stricmp(cmd,"mastersave")){
-		masterSave_f(ent);
-		return qtrue;
-	}
-	if(!Q_stricmp(cmd,"masterlist")){
-		masterList_f(ent);
-		return qtrue;
-	}
-	if(!Q_stricmp(cmd,"arenaplace")){
-		arenaPlace_f(ent);
-		return qtrue;
-	}
-	if(!Q_stricmp(cmd,"arenasave")){
-		arenaSave_f(ent);
-		return qtrue;
-	}
-	if(!Q_stricmp(cmd,"arenascan")){
-		arenaScan_f(ent);
-		return qtrue;
-	}
-	arenaList_f(ent);
+	entry->handler(ent);
 	return qtrue;
 }
 

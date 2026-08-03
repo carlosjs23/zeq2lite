@@ -672,10 +672,19 @@ void CG_InitConsoleCommands( void ) {
 	trap_AddCommand ("stats");
 	trap_AddCommand ("teamtask");
 	trap_AddCommand ("loaddefered");	// spelled wrong, but not changing for demo
-	// The master editor lives in the game module - see the masterplace banner in
-	// g_training.c - so these are forwarded like any other server command, and
-	// are listed here only so tab completion knows they exist.
+	// The master and arena editors live in the game module - see the masterplace
+	// banner in g_training.c - so these are forwarded like any other server
+	// command, and are listed here only so tab completion knows they exist. All
+	// of them, not a subset: a command missing from this list still runs, but it
+	// does not complete, and "it does not complete" is how a player concludes a
+	// command is not there.
 	trap_AddCommand ("masterplace");
 	trap_AddCommand ("mastersave");
 	trap_AddCommand ("masterlist");
+	trap_AddCommand ("arenaplace");
+	trap_AddCommand ("arenasave");
+	trap_AddCommand ("arenalist");
+	trap_AddCommand ("arenascan");
+	trap_AddCommand ("ruledump");
+	trap_AddCommand ("ruletest");
 }
