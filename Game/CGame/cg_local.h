@@ -142,7 +142,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	JOURNAL_HEAD_Y		56
 #define	JOURNAL_LIVE_Y		72
 #define	JOURNAL_BODY_Y		98
-#define	JOURNAL_BODY_BOTTOM	442
+// The list stops above the status panel rather than at the bottom of the
+// screen: the panel is drawn before the page and keeps its corner.
+#define	JOURNAL_BODY_BOTTOM	(HUD_PANEL_Y-8)
 #define	JOURNAL_ROW		14
 #define	JOURNAL_INDENT		18
 #define	JOURNAL_ROWS		((JOURNAL_BODY_BOTTOM-JOURNAL_BODY_Y)/JOURNAL_ROW)

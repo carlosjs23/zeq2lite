@@ -333,12 +333,19 @@ Four surfaces, all in cgame:
    `CG_KEY_EVENT`, `CG_MOUSE_EVENT`, `CG_EVENT_HANDLING` are dispatched at
    `vmMain` in `cg_main.c`.
 
-   **It ships as the console command `journal` and no bind.** The 47 default
-   binds live in `default.cfg`, which is game data rather than a tracked file —
-   it is gitignored install content and it is CRLF — so a bind added there
-   would not ship with the repository at all. Anyone who wants a key can
-   `bind j journal`; the command is registered with `trap_AddCommand`, so tab
-   completion knows it.
+   **It ships as the console command `trainingjournal` and no bind.** The 47
+   default binds live in `default.cfg`, which is game data rather than a tracked
+   file — it is gitignored install content and it is CRLF — so a bind added
+   there would not ship with the repository at all. Anyone who wants a key can
+   `bind j trainingjournal`; the command is registered with `trap_AddCommand`,
+   so tab completion knows it.
+
+   It is not called `journal` because it cannot be: `Cmd_ExecuteString`
+   (`Shared/cmd.c`) checks cvars before it offers a command to cgame, and
+   `Com_Init` creates a `journal` cvar for the engine's event journalling. The
+   cgame command registers and then never runs — typing it prints the cvar.
+   That failure is silent in exactly the way this mode's whole design is meant
+   to avoid, so it is written down here.
 
 **Trap:** all 2D is authored in a 640x480 virtual space with two mappings. The
 HUD is aspect-correct; a new element must use the same mapping as its

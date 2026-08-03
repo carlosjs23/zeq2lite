@@ -596,7 +596,13 @@ static consoleCommand_t	commands[] = {
 	// The journal page. Handled here rather than forwarded: the toggle and the
 	// key catcher are client state, and the batch it asks the server for is
 	// requested by the page itself when it opens.
-	{ "journal", CG_JournalToggle },
+	//
+	// Not called `journal`, however much it wants to be: Cmd_ExecuteString
+	// checks cvars BEFORE it offers a command to cgame, and Com_Init creates a
+	// cvar called `journal` for the engine's own event journalling. A cgame
+	// command by that name registers fine and then never runs - typing it just
+	// prints the cvar.
+	{ "trainingjournal", CG_JournalToggle },
 	{ "loaddeferred", CG_LoadDeferredPlayers }
 };
 

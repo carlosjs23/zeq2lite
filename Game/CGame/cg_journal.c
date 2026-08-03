@@ -35,7 +35,7 @@ static vec4_t	journalAvailable	= {1.0f,0.85f,0.4f,1.0f};
 static vec4_t	journalLocked		= {0.45f,0.50f,0.55f,0.8f};
 static vec4_t	journalHeading		= {1.0f,1.0f,1.0f,0.9f};
 static vec4_t	journalQuiet		= {0.7f,0.75f,0.8f,0.8f};
-static vec4_t	journalBackdrop		= {0.0f,0.0f,0.0f,0.82f};
+static vec4_t	journalBackdrop		= {0.0f,0.0f,0.0f,0.94f};
 
 /*================
 CG_JournalRequest
@@ -302,11 +302,20 @@ mapping, like the rest of the HUD. Mixing the two inside one element is the bug
 CLAUDE.md's screen-space section is about.
 ================*/
 void CG_DrawJournal(void){
-	int	rows;
+	const char	*hint;
+	int		rows,width;
 
 	if(!cg.journal.open){return;}
 	CG_FillRect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,journalBackdrop);
 	CG_JournalLine(JOURNAL_LEFT,JOURNAL_TITLE_Y,"TRAINING JOURNAL",journalHeading);
+	// The key hint shares the title's line rather than sitting under the list.
+	// A footer at the bottom of a 640x480 page lands on top of the status panel,
+	// which is drawn first and owns that corner.
+	rows = cg.journal.numSections + cg.journal.numLessons;
+	hint = rows > JOURNAL_ROWS ? "escape closes    arrows scroll" : "escape closes";
+	width = CG_DrawStrlen(hint) * SMALLCHAR_WIDTH / 2;
+	CG_DrawStringExt(-1,JOURNAL_RIGHT-width,JOURNAL_TITLE_Y+SMALLCHAR_HEIGHT/4,hint,
+		journalQuiet,qfalse,qfalse,SMALLCHAR_WIDTH/2,SMALLCHAR_HEIGHT/2,0);
 	if(!cg.journal.valid){
 		// A page that has asked and heard nothing says so. Drawing the empty
 		// arrays instead would be a screen full of nothing that looks settled.
@@ -322,8 +331,4 @@ void CG_DrawJournal(void){
 		cg.journal.earnedTags),journalQuiet);
 	CG_JournalLive();
 	CG_JournalBody();
-	rows = cg.journal.numSections + cg.journal.numLessons;
-	CG_JournalLine(JOURNAL_LEFT,JOURNAL_BODY_BOTTOM+6,
-		rows > JOURNAL_ROWS ? "escape closes    arrows / pgup / pgdn scroll" : "escape closes",
-		journalQuiet);
 }
