@@ -182,6 +182,7 @@ void G_TrainingInit(void){
 // so a line parses by splitting on whitespace and the only quoted field is the
 // last one:
 //
+//   Training: <clientNum> <key> say "<text>"
 //   Training: <clientNum> <key> grant <tagName>
 //   Training: <clientNum> <key> remove <tagName>
 //   Training: <clientNum> <key> unlock-tier <tier>
@@ -402,10 +403,14 @@ static void runAction(gentity_t *ent,const rule_t *rule,const action_t *action){
 		trainingEvent(clientNum,va("remove %s",G_TagName(action->tag)));
 		break;
 	case acSay:
-		// One delivery. This also went out as a console print while the HUD had
-		// nothing to draw it with; now that it does, the print was a second copy
-		// of every line in the chat feed.
+		// One delivery to the player. This also went out as a console print
+		// while the HUD had nothing to draw it with; now that it does, the print
+		// was a second copy of every line in the chat feed. The log line is not
+		// that print: games.log is the event seam, a spoken line is an event,
+		// and a mode whose whole voice is authored content is otherwise a mode
+		// nothing can be verified about after the fact.
 		trainingToast(clientNum,action->text);
+		trainingEvent(clientNum,va("say \"%s\"",action->text));
 		break;
 	case acObjective:
 		Q_strncpyz(client->pers.objectiveText,action->text,sizeof(client->pers.objectiveText));
