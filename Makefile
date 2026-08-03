@@ -1890,6 +1890,7 @@ CGOBJ_ = \
   $(B)/Base/CGame/cg_text.o \
   $(B)/Base/CGame/cg_localents.o \
   $(B)/Base/CGame/cg_marks.o \
+  $(B)/Base/CGame/cg_arena.o \
   $(B)/Base/CGame/cg_players.o \
   $(B)/Base/CGame/cg_playerstate.o \
   $(B)/Base/CGame/cg_predict.o \

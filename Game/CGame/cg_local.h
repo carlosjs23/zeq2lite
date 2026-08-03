@@ -1695,6 +1695,13 @@ void	CG_ImpactMark( qhandle_t markShader,
 					float radius, qboolean temporary );
 
 //
+// cg_arena.c
+//
+void		CG_AddArena( void );
+void		CG_ArenaMapName( char *out, int size );
+qboolean	CG_ArenaRing( vec3_t center, float *radius, float *floor );
+
+//
 // cg_localents.c
 //
 void	CG_InitLocalEntities( void );

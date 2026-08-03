@@ -11,12 +11,13 @@ where its edge is while looking at his opponent rather than at the floor.
     R4 budokai    square tiles, a painted boundary and corner posts
     R5 pillars    eight energy markers standing on a faint ground ring
 
-Each writes the textures it needs plus its shader blocks, so a treatment can be
-tried by pointing map geometry at one shader name. Which of them needs geometry
-is the thing to know before choosing: R1 and R3 are a decal and a curtain and
-can ride on a cylinder brush; R2 and R4 want a real floor surface; R5 wants
-eight small brushes on the perimeter. That is the wiring phase's problem, but
-it is what makes R1 the cheapest candidate here and R4 the dearest.
+Each writes the textures it needs plus its shader blocks. R4 and R3 are the
+combination that ships: cgame builds the floor, the corner posts and the ki
+wall out of scene polys in cg_arena.c, from the radius in the per-map arena
+file. That is why those blocks carry no $lightmap stage and take their colour
+from the vertices - a scene poly has no lightmap coordinates, and the wall's
+brightness is the local fighter's distance to the boundary, which only the
+client knows. R1, R2 and R5 are unwired candidates and are kept as authored.
 
 Deliberately stdlib-only, like every other generator in this directory - the
 noise, the tiling and the PNG writing are all hand-rolled so a build machine
@@ -173,7 +174,7 @@ def r1_hairline(out):
 	cull none
 	{
 		map textures/ring/ringEdgeLine.png
-		blendfunc GL_ONE GL_ONE
+		blendfunc GL_SRC_ALPHA GL_ONE
 		rgbGen wave sin 0.72 0.10 0 0.25
 		tcMod scroll 0.03 0
 	}
@@ -182,7 +183,7 @@ def r1_hairline(out):
 	cull none
 	{
 		map textures/ring/ringEdgeTick.png
-		blendfunc GL_ONE GL_ONE
+		blendfunc GL_SRC_ALPHA GL_ONE
 		rgbGen identity
 	}
 }"""]
@@ -288,6 +289,11 @@ def r3_kiwall(out):
             put(px, w, x, y, lerp(GAUGE, KI_HOT, scale * 0.55), int(min(1.0, a) * 255))
     write_png(os.path.join(out, "ringKiWall.png"), w, h, px)
 
+    # The curtain's shape is in the alpha channel and its colour is flat, so the
+    # blend has to weight by alpha - a bare GL_ONE GL_ONE draws the whole quad
+    # as a solid sheet of gold. And rgbGen is vertex rather than a wave: cgame
+    # builds this cylinder itself and writes the proximity brightness into the
+    # vertex colours, which a shader-side wave would overwrite.
     return ["""ringKiWall
 {
 	cull none
@@ -295,14 +301,14 @@ def r3_kiwall(out):
 	surfaceparm trans
 	{
 		map textures/ring/ringKiWall.png
-		blendfunc GL_ONE GL_ONE
-		rgbGen wave sin 0.42 0.22 0 0.4
+		blendfunc GL_SRC_ALPHA GL_ONE
+		rgbGen vertex
 		tcMod scroll 0.015 0.05
 	}
 	{
 		map textures/ring/ringKiWall.png
-		blendfunc GL_ONE GL_ONE
-		rgbGen wave sin 0.20 0.16 0.5 0.17
+		blendfunc GL_SRC_ALPHA GL_ONE
+		rgbGen vertex
 		tcMod scale 2 1
 		tcMod scroll -0.04 0.09
 	}
@@ -347,27 +353,23 @@ def r4_budokai(out):
             put(px, w, x, y, col, 255)
     write_png(os.path.join(out, "ringPost.png"), w, h, px)
 
+    # No $lightmap stage: cgame draws the floor and the posts as scene polys,
+    # which carry no lightmap coordinates, so the map's light arrives as vertex
+    # colour from CG_LightVerts instead. A $lightmap stage on a poly surface
+    # samples whatever texture coordinates the first stage left behind, which
+    # is the arena floor tinted by an unrelated corner of the map's lightmap.
     return ["""ringFloorTile
 {
 	{
 		map textures/ring/ringFloorTile.png
-		rgbGen identity
-	}
-	{
-		map $lightmap
-		blendFunc GL_DST_COLOR GL_ZERO
-		rgbGen identity
+		rgbGen vertex
 	}
 }""", """ringPost
 {
+	cull none
 	{
 		map textures/ring/ringPost.png
-		rgbGen identity
-	}
-	{
-		map $lightmap
-		blendFunc GL_DST_COLOR GL_ZERO
-		rgbGen identity
+		rgbGen vertex
 	}
 }"""]
 
@@ -408,7 +410,7 @@ def r5_pillars(out):
 	surfaceparm trans
 	{
 		map textures/ring/ringPillar.png
-		blendfunc GL_ONE GL_ONE
+		blendfunc GL_SRC_ALPHA GL_ONE
 		rgbGen wave sin 0.78 0.14 0 0.31
 	}
 }""", """ringGroundGlow
@@ -417,7 +419,7 @@ def r5_pillars(out):
 	surfaceparm nonsolid
 	{
 		map textures/ring/ringGroundGlow.png
-		blendfunc GL_ONE GL_ONE
+		blendfunc GL_SRC_ALPHA GL_ONE
 		rgbGen wave sin 0.60 0.12 0 0.19
 	}
 }"""]
