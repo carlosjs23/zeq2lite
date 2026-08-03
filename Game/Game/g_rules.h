@@ -112,6 +112,10 @@ qboolean	G_TagPrefixMask(const char *prefix,tagSet_t *out);
 
 int		G_RulesFactKey(const char *name);
 const char	*G_RulesFactName(int key);
+// The declared unit and enum values behind a fact, so facts.def can be written
+// out of the C enum rather than kept in step with it by hand.
+const char	*G_RulesFactUnit(int key);
+const char	*G_RulesFactValue(int key,int index);
 
 void		G_RulesReset(void);
 qboolean	G_RulesLoad(const char *tagsPath,const char *rulesPath);
@@ -120,6 +124,10 @@ const char	*G_RulesError(void);
 int		G_RulesCount(void);
 const rule_t	*G_RulesGet(int index);
 const rule_t	*G_RulesFind(const char *name);
+int		G_RulesIndexOf(const rule_t *rule);
+
+int		G_RulesAdvance(int accumulated,int msec,qboolean active);
+qboolean	G_RulesLatch(int *latched,int index);
 
 const rule_t	*G_RulesMatch(const int *clientFacts,const int *worldFacts,const tagSet_t *clientTags,const tagSet_t *worldTags);
 

@@ -555,6 +555,30 @@ const char *G_RulesFactName(int key){
 	return factDefs[key].name;
 }
 
+const char *G_RulesFactUnit(int key){
+	if(key & RULE_WORLD_KEY){
+		key &= ~RULE_WORLD_KEY;
+		if(key < 0 || key >= fWorldFactCount){return NULL;}
+		return worldFactDefs[key].unit;
+	}
+	if(key < 0 || key >= fFactCount){return NULL;}
+	return factDefs[key].unit;
+}
+
+const char *G_RulesFactValue(int key,int index){
+	const factDef_t *def;
+	if(key & RULE_WORLD_KEY){
+		key &= ~RULE_WORLD_KEY;
+		if(key < 0 || key >= fWorldFactCount){return NULL;}
+		def = &worldFactDefs[key];
+	}else{
+		if(key < 0 || key >= fFactCount){return NULL;}
+		def = &factDefs[key];
+	}
+	if(!def->values || index < 0 || index >= def->numValues){return NULL;}
+	return def->values[index];
+}
+
 // ------------------------------------------------------------- tag clauses
 
 // A `.*` suffix names a declared prefix group. Wildcards over several groups
@@ -1133,6 +1157,43 @@ const rule_t *G_RulesFind(const char *name){
 		if(!Q_stricmp(rules[i].name,name)){return &rules[i];}
 	}
 	return NULL;
+}
+
+int G_RulesIndexOf(const rule_t *rule){
+	if(!rule || !rules){return -1;}
+	if(rule < rules || rule >= rules + ruleCount){return -1;}
+	return (int)(rule - rules);
+}
+
+// ---------------------------------------------------------------- firing
+
+// An accumulator counts unbroken time: it advances while its condition holds
+// and drops to zero the moment it does not, because "airborne for 45 seconds"
+// means 45 seconds without touching the ground, not 45 seconds in total.
+int G_RulesAdvance(int accumulated,int msec,qboolean active){
+	if(!active){return 0;}
+	if(msec < 0){msec = 0;}
+	if(accumulated < 0){accumulated = 0;}
+	if(accumulated > MAX_QINT - msec){return MAX_QINT;}
+	return accumulated + msec;
+}
+
+// Edge trigger for the evaluation loop. `latched` holds the best rule's index
+// plus one, so a zeroed client starts with nothing latched rather than with
+// rule 0. A rule's actions run on the frame it becomes the best match and not
+// again while it stays one; the latch clears itself when the best match
+// changes, including changing to no match at all.
+//
+// This is not what makes a rule fire once - content does that by granting a tag
+// it also forbids, which stops the rule matching at all. The latch only stops a
+// rule repeating while it remains the best match, which at sv_fps 20 would
+// otherwise be twenty times a second.
+qboolean G_RulesLatch(int *latched,int index){
+	int want;
+	want = index + 1;
+	if(*latched == want){return qfalse;}
+	*latched = want;
+	return index >= 0 ? qtrue : qfalse;
 }
 
 int G_RulesTestCount(void){

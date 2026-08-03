@@ -110,6 +110,7 @@ vmCvar_t	g_quickTransformCostPerTier ;
 vmCvar_t	g_quickZanzokenCost;
 vmCvar_t	g_quickZanzokenDistance;
 vmCvar_t	g_aiSkill;
+vmCvar_t	g_training;
 
 static cvarTable_t		gameCvarTable[] = {
 	// don't override the cheat state set by the system
@@ -199,6 +200,9 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_quickZanzokenCost , "g_quickZanzokenCost", "-1.0", CVAR_ARCHIVE | CVAR_SERVERINFO,0,qtrue },
 	{ &g_quickZanzokenDistance , "g_quickZanzokenDistance", "-1.0", CVAR_ARCHIVE | CVAR_SERVERINFO,0,qtrue },
 	{ &g_aiSkill, "g_aiSkill", "3", CVAR_ARCHIVE, 0, qtrue },
+	// Latched because the rule database is read once at G_InitGame and never
+	// reloaded; a mid-map flip would leave the mode half on.
+	{ &g_training, "g_training", "1", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse },
 	// END ADDING
 
 };
@@ -498,6 +502,10 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 		G_ModelIndex( SP_PODIUM_MODEL );
 	}
 	G_RemapTeamShaders();
+
+	// After G_InitMemory: the rule database is pooled out of the bump
+	// allocator, which G_InitMemory has just reset.
+	G_TrainingInit();
 }
 
 

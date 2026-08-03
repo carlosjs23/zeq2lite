@@ -31,6 +31,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MAPLENSFLARES		1	// JUHOX
 
 #define	DEFAULT_GRAVITY		3000
+// What a player falls at when nothing has changed it. ps->gravity[0] holds a
+// per-client base and this is the value it stands in for; ps->gravity[2] is the
+// working value pmove rewrites every move.
+#define	PLAYER_BASE_GRAVITY	800
 #define	GIB_HEALTH			-40
 #define	ARMOR_PROTECTION	0.66
 

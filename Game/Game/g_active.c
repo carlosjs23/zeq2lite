@@ -1028,6 +1028,11 @@ void ClientEndFrame( gentity_t *ent ) {
 		ent->s.eFlags &= ~EF_CONNECTION;
 	}
 	G_SetClientSound (ent);
+
+	// Rule evaluation belongs here and not in ClientThink: this runs once per
+	// server frame, that one runs once per usercmd at a rate the client picks.
+	G_TrainingEndFrame( ent );
+
 	// set the latest infor
 	BG_PlayerStateToEntityState( &ent->client->ps, &ent->s, qtrue );
 	SendPendingPredictableEvents( &ent->client->ps );

@@ -3856,7 +3856,7 @@ void PmoveSingle(pmove_t *pmove){
 	pm->numtouch = 0;
 	pm->watertype = 0;
 	pm->waterlevel = 0;
-	pm->ps->gravity[2] = pm->ps->bitFlags & usingJump ? pm->ps->gravity[2] : 800;
+	pm->ps->gravity[2] = pm->ps->bitFlags & usingJump ? pm->ps->gravity[2] : (pm->ps->gravity[0] ? pm->ps->gravity[0] : PLAYER_BASE_GRAVITY);
 	pm->ps->eFlags &= ~EF_AURA;
 	memset (&pml, 0, sizeof(pml));
 	pml.msec = pmove->cmd.serverTime - pm->ps->commandTime;

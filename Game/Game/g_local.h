@@ -288,6 +288,14 @@ typedef struct {
 	// would only break for players who die mid-arc, which is the worst possible
 	// discovery schedule.
 	tagSet_t	tags;
+	// The lesson this client is on and the ceiling its training has opened.
+	// Both sit beside the tags for the same reason: an unlocked tier a player
+	// loses by dying is not an unlock, and an objective that clears on death
+	// leaves the arc with no visible next step.
+	char		objectiveText[MAX_ACTION_TEXT];
+	int			objectiveTrack;		// fact key; meaningful only with text set
+	int			objectiveGoal;
+	int			unlockedTier;
 } clientPersistant_t;
 
 
@@ -397,6 +405,9 @@ extern struct gclient_s {
 	// belong on this side of ClientSpawn because resetting them on death is
 	// what a lesson means by "stay airborne for 45 seconds".
 	int			facts[fFactCount];
+	// Best-match rule index plus one, so a wiped client has nothing latched
+	// rather than rule 0 latched. See G_RulesLatch for what it is and is not.
+	int			ruleLatched;
 
 
 	// END ADDING
@@ -775,6 +786,14 @@ qboolean G_weapPhys_Parse( char *filename, int clientNum );
 void G_CheckSkills(playerState_t *ps );
 
 ///
+/// g_training.c
+///
+void		G_TrainingInit( void );
+void		G_TrainingEndFrame( gentity_t *ent );
+qboolean	G_TrainingTierUnlocked( gclient_t *client, int tier );
+qboolean	G_TrainingConsoleCommand( const char *cmd );
+
+///
 /// g_tiers.c
 ///
 void checkTier(gclient_t *client );
@@ -851,6 +870,7 @@ extern	vmCvar_t	g_quickTransformCostPerTier ;
 extern	vmCvar_t	g_quickZanzokenCost ;
 extern	vmCvar_t	g_quickZanzokenDistance ;
 extern	vmCvar_t	g_aiSkill;
+extern	vmCvar_t	g_training;
 // END ADDING
 #if MAPLENSFLARES	// JUHOX: cvars for map lens flares
 extern	vmCvar_t	g_editmode;

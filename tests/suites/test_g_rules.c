@@ -512,6 +512,62 @@ Test(g_rules, a_wrong_vector_reports_what_it_got) {
 	cr_assert_str_eq(err, "test 'wrong' expected 'a', matched 'none'");
 }
 
+/* ------------------------------------------------ accumulators and latching */
+
+/* Both seams the game-side evaluation loop is built on are pure functions of
+   their arguments, so the behaviour that decides when a lesson counts and when
+   a rule speaks is testable without a server frame. */
+
+Test(g_rules, an_accumulator_counts_unbroken_time) {
+	int held = 0;
+	int i;
+
+	for (i = 0; i < 10; ++i) {
+		held = G_RulesAdvance(held, 50, qtrue);
+	}
+	cr_assert_eq(held, 500);
+	/* One frame off the ground is the whole point: it resets, not decays. */
+	held = G_RulesAdvance(held, 50, qfalse);
+	cr_assert_eq(held, 0);
+	held = G_RulesAdvance(held, 50, qtrue);
+	cr_assert_eq(held, 50);
+}
+
+Test(g_rules, an_accumulator_saturates_rather_than_wrapping) {
+	cr_assert_eq(G_RulesAdvance(MAX_QINT - 10, 50, qtrue), MAX_QINT);
+	/* A frame that went backwards must not run the clock down. */
+	cr_assert_eq(G_RulesAdvance(1000, -50, qtrue), 1000);
+}
+
+Test(g_rules, the_latch_fires_once_when_a_rule_becomes_the_best_match) {
+	int latched = 0;
+
+	/* A zeroed client has nothing latched, not rule 0 latched. */
+	cr_assert(G_RulesLatch(&latched, 0));
+	cr_assert_not(G_RulesLatch(&latched, 0));
+	cr_assert_not(G_RulesLatch(&latched, 0));
+	/* A different rule taking over is a new edge. */
+	cr_assert(G_RulesLatch(&latched, 3));
+	cr_assert_not(G_RulesLatch(&latched, 3));
+	/* Matching nothing is never a firing, but it does clear the latch, so the
+	   same rule fires again when it comes back. */
+	cr_assert_not(G_RulesLatch(&latched, -1));
+	cr_assert(G_RulesLatch(&latched, 3));
+}
+
+Test(g_rules, rules_are_addressable_by_index_for_the_latch) {
+	const rule_t *rule;
+
+	cr_assert(loadOk(kTags,
+		"rule a { when tierCurrent atLeast 2 say \"a\" }\n"
+		"rule b { when tierCurrent atMost 1 say \"b\" }\n"), "%s", G_RulesError());
+
+	rule = G_RulesFind("b");
+	cr_assert_eq(G_RulesIndexOf(rule), 1);
+	cr_assert_eq(G_RulesGet(G_RulesIndexOf(rule)), rule);
+	cr_assert_eq(G_RulesIndexOf(NULL), -1);
+}
+
 /* -------------------------------------------------------- shipped content */
 
 /* The content under GameData/rules is a real deliverable, so the suite runs the
