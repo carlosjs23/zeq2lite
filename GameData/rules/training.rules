@@ -1,8 +1,11 @@
-// Phase 1 training content.
+// Training content, in two halves.
 //
-// No rule here keys on masterNear: master triggers arrive in Phase 2, so a rule
-// that needed one could not be exercised yet. Everything below is built from
-// facts that exist now - airborneTime, auraTime, fatigue, tierCurrent, gravity.
+// The solo basics come first and use only facts a player carries with them -
+// airborneTime, auraTime, fatigue, tierCurrent, gravity. The master arc after
+// them is keyed on masterNear and needs the placements in
+// rules/masters_<mapname>.def to fire at all. The two are parallel ladders
+// rather than a sequence: a player can walk up to Roshi on their first minute,
+// and where both halves match, the master rule wins because it states more.
 //
 // Rules are a chain: each step requires the tag the step before it granted, and
 // forbids the tag it grants itself so it fires exactly once. That chaining is
@@ -103,6 +106,99 @@ rule seen_first_ascension {
 	say    "So that is what it feels like."
 }
 
+// --------------------------------------------------------- the master arc
+//
+// Keyed on masterNear, which is the id of the master whose radius the player is
+// standing in: declared in rules/masters.def, placed per map in
+// rules/masters_<mapname>.def.
+//
+// Every rule here states at least three criteria, and no rule in the solo half
+// states more than two. That is not decoration - the loader rejects two rules
+// that can match the same state with equal specificity, and criteria count is
+// what keeps the two halves from colliding without either having to know about
+// the other. Inside this half the greetings and the lessons are kept apart by
+// disjoint ranges on a shared fact and by the greeting tag.
+
+// A master greets you when you land in front of him with something left in the
+// tank. Landing is the interaction: a player who flies past overhead has an
+// airborneTime far past this range and is not talked at.
+rule roshi_greeting {
+	when  masterNear    is      roshi
+	when  airborneTime  atMost  2s
+	when  fatigue       above   0pl
+
+	forbids  trained.roshi.greeting
+
+	grant      trained.roshi.greeting
+	say        "So you found me. Everyone starts the same way: stay off the ground."
+	objective  "Stay airborne for forty-five seconds"  track  airborneTime  goal  45s
+}
+
+rule roshi_flight_pass {
+	when  masterNear    is       roshi
+	when  airborneTime  atLeast  45s
+	when  fatigue       above    0pl
+
+	requires  trained.roshi.greeting
+	forbids   trained.roshi.flight
+
+	grant   trained.roshi.flight
+	say     "Not bad. You have the endurance of a delivery boy."
+	unlock  tier 2
+}
+
+rule roshi_flight_fail {
+	when  masterNear    is       roshi
+	when  airborneTime  atLeast  45s
+	when  fatigue       is       0pl
+
+	requires  trained.roshi.greeting
+	forbids   trained.roshi.flight
+
+	say  "Empty. Ki holds you up there, not willpower. Land and try again."
+}
+
+rule kingkai_greeting {
+	when  masterNear    is      kingKai
+	when  airborneTime  atMost  2s
+	when  fatigue       above   0pl
+
+	requires  trained.roshi.flight
+	forbids   trained.kingKai.greeting
+
+	grant       trained.kingKai.greeting
+	say         "My planet is small and it pulls hard. Keep your aura up in it."
+	setGravity  10g
+	objective   "Hold your aura for twenty seconds under ten times gravity"  track  auraTime  goal  20s
+}
+
+rule kingkai_gravity_pass {
+	when  masterNear  is       kingKai
+	when  gravity     atLeast  10g
+	when  auraTime    atLeast  20s
+
+	requires  trained.kingKai.greeting
+	forbids   trained.kingKai.gravity
+
+	grant   trained.kingKai.gravity
+	say     "Ten times gravity and you are still glowing. Now the joke."
+	unlock  tier 3
+}
+
+// One criterion more than the pass, so an exhausted player gets this line
+// instead and the pass stays out of reach until there is ki to hold an aura up.
+rule kingkai_gravity_fail {
+	when  masterNear  is       kingKai
+	when  gravity     atLeast  10g
+	when  auraTime    atLeast  20s
+	when  fatigue     is       0pl
+
+	requires  trained.kingKai.greeting
+	forbids   trained.kingKai.gravity
+
+	say  "Flat on your face under my gravity. Rest, then hold it up again."
+}
+
 // ------------------------------------------------------------------- vectors
 
 test "an untrained player gets the fallback nudge" {
@@ -180,4 +276,84 @@ test "the first ascension is noticed once" {
 	given   tierCurrent  2
 	given   tags         training.begun  trained.flight.hover  trained.flight.endurance  trained.aura.sustain
 	expect  seen_first_ascension
+}
+
+// ------------------------------------------------- the master arc's vectors
+
+test "roshi greets a player who lands in front of him" {
+	given   masterNear  roshi
+	given   fatigue     1000pl
+	expect  roshi_greeting
+}
+
+// The greeting is the interaction, so a player who never lands gets the solo
+// nudge rather than a master's line.
+test "flying past roshi is not landing in front of him" {
+	given   masterNear    roshi
+	given   airborneTime  30s
+	given   fatigue       1000pl
+	given   tags          training.begun
+	expect  flight_hover_pass
+}
+
+test "away from every master nothing greets anyone" {
+	given   fatigue  1000pl
+	expect  idle_nudge
+}
+
+test "endurance in front of roshi passes with ki left" {
+	given   masterNear    roshi
+	given   airborneTime  46s
+	given   fatigue       500pl
+	given   tags          trained.roshi.greeting
+	expect  roshi_flight_pass
+}
+
+test "fatigued out in front of roshi gets the failure line" {
+	given   masterNear    roshi
+	given   airborneTime  46s
+	given   fatigue       0pl
+	given   tags          trained.roshi.greeting
+	expect  roshi_flight_fail
+}
+
+// The master rule states three criteria and the solo one two, so the specific
+// rule wins wherever both apply - which is what buys free fallbacks.
+test "roshi's lesson beats the solo lesson on the same state" {
+	given   masterNear    roshi
+	given   airborneTime  46s
+	given   fatigue       500pl
+	given   tags          training.begun  trained.flight.hover  trained.roshi.greeting
+	expect  roshi_flight_pass
+}
+
+test "king kai waits until roshi is finished with you" {
+	given   masterNear  kingKai
+	given   fatigue     1000pl
+	expect  idle_nudge
+}
+
+test "king kai greets a player roshi has passed" {
+	given   masterNear  kingKai
+	given   fatigue     1000pl
+	given   tags        trained.roshi.greeting  trained.roshi.flight
+	expect  kingkai_greeting
+}
+
+test "the aura holds under ten times gravity" {
+	given   masterNear  kingKai
+	given   gravity     10g
+	given   auraTime    21s
+	given   fatigue     300pl
+	given   tags        trained.roshi.flight  trained.kingKai.greeting
+	expect  kingkai_gravity_pass
+}
+
+test "nothing left to hold the aura with fails the gravity lesson" {
+	given   masterNear  kingKai
+	given   gravity     10g
+	given   auraTime    21s
+	given   fatigue     0pl
+	given   tags        trained.roshi.flight  trained.kingKai.greeting
+	expect  kingkai_gravity_fail
 }

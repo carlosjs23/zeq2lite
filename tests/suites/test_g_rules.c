@@ -19,6 +19,7 @@ gate that keeps content honest without launching the game.
 
 #define TAGS_PATH   "rules/tags.def"
 #define RULES_PATH  "rules/training.rules"
+#define MASTERS_PATH "rules/masters.def"
 
 /* The chain the sample content and most inline fixtures share. */
 static const char *const kTags =
@@ -32,6 +33,10 @@ static void setup(void) {
 	fake_fs_reset();
 	G_InitMemory();
 	G_RulesReset();
+	/* The masterNear vocabulary survives G_RulesReset on purpose - it is loaded
+	   once per map, outside the rules - so a suite that installs one has to put
+	   the built-in table back itself. */
+	G_RulesSetMasterVocabulary(NULL, 0);
 }
 
 TestSuite(g_rules, .init = setup);
@@ -606,21 +611,53 @@ Test(g_rules, the_shipped_content_loads_and_its_vectors_pass) {
 	cr_assert_eq(fake_fs_leak_count(), 0);
 }
 
-/* Phase 1 has no master triggers, so content keyed on masterNear could not be
-   exercised. The fact exists; the plan forbids building Phase 1 vectors on it. */
-Test(g_rules, the_shipped_content_does_not_key_on_masterNear) {
-	int i, j;
+/* The master arc is the reason the vocabulary is loaded before the rules parse:
+   `masterNear is roshi` is only a legal value because rules/masters.def declared
+   roshi, and this is the assertion that the two files agree. */
+Test(g_rules, the_shipped_content_keys_on_the_shipped_masters) {
+	const char *const *vocabulary;
+	int count, i, j, keyed;
 	const rule_t *rule;
+
+	loadShipped(MASTERS_PATH, RULES_CONTENT_DIR "/masters.def");
+	G_MastersReset();
+	cr_assert(G_MastersLoadDef(MASTERS_PATH), "%s", G_MastersError());
+	vocabulary = G_MastersVocabulary(&count);
+	G_RulesSetMasterVocabulary(vocabulary, count);
 
 	loadShipped(TAGS_PATH, RULES_CONTENT_DIR "/tags.def");
 	loadShipped(RULES_PATH, RULES_CONTENT_DIR "/training.rules");
 	cr_assert(G_RulesLoad(TAGS_PATH, RULES_PATH), "%s", G_RulesError());
 
+	keyed = 0;
 	for (i = 0; i < G_RulesCount(); ++i) {
 		rule = G_RulesGet(i);
 		for (j = 0; j < rule->numCriteria; ++j) {
-			cr_assert_neq(rule->criteria[j].key, fMasterNear,
-				"rule '%s' keys on masterNear", rule->name);
+			if (rule->criteria[j].key != fMasterNear) {
+				continue;
+			}
+			keyed++;
+			/* A criterion compiles to the master's id, so an id no master holds
+			   would be a rule that can never match - the silent no-op again. */
+			cr_assert_geq(rule->criteria[j].min, 1);
+			cr_assert_lt(rule->criteria[j].min, count);
+			cr_assert_str_neq(G_MastersName(rule->criteria[j].min), "");
 		}
 	}
+	cr_assert_gt(keyed, 0, "the shipped content no longer keys on masterNear");
+}
+
+/* Progress is quantized on the server and travels as a percent, so the clamp is
+   the whole contract the HUD gauge is drawn against. */
+Test(g_rules, progress_is_a_clamped_percent) {
+	cr_assert_eq(G_RulesProgress(0, 45000), 0);
+	cr_assert_eq(G_RulesProgress(-1, 45000), 0);
+	cr_assert_eq(G_RulesProgress(22500, 45000), 50);
+	cr_assert_eq(G_RulesProgress(45000, 45000), 100);
+	/* Overshoot is normal: a fact keeps accumulating after the goal is met. */
+	cr_assert_eq(G_RulesProgress(90000, 45000), 100);
+	/* A goal of zero is content that never states one; it must not divide. */
+	cr_assert_eq(G_RulesProgress(1000, 0), 0);
+	/* Truncation, not rounding: 99 must not read as done. */
+	cr_assert_eq(G_RulesProgress(44999, 45000), 99);
 }
