@@ -373,6 +373,18 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			break;
 		case EV_MELEE_STUN:
 			break;
+		// The three no-damage outcomes, on the same line as the rest of the
+		// fight report. They resolve in a single frame and leave nothing behind
+		// in the playerState, so a sampled report cannot see them at all and
+		// the only way to know a duel ever produced one is to say so here.
+		case EV_MELEE_BREAKER_BACKFIRE:
+		case EV_MELEE_BREAKER_CLASH:
+		case EV_MELEE_CLASH:
+			if(g_debugFight.integer){
+				G_Printf("fight c%i t%i.%i: %s\n",(int)(ent - g_entities),
+					level.time / 1000,(level.time % 1000) / 100,eventnames[event]);
+			}
+			break;
 		case EV_MELEE_KNOCKOUT:
 			enemy = &g_entities[ps->lockedTarget-1];
 			enemy->enemy = ent;

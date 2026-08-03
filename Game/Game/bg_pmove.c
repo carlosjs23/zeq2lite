@@ -2727,13 +2727,13 @@ void PM_Melee(void){
 			if(pm->ps->timers[tmMeleeBreaker] > 0){
 				state = stMeleeUsingChargeBreaker;
 				if(enemyState == stMeleeUsingSpeed){
-					//PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);
+					PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);
 					pm->ps->timers[tmFreeze] = 950;
 					pm->ps->powerLevel[plUseFatigue] += damage;
 					state = stMeleeIdle;
 				}
 				else if(pm->ps->lockedPlayer->timers[tmMeleeBreaker]){
-					//PM_AddEvent(EV_MELEE_BREAKER_CLASH);
+					PM_AddEvent(EV_MELEE_BREAKER_CLASH);
 					PM_AddEvent(EV_MELEE_KNOCKBACK);
 					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->timers[tmMeleeIdle] = -480;
@@ -2762,13 +2762,13 @@ void PM_Melee(void){
 			else{
 				state = stMeleeUsingSpeedBreaker;
 				if(pm->ps->lockedPlayer->timers[tmMeleeCharge]){
-					//PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);
+					PM_AddEvent(EV_MELEE_BREAKER_BACKFIRE);
 					pm->ps->timers[tmFreeze] = 300;
 					pm->ps->lockedPlayer->timers[tmMeleeCharge] = 1000;
 					state = stMeleeIdle;
 				}
 				else if(pm->ps->lockedPlayer->timers[tmMeleeBreaker]){
-					//PM_AddEvent(EV_MELEE_CLASH);
+					PM_AddEvent(EV_MELEE_CLASH);
 					PM_AddEvent(EV_MELEE_KNOCKBACK);
 					pm->ps->timers[tmFreeze] = 500;
 					pm->ps->timers[tmMeleeIdle] = -480;
@@ -2828,7 +2828,7 @@ void PM_Melee(void){
 						pm->ps->timers[tmMeleeIdle] = -480;
 						pm->ps->lockedPlayer->timers[tmMeleeIdle] = -480;
 						PM_AddEvent(EV_MELEE_KNOCKBACK);
-						//PM_AddEvent(EV_MELEE_CLASH);
+						PM_AddEvent(EV_MELEE_CLASH);
 						PM_StopMelee();
 					}
 					else if(enemyState != stMeleeUsingEvade){

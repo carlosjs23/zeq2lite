@@ -628,7 +628,13 @@ typedef enum {
 	EV_HOVER_LONG,
 	// ADDING FOR ZEQ2
 	EV_BEAM_FADE,
-	EV_EARTHQUAKE
+	EV_EARTHQUAKE,
+	// The three melee outcomes that had no event to announce them. Appended,
+	// never inserted: es.event goes on the wire as eight bits and every value
+	// above is a number a demo or an older client already means something by.
+	EV_MELEE_BREAKER_BACKFIRE,
+	EV_MELEE_BREAKER_CLASH,
+	EV_MELEE_CLASH
 	// END ADDING
 } entity_event_t;
 typedef enum {
@@ -865,3 +871,6 @@ int		BG_IntMergeBits( const int hi, const int lo );
 
 const char *BG_WeaponStateName( int state );
 const char *BG_MeleeStateName( int state );
+// Parallel to entity_event_t, defined in bg_misc.c. Declared here because both
+// modules print events and each used to carry its own extern for it.
+extern char *eventnames[];

@@ -949,6 +949,9 @@ typedef struct {
 	sfxHandle_t	powerStunSound1;
 	sfxHandle_t	powerStunSound2;
 	sfxHandle_t	powerMissSound;
+	sfxHandle_t	meleeClashSound;
+	sfxHandle_t	meleeBreakerClashSound;
+	sfxHandle_t	meleeBackfireSound;
 	sfxHandle_t	airBrake1;
 	sfxHandle_t	airBrake2;
 	sfxHandle_t hover;

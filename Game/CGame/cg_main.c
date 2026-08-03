@@ -527,6 +527,13 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.powerStunSound2 = trap_S_RegisterSound( "effects/melee/powerStun2.ogg", qfalse );
 	cgs.media.powerMeleeSound = trap_S_RegisterSound( "effects/melee/powerHit1.ogg", qfalse );
 	cgs.media.powerMissSound = trap_S_RegisterSound( "effects/melee/powerMiss1.ogg", qfalse );
+	// Two attacks meeting and a breaker turned back on its owner. The data set
+	// shipped sounds for the first two and nothing was ever playing them; the
+	// backfire borrows the deflection, which is what it is - the swing never
+	// reaches the target and must not read as a landed hit.
+	cgs.media.meleeClashSound = trap_S_RegisterSound( "effects/melee/meleeHitClash.ogg", qfalse );
+	cgs.media.meleeBreakerClashSound = trap_S_RegisterSound( "effects/melee/meleeBreaker.ogg", qfalse );
+	cgs.media.meleeBackfireSound = trap_S_RegisterSound( "effects/deflect.ogg", qfalse );
 	cgs.media.lockonStart = trap_S_RegisterSound( "effects/powerSense.ogg", qfalse );
 	cgs.media.nullSound = trap_S_RegisterSound( "effects/null.ogg", qfalse );
 	cgs.media.airBrake1 = trap_S_RegisterSound( "effects/airBrake1.ogg", qfalse );

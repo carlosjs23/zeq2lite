@@ -558,6 +558,27 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_MELEE_BREAKER");
 		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,cgs.media.powerStunSound1);
 		break;
+	// The three outcomes of the melee's rock-paper-scissors that produce no
+	// damage number, and so had nothing at all to show for themselves. Each
+	// carries a sound the others do not, because what a player has to learn
+	// here is which of the three just happened.
+	case EV_MELEE_CLASH:
+		DEBUGNAME("EV_MELEE_CLASH");
+		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,cgs.media.meleeClashSound);
+		CG_PowerMeleeEffect(cent->lerpOrigin,cent->currentState.tier);
+		break;
+	case EV_MELEE_BREAKER_CLASH:
+		DEBUGNAME("EV_MELEE_BREAKER_CLASH");
+		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,cgs.media.meleeBreakerClashSound);
+		CG_PowerMeleeEffect(cent->lerpOrigin,cent->currentState.tier);
+		break;
+	// Nothing lands on anyone, so no impact flash: the fighter that swung is
+	// the one frozen, and a shake on their own camera is the feedback.
+	case EV_MELEE_BREAKER_BACKFIRE:
+		DEBUGNAME("EV_MELEE_BREAKER_BACKFIRE");
+		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,cgs.media.meleeBackfireSound);
+		CG_AddEarthquake(cent->lerpOrigin, 500, 1, 0, 1, 250);
+		break;
 	case EV_TIERUP_FIRST:
 		DEBUGNAME("EV_TIERUP_FIRST");
 		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,ci->tierConfig[ci->tierCurrent].soundTransformFirst);
