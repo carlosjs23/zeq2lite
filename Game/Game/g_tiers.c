@@ -101,6 +101,12 @@ qboolean checkTierUpTransformation(gclient_t *client, int nextTierIndex, int cur
 					   (ps->powerLevel[plFatigue] >= nextTier->sustainFatigue) &&
 					   (ps->powerLevel[plMaximum] >= nextTier->sustainMaximum);
 
+				// Training gates the ability to ascend, so a tier the player has
+				// not been taught fails here like any other unmet requirement.
+				if(hasRequirementsToTransform && !G_TrainingTierUnlocked(client,nextTierIndex)){
+					hasRequirementsToTransform = qfalse;
+				}
+
 				if((((nextTier->requirementButtonUp && (tierChangeMode > 0)) || !nextTier->requirementButtonUp) &&
 						hasRequirementsToTransform == 1) ){
 					ps->timers[tmTransform] = 1;

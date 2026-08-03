@@ -23,3 +23,12 @@ vmCvar_t g_quickZanzokenDistance    = { 0, 0, -1.0f, -1, "-1" };
 
 /* g_tiers.c reaches the game module's printf wrapper for diagnostics. */
 void QDECL G_Printf(const char *fmt, ...) { (void)fmt; }
+
+/* Training gates the ability to ascend from outside this unit. Reporting every
+   tier unlocked is what a server with g_training 0 does, so the tier vectors
+   keep measuring the power requirements they were written for. */
+qboolean G_TrainingTierUnlocked(gclient_t *client, int tier) {
+	(void)client;
+	(void)tier;
+	return qtrue;
+}
