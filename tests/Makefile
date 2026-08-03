@@ -26,7 +26,7 @@ BUILD             := bin
 # Adding a suite: create suites/test_<name>.c, add <name> here, and give it an
 # SRC_<name> line listing the engine translation units it needs. Keep that list
 # minimal - a short list is a sign the unit under test is well isolated.
-SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers
+SUITES := q_shared screen cg_screen vidmodes bloomsize fs_path cg_music cg_players iqm msg weapgfx png snd usermissile tiers g_rules
 
 SHARED_CORE := $(ROOT)/Shared/q_shared.c $(ROOT)/Shared/q_math.c
 SUPPORT     := support/engine_stubs.c
@@ -64,6 +64,10 @@ SRC_tiers    := $(ROOT)/Game/Game/g_tiers.c $(SHARED_CORE) $(SUPPORT) \
                 support/fake_fs.c support/tiers_stubs.c
 SRC_snd      := $(ROOT)/Engine/client/snd_dma.c $(SHARED_CORE) $(SUPPORT) \
                 support/sound_stubs.c
+# g_rules.c is a leaf: COM_Parse, the FS traps and G_Alloc. g_mem.c is linked for
+# real so the suite runs against the actual bump allocator and its POOLSIZE.
+SRC_g_rules  := $(ROOT)/Game/Game/g_rules.c $(ROOT)/Game/Game/g_mem.c \
+                $(SHARED_CORE) $(SUPPORT) support/fake_fs.c support/rules_stubs.c
 
 # The renderer sources reach SDL2's SDL_opengl.h through qgl.h, so the PNG
 # suite needs the same SDL2 include path the engine build uses.  See the
@@ -88,7 +92,10 @@ INCLUDES := -I$(ROOT)/Shared -I$(ROOT)/Game/Game -I$(ROOT)/Game/CGame \
 # QVM one. -Wno-* entries are blanket-suppressed only where the 2011-era engine
 # sources are unavoidably noisy; test code itself must compile clean.
 WARN := -Wall -Wno-unused-parameter -Wno-missing-braces
-CFLAGS_TEST := -std=gnu99 -g -O0 $(WARN) $(INCLUDES)
+# RULES_CONTENT_DIR lets the g_rules suite read the shipped rule content instead
+# of a copy that would drift from it, without depending on the working directory.
+CFLAGS_TEST := -std=gnu99 -g -O0 $(WARN) $(INCLUDES) \
+               -DRULES_CONTENT_DIR=\"$(ROOT)/GameData/rules\"
 LDFLAGS_TEST := -L$(CRITERION_PREFIX)/lib -lcriterion -lm
 
 ifeq ($(SAN),1)

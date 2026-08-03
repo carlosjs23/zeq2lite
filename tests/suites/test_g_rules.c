@@ -1,0 +1,570 @@
+/*
+Rule engine: tag vocabulary, parser, load-time validation, matcher and the
+executor for inline test vectors.
+
+Most tests declare their .rules and tags.def inline through fake_fs, because the
+error wordings are the feature under test and reading them next to the content
+that provokes them is the point. The last group instead loads the shipped
+content from GameData/rules and runs the vectors authored in it, which is the
+gate that keeps content honest without launching the game.
+*/
+
+#include <criterion/criterion.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "g_local.h"
+#include "fake_fs.h"
+
+#define TAGS_PATH   "rules/tags.def"
+#define RULES_PATH  "rules/training.rules"
+
+/* The chain the sample content and most inline fixtures share. */
+static const char *const kTags =
+	"tag training.begun\n"
+	"tag trained.flight.hover\n"
+	"tag trained.flight.endurance\n"
+	"tag trained.aura.sustain\n"
+	"tag seen.firstAscension\n";
+
+static void setup(void) {
+	fake_fs_reset();
+	G_InitMemory();
+	G_RulesReset();
+}
+
+TestSuite(g_rules, .init = setup);
+
+static void load(const char *tags, const char *rules) {
+	fake_fs_add(TAGS_PATH, tags);
+	fake_fs_add(RULES_PATH, rules);
+}
+
+static qboolean loadOk(const char *tags, const char *rules) {
+	load(tags, rules);
+	return G_RulesLoad(TAGS_PATH, RULES_PATH);
+}
+
+/* ------------------------------------------------------------------ parsing */
+
+Test(g_rules, parses_a_rule_into_ranges_and_actions) {
+	const rule_t *rule;
+
+	cr_assert(loadOk(kTags,
+		"rule hover {\n"
+		"    when  airborneTime  atLeast  45s\n"
+		"    when  fatigue       above    0pl\n"
+		"    requires  training.begun\n"
+		"    forbids   trained.flight.hover\n"
+		"    grant   trained.flight.hover\n"
+		"    say     \"Not bad.\"\n"
+		"    unlock  tier 2\n"
+		"}\n"), "%s", G_RulesError());
+
+	cr_assert_eq(G_RulesCount(), 1);
+	rule = G_RulesFind("hover");
+	cr_assert_not_null(rule);
+	cr_assert_eq(rule->numCriteria, 2);
+	/* Every operator compiles to the same two ints; that is the whole design. */
+	cr_assert_eq(rule->criteria[0].key, fAirborneTime);
+	cr_assert_eq(rule->criteria[0].min, 45000);
+	cr_assert_eq(rule->criteria[0].max, MAX_QINT);
+	cr_assert_eq(rule->criteria[1].key, fFatigue);
+	cr_assert_eq(rule->criteria[1].min, 1);
+	cr_assert_eq(rule->numActions, 3);
+	cr_assert_eq(rule->actions[0].type, acGrant);
+	cr_assert_eq(rule->actions[0].tag, G_TagFind("trained.flight.hover"));
+	cr_assert_eq(rule->actions[1].type, acSay);
+	cr_assert_str_eq(rule->actions[1].text, "Not bad.");
+	cr_assert_eq(rule->actions[2].type, acUnlockTier);
+	cr_assert_eq(rule->actions[2].value, 2);
+}
+
+/* One rule per load: two rules of equal specificity would be a load-time tie,
+   which is the subject of its own test rather than an obstacle here. */
+static const criterion_t *onlyCriterion(const char *body) {
+	setup();
+	cr_assert(loadOk(kTags, body), "%s", G_RulesError());
+	return &G_RulesGet(0)->criteria[0];
+}
+
+Test(g_rules, named_operators_all_reach_the_same_two_ints) {
+	const criterion_t *c;
+
+	c = onlyCriterion("rule a {\n when tierCurrent is 2\n say \"a\"\n}\n");
+	cr_assert_eq(c->min, 2);
+	cr_assert_eq(c->max, 2);
+
+	c = onlyCriterion("rule a {\n when tierTotal atMost 3\n say \"a\"\n}\n");
+	cr_assert_eq(c->min, MIN_QINT);
+	cr_assert_eq(c->max, 3);
+
+	c = onlyCriterion("rule a {\n when gravity below 10g\n say \"a\"\n}\n");
+	cr_assert_eq(c->min, MIN_QINT);
+	cr_assert_eq(c->max, 8000 - 1);
+
+	c = onlyCriterion("rule a {\n when auraTime between 5s and 9s\n say \"a\"\n}\n");
+	cr_assert_eq(c->min, 5000);
+	cr_assert_eq(c->max, 9000);
+}
+
+Test(g_rules, objective_action_carries_its_tracked_fact_and_goal) {
+	const rule_t *rule;
+
+	cr_assert(loadOk(kTags,
+		"rule o {\n"
+		"    when airborneTime atLeast 1s\n"
+		"    objective \"Hover for ten seconds\" track airborneTime goal 10s\n"
+		"}\n"), "%s", G_RulesError());
+
+	rule = G_RulesFind("o");
+	cr_assert_eq(rule->actions[0].type, acObjective);
+	cr_assert_str_eq(rule->actions[0].text, "Hover for ten seconds");
+	cr_assert_eq(rule->actions[0].track, fAirborneTime);
+	cr_assert_eq(rule->actions[0].value, 10000);
+}
+
+Test(g_rules, world_facts_parse_into_their_own_key_space) {
+	const rule_t *rule;
+
+	cr_assert(loadOk(kTags,
+		"rule w {\n"
+		"    when world roundState is waiting\n"
+		"    say \"w\"\n"
+		"}\n"), "%s", G_RulesError());
+
+	rule = G_RulesFind("w");
+	cr_assert_eq(rule->criteria[0].key, wRoundState | RULE_WORLD_KEY);
+	cr_assert_eq(rule->criteria[0].min, 0);
+}
+
+Test(g_rules, comments_and_trailing_comments_are_skipped) {
+	cr_assert(loadOk(kTags,
+		"// leading comment\n"
+		"rule a {           // about this rule\n"
+		"    when tierCurrent is 2   // and this criterion\n"
+		"    /* block\n"
+		"       comment */\n"
+		"    say \"a\"\n"
+		"}\n"), "%s", G_RulesError());
+	cr_assert_eq(G_RulesCount(), 1);
+	cr_assert_eq(G_RulesGet(0)->numCriteria, 1);
+}
+
+/* -------------------------------------------------------------- load errors */
+
+Test(g_rules, unknown_fact_names_the_line_and_suggests) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when airbornTime atLeast 45s\n"
+		"    say \"a\"\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:2: unknown fact 'airbornTime' - did you mean 'airborneTime'?");
+}
+
+Test(g_rules, undeclared_tag_names_tags_def) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when tierCurrent is 2\n"
+		"    grant trained.flight.fligth\n"
+		"}\n"));
+	/* Nothing declared is within three edits, and a suggestion further away
+	   than that is noise rather than help. */
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:3: tag 'trained.flight.fligth' not declared in tags.def");
+}
+
+Test(g_rules, a_near_miss_tag_gets_a_suggestion) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when tierCurrent is 2\n"
+		"    requires trained.flight.hoverr\n"
+		"    say \"a\"\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:3: tag 'trained.flight.hoverr' not declared in tags.def"
+		" - did you mean 'trained.flight.hover'?");
+}
+
+Test(g_rules, a_bare_number_where_a_unit_exists_is_an_error) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when airborneTime atLeast 45\n"
+		"    say \"a\"\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:2: bare number '45' for fact 'airborneTime'"
+		" - did you mean '45s'?");
+}
+
+Test(g_rules, a_wrong_unit_is_an_error) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when airborneTime atLeast 45g\n"
+		"    say \"a\"\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:2: unknown unit 'g' for fact 'airborneTime' - expected 's'");
+}
+
+Test(g_rules, a_unit_on_a_plain_fact_is_an_error) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when tierCurrent is 2s\n"
+		"    say \"a\"\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:2: fact 'tierCurrent' takes a plain number, not '2s'");
+}
+
+Test(g_rules, unknown_enum_value_suggests_a_declared_one) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when world roundState is inProgres\n"
+		"    say \"a\"\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:2: unknown value 'inProgres' for fact 'roundState'"
+		" - did you mean 'inProgress'?");
+}
+
+Test(g_rules, unknown_action_suggests_a_declared_verb) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when tierCurrent is 2\n"
+		"    gran training.begun\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:3: unknown action 'gran' - did you mean 'grant'?");
+}
+
+Test(g_rules, equal_specificity_ties_are_rejected_and_name_both_rules) {
+	cr_assert_not(loadOk(kTags,
+		"rule first  { when tierCurrent is 2 say \"a\" }\n"
+		"rule second { when auraTime atLeast 1s say \"b\" }\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:2: rule 'second' can match the same state as rule 'first'"
+		" with equal specificity");
+}
+
+Test(g_rules, disjoint_ranges_on_one_fact_are_not_a_tie) {
+	cr_assert(loadOk(kTags,
+		"rule low  { when tierCurrent is 1 say \"a\" }\n"
+		"rule high { when tierCurrent is 2 say \"b\" }\n"), "%s", G_RulesError());
+	cr_assert_eq(G_RulesCount(), 2);
+}
+
+Test(g_rules, a_forbidden_tag_the_other_rule_requires_breaks_the_tie) {
+	cr_assert(loadOk(kTags,
+		"rule before {\n"
+		"    when tierCurrent is 2\n"
+		"    forbids training.begun\n"
+		"    grant   training.begun\n"
+		"}\n"
+		"rule after {\n"
+		"    when auraTime atLeast 1s\n"
+		"    requires training.begun\n"
+		"    say \"b\"\n"
+		"}\n"), "%s", G_RulesError());
+	cr_assert_eq(G_RulesCount(), 2);
+}
+
+Test(g_rules, a_prefix_group_can_be_exhausted_while_bits_remain) {
+	char tags[8192];
+	int i, used;
+
+	used = 0;
+	tags[0] = 0;
+	for (i = 0; i < TAG_GROUP_BITS + 1; ++i) {
+		used += snprintf(tags + used, sizeof(tags) - used, "tag many.t%i\n", i);
+	}
+	load(tags, "");
+	cr_assert_not(G_RulesLoad(TAGS_PATH, RULES_PATH));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/tags.def:33: tag prefix group 'many' exhausted (32 of 32 used)");
+}
+
+Test(g_rules, the_global_tag_budget_is_exhausted_by_prefixes) {
+	char tags[16384];
+	int i, used;
+
+	used = 0;
+	tags[0] = 0;
+	for (i = 0; i < MAX_TAG_GROUPS + 1; ++i) {
+		used += snprintf(tags + used, sizeof(tags) - used, "tag group%i.only\n", i);
+	}
+	load(tags, "");
+	cr_assert_not(G_RulesLoad(TAGS_PATH, RULES_PATH));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/tags.def:17: tag budget exhausted (512 of 512 used)");
+}
+
+Test(g_rules, a_test_expecting_an_unknown_rule_is_a_load_error) {
+	cr_assert_not(loadOk(kTags,
+		"rule a { when tierCurrent is 2 say \"a\" }\n"
+		"test \"typo\" {\n"
+		"    given tierCurrent 2\n"
+		"    expect b\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:2: test 'typo' expects unknown rule 'b'");
+}
+
+/* -------------------------------------------------------------------- tags */
+
+Test(g_rules, bits_are_allocated_by_prefix_so_a_wildcard_is_one_mask) {
+	tagSet_t mask;
+	int hover, endurance;
+
+	cr_assert(loadOk(kTags, ""), "%s", G_RulesError());
+	hover = G_TagFind("trained.flight.hover");
+	endurance = G_TagFind("trained.flight.endurance");
+	cr_assert_neq(hover, -1);
+	/* Declared next to each other in the file and adjacent in the bitfield. */
+	cr_assert_eq(endurance, hover + 1);
+	cr_assert(G_TagPrefixMask("trained.flight", &mask));
+	cr_assert(G_TagTest(&mask, hover));
+	cr_assert(G_TagTest(&mask, endurance));
+	cr_assert_not(G_TagTest(&mask, G_TagFind("trained.aura.sustain")));
+}
+
+Test(g_rules, a_wildcard_clause_compiles_to_the_prefix_mask) {
+	const rule_t *rule;
+
+	cr_assert(loadOk(kTags,
+		"rule a {\n"
+		"    when tierCurrent is 2\n"
+		"    requires trained.flight.*\n"
+		"    say \"a\"\n"
+		"}\n"), "%s", G_RulesError());
+
+	rule = G_RulesFind("a");
+	cr_assert(G_TagTest(&rule->requireTags, G_TagFind("trained.flight.hover")));
+	cr_assert(G_TagTest(&rule->requireTags, G_TagFind("trained.flight.endurance")));
+	cr_assert_not(G_TagTest(&rule->requireTags, G_TagFind("training.begun")));
+}
+
+Test(g_rules, an_undeclared_prefix_is_a_load_error) {
+	cr_assert_not(loadOk(kTags,
+		"rule a {\n"
+		"    when tierCurrent is 2\n"
+		"    requires trained.melee.*\n"
+		"    say \"a\"\n"
+		"}\n"));
+	cr_assert_str_eq(G_RulesError(),
+		"rules/training.rules:3: tag prefix 'trained.melee' not declared in tags.def");
+}
+
+/* ----------------------------------------------------------------- matching */
+
+static const rule_t *match(const int *facts, const tagSet_t *tags) {
+	static int worldFacts[fWorldFactCount];
+	static tagSet_t worldTags;
+	memset(worldFacts, 0, sizeof(worldFacts));
+	memset(&worldTags, 0, sizeof(worldTags));
+	return G_RulesMatch(facts, worldFacts, tags, &worldTags);
+}
+
+static const char *const kLadder =
+	"rule general  { when auraTime atLeast 1s say \"general\" }\n"
+	"rule specific { when auraTime atLeast 1s when tierCurrent atLeast 2 say \"specific\" }\n";
+
+Test(g_rules, the_rule_with_the_most_criteria_wins) {
+	int facts[fFactCount];
+	tagSet_t tags;
+	const rule_t *rule;
+
+	cr_assert(loadOk(kTags, kLadder), "%s", G_RulesError());
+	memset(facts, 0, sizeof(facts));
+	memset(&tags, 0, sizeof(tags));
+
+	facts[fAuraTime] = 2000;
+	rule = match(facts, &tags);
+	cr_assert_not_null(rule);
+	cr_assert_str_eq(rule->name, "general");
+
+	facts[fTierCurrent] = 3;
+	rule = match(facts, &tags);
+	cr_assert_not_null(rule);
+	cr_assert_str_eq(rule->name, "specific");
+}
+
+Test(g_rules, nothing_matches_when_no_criterion_holds) {
+	int facts[fFactCount];
+	tagSet_t tags;
+
+	cr_assert(loadOk(kTags, kLadder), "%s", G_RulesError());
+	memset(facts, 0, sizeof(facts));
+	memset(&tags, 0, sizeof(tags));
+	cr_assert_null(match(facts, &tags));
+}
+
+Test(g_rules, require_and_forbid_tags_gate_a_match) {
+	int facts[fFactCount];
+	tagSet_t tags;
+
+	cr_assert(loadOk(kTags,
+		"rule gated {\n"
+		"    when auraTime atLeast 1s\n"
+		"    requires training.begun\n"
+		"    forbids  trained.aura.sustain\n"
+		"    say \"gated\"\n"
+		"}\n"), "%s", G_RulesError());
+
+	memset(facts, 0, sizeof(facts));
+	memset(&tags, 0, sizeof(tags));
+	facts[fAuraTime] = 5000;
+	cr_assert_null(match(facts, &tags));
+
+	G_TagSet(&tags, G_TagFind("training.begun"));
+	cr_assert_not_null(match(facts, &tags));
+
+	G_TagSet(&tags, G_TagFind("trained.aura.sustain"));
+	cr_assert_null(match(facts, &tags));
+}
+
+Test(g_rules, a_rule_granting_a_tag_it_forbids_is_self_terminating) {
+	int facts[fFactCount];
+	tagSet_t tags;
+	const rule_t *rule;
+
+	cr_assert(loadOk(kTags,
+		"rule once {\n"
+		"    when auraTime atLeast 1s\n"
+		"    forbids seen.firstAscension\n"
+		"    grant   seen.firstAscension\n"
+		"}\n"), "%s", G_RulesError());
+
+	memset(facts, 0, sizeof(facts));
+	memset(&tags, 0, sizeof(tags));
+	facts[fAuraTime] = 5000;
+	rule = match(facts, &tags);
+	cr_assert_not_null(rule);
+
+	/* Applying the rule's own grant is what stops it firing again. */
+	G_TagSet(&tags, rule->actions[0].tag);
+	cr_assert_null(match(facts, &tags));
+}
+
+Test(g_rules, world_facts_and_world_tags_take_part_in_matching) {
+	int facts[fFactCount], worldFacts[fWorldFactCount];
+	tagSet_t tags, worldTags;
+
+	cr_assert(loadOk(kTags,
+		"rule event {\n"
+		"    when world roundState is inProgress\n"
+		"    requires training.begun\n"
+		"    say \"event\"\n"
+		"}\n"), "%s", G_RulesError());
+
+	memset(facts, 0, sizeof(facts));
+	memset(worldFacts, 0, sizeof(worldFacts));
+	memset(&tags, 0, sizeof(tags));
+	memset(&worldTags, 0, sizeof(worldTags));
+
+	cr_assert_null(G_RulesMatch(facts, worldFacts, &tags, &worldTags));
+	worldFacts[wRoundState] = 1;
+	cr_assert_null(G_RulesMatch(facts, worldFacts, &tags, &worldTags));
+
+	/* The tag may be held on either side; the matcher reads the union. */
+	G_TagSet(&worldTags, G_TagFind("training.begun"));
+	cr_assert_not_null(G_RulesMatch(facts, worldFacts, &tags, &worldTags));
+}
+
+/* ------------------------------------------------------------ test vectors */
+
+Test(g_rules, inline_vectors_run_against_the_loaded_rules) {
+	int passed, failed;
+	char err[MAX_RULE_ERROR];
+
+	cr_assert(loadOk(kTags,
+		"rule a { when tierCurrent atLeast 2 say \"a\" }\n"
+		"test \"tier two fires it\" {\n"
+		"    given  tierCurrent 2\n"
+		"    expect a\n"
+		"}\n"
+		"test \"tier one does not\" {\n"
+		"    given  tierCurrent 1\n"
+		"    expect none\n"
+		"}\n"), "%s", G_RulesError());
+
+	cr_assert_eq(G_RulesTestCount(), 2);
+	cr_assert(G_RulesRunTests(&passed, &failed, err, sizeof(err)), "%s", err);
+	cr_assert_eq(passed, 2);
+	cr_assert_eq(failed, 0);
+}
+
+Test(g_rules, a_wrong_vector_reports_what_it_got) {
+	int passed, failed;
+	char err[MAX_RULE_ERROR];
+
+	cr_assert(loadOk(kTags,
+		"rule a { when tierCurrent atLeast 2 say \"a\" }\n"
+		"test \"wrong\" {\n"
+		"    given  tierCurrent 1\n"
+		"    expect a\n"
+		"}\n"), "%s", G_RulesError());
+
+	cr_assert_not(G_RulesRunTests(&passed, &failed, err, sizeof(err)));
+	cr_assert_eq(failed, 1);
+	cr_assert_str_eq(err, "test 'wrong' expected 'a', matched 'none'");
+}
+
+/* -------------------------------------------------------- shipped content */
+
+/* The content under GameData/rules is a real deliverable, so the suite runs the
+   vectors the author wrote in it rather than a copy that could drift. The path
+   is baked in at compile time; fake_fs still serves the bytes, so nothing here
+   depends on the working directory. */
+static void loadShipped(const char *name, const char *path) {
+	char *data;
+	long length;
+	FILE *f = fopen(path, "rb");
+
+	cr_assert_not_null(f, "cannot open %s", path);
+	fseek(f, 0, SEEK_END);
+	length = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	data = malloc((size_t)length + 1);
+	cr_assert_eq(fread(data, 1, (size_t)length, f), (size_t)length);
+	data[length] = '\0';
+	fclose(f);
+	fake_fs_add(name, data);
+	free(data);
+}
+
+Test(g_rules, the_shipped_content_loads_and_its_vectors_pass) {
+	int passed, failed;
+	char err[MAX_RULE_ERROR];
+
+	loadShipped(TAGS_PATH, RULES_CONTENT_DIR "/tags.def");
+	loadShipped(RULES_PATH, RULES_CONTENT_DIR "/training.rules");
+
+	cr_assert(G_RulesLoad(TAGS_PATH, RULES_PATH), "%s", G_RulesError());
+	cr_assert_gt(G_RulesCount(), 0);
+	cr_assert_gt(G_RulesTestCount(), 0);
+	cr_assert(G_RulesRunTests(&passed, &failed, err, sizeof(err)), "%s", err);
+	cr_assert_eq(failed, 0);
+	cr_assert_eq(fake_fs_leak_count(), 0);
+}
+
+/* Phase 1 has no master triggers, so content keyed on masterNear could not be
+   exercised. The fact exists; the plan forbids building Phase 1 vectors on it. */
+Test(g_rules, the_shipped_content_does_not_key_on_masterNear) {
+	int i, j;
+	const rule_t *rule;
+
+	loadShipped(TAGS_PATH, RULES_CONTENT_DIR "/tags.def");
+	loadShipped(RULES_PATH, RULES_CONTENT_DIR "/training.rules");
+	cr_assert(G_RulesLoad(TAGS_PATH, RULES_PATH), "%s", G_RulesError());
+
+	for (i = 0; i < G_RulesCount(); ++i) {
+		rule = G_RulesGet(i);
+		for (j = 0; j < rule->numCriteria; ++j) {
+			cr_assert_neq(rule->criteria[j].key, fMasterNear,
+				"rule '%s' keys on masterNear", rule->name);
+		}
+	}
+}
