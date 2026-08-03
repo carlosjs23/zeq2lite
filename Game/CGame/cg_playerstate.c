@@ -261,6 +261,7 @@ void CG_CheckLocalSounds( playerState_t *ps, playerState_t *ops ) {
 CG_TransitionPlayerState
 ===============*/
 void CG_TransitionPlayerState( playerState_t *ps, playerState_t *ops ) {
+	int		reserveFull;
 
 	if(ps->clientNum != ops->clientNum){
 		cg.thisFrameTeleport = qtrue;
@@ -280,6 +281,13 @@ void CG_TransitionPlayerState( playerState_t *ps, playerState_t *ops ) {
 	if(ps->viewheight != ops->viewheight){
 		cg.duckChange = ps->viewheight - ops->viewheight;
 		cg.duckTime = cg.time;
+	}
+
+	// The reserve refilling is the moment another limit break becomes worth
+	// holding for, so flash the gauge on the crossing rather than every frame.
+	reserveFull = BREAKLIMIT_RESERVE_FULL(ps->powerLevel[plMaximum]);
+	if(ps->powerLevel[plMaximumPool] >= reserveFull && ops->powerLevel[plMaximumPool] < reserveFull){
+		cg.breakLimitReadyTime = cg.time;
 	}
 
 	cg.tierSelectionMode = 0;
