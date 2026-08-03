@@ -211,21 +211,21 @@ Test(g_journal, a_masterNear_criterion_files_the_lesson_under_that_master) {
 	tagSet_t tags;
 	int count;
 
-	fake_fs_add(MASTERS_PATH, "master 1 roshi\nmaster 2 kingKai\n");
+	fake_fs_add(MASTERS_PATH, "master 1 rhogan\nmaster 2 oberak\n");
 	cr_assert(G_MastersLoadDef(MASTERS_PATH), "%s", G_MastersError());
 	vocabulary = G_MastersVocabulary(&count);
 	G_RulesSetMasterVocabulary(vocabulary, count);
 
-	load("tag trained.roshi.greeting\ntag trained.kingKai.greeting\n",
-		"rule roshi_hello {\n"
-		"  when masterNear is roshi\n"
-		"  forbids trained.roshi.greeting\n"
-		"  grant trained.roshi.greeting\n"
+	load("tag trained.rhogan.greeting\ntag trained.oberak.greeting\n",
+		"rule rhogan_hello {\n"
+		"  when masterNear is rhogan\n"
+		"  forbids trained.rhogan.greeting\n"
+		"  grant trained.rhogan.greeting\n"
 		"}\n"
 		"rule kingkai_hello {\n"
-		"  when masterNear is kingKai\n"
-		"  forbids trained.kingKai.greeting\n"
-		"  grant trained.kingKai.greeting\n"
+		"  when masterNear is oberak\n"
+		"  forbids trained.oberak.greeting\n"
+		"  grant trained.oberak.greeting\n"
 		"}\n");
 	memset(&tags, 0, sizeof(tags));
 	cr_assert_eq(G_JournalBuild(&tags, 0, entries, MAX_JOURNAL_ENTRIES), 2);
@@ -269,12 +269,12 @@ Test(g_journal, packing_skips_every_other_masters_lessons) {
 
 	memset(entries, 0, sizeof(entries));
 	strcpy(entries[0].label, "solo");     entries[0].masterId = 0; entries[0].status = jsDone;
-	strcpy(entries[1].label, "roshi.a");  entries[1].masterId = 1; entries[1].status = jsAvailable;
+	strcpy(entries[1].label, "rhogan.a");  entries[1].masterId = 1; entries[1].status = jsAvailable;
 	strcpy(entries[2].label, "solo2");    entries[2].masterId = 0; entries[2].status = jsLocked;
-	strcpy(entries[3].label, "roshi.b");  entries[3].masterId = 1; entries[3].status = jsLocked;
+	strcpy(entries[3].label, "rhogan.b");  entries[3].masterId = 1; entries[3].status = jsLocked;
 
 	cr_assert_eq(G_JournalPack(entries, 4, 1, &cursor, out, sizeof(out)), 2);
-	cr_assert_str_eq(out, "aroshi.a|lroshi.b");
+	cr_assert_str_eq(out, "arhogan.a|lrhogan.b");
 
 	cursor = 0;
 	cr_assert_eq(G_JournalPack(entries, 4, 0, &cursor, out, sizeof(out)), 2);
@@ -383,11 +383,11 @@ Test(g_journal, the_shipped_content_opens_with_work_available_and_nothing_done) 
 	cr_assert_eq(done, 0, "an untrained player already has a lesson ticked");
 }
 
-/* The smoke path, and the one the screenshot is taken on: earning Roshi's
+/* The smoke path, and the one the screenshot is taken on: earning Rhogan's
    greeting has to tick exactly that lesson and open the one behind it. */
-Test(g_journal, the_roshi_greeting_ticks_its_own_lesson_and_opens_the_next) {
+Test(g_journal, the_rhogan_greeting_ticks_its_own_lesson_and_opens_the_next) {
 	journalEntry_t entries[MAX_JOURNAL_ENTRIES];
-	const char *const held[] = { "trained.roshi.greeting" };
+	const char *const held[] = { "trained.rhogan.greeting" };
 	const journalEntry_t *greeting, *flight;
 	tagSet_t tags;
 	int count;
@@ -395,8 +395,8 @@ Test(g_journal, the_roshi_greeting_ticks_its_own_lesson_and_opens_the_next) {
 	loadShippedContent();
 	tagsOf(&tags, held, 1);
 	count = G_JournalBuild(&tags, 0, entries, MAX_JOURNAL_ENTRIES);
-	greeting = entryNamed(entries, count, "trained.roshi.greeting");
-	flight = entryNamed(entries, count, "trained.roshi.flight");
+	greeting = entryNamed(entries, count, "trained.rhogan.greeting");
+	flight = entryNamed(entries, count, "trained.rhogan.flight");
 	cr_assert_not_null(greeting);
 	cr_assert_not_null(flight);
 	cr_assert_eq(greeting->status, jsDone);

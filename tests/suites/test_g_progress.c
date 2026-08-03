@@ -21,9 +21,9 @@ its bits still loads, and one that retires a name drops it and says so.
 
 static const char *const kTags =
 	"tag training.begun\n"
-	"tag trained.roshi.greeting\n"
-	"tag trained.roshi.flight\n"
-	"tag trained.kingKai.gravity\n";
+	"tag trained.rhogan.greeting\n"
+	"tag trained.rhogan.flight\n"
+	"tag trained.oberak.gravity\n";
 
 /* Nothing here needs a rule; the tag vocabulary is loaded through the same
    entry point the game uses, so the bits under test are the real ones. */
@@ -111,8 +111,8 @@ Test(g_progress, serializes_named_tags_and_the_ceiling) {
 
 	memset(&p, 0, sizeof(p));
 	p.unlockedTier = 3;
-	grant(&p, "trained.roshi.greeting");
-	grant(&p, "trained.roshi.flight");
+	grant(&p, "trained.rhogan.greeting");
+	grant(&p, "trained.rhogan.flight");
 
 	length = G_ProgressSerialize(&p, "abc123", text, sizeof(text));
 	cr_assert(length > 0);
@@ -120,10 +120,10 @@ Test(g_progress, serializes_named_tags_and_the_ceiling) {
 	cr_assert_not_null(strstr(text, "version 1\n"));
 	cr_assert_not_null(strstr(text, "key abc123\n"));
 	cr_assert_not_null(strstr(text, "tier 3\n"));
-	cr_assert_not_null(strstr(text, "tag trained.roshi.greeting\n"));
-	cr_assert_not_null(strstr(text, "tag trained.roshi.flight\n"));
+	cr_assert_not_null(strstr(text, "tag trained.rhogan.greeting\n"));
+	cr_assert_not_null(strstr(text, "tag trained.rhogan.flight\n"));
 	/* Ungranted tags are absent rather than written as a zero. */
-	cr_assert_null(strstr(text, "trained.kingKai.gravity"));
+	cr_assert_null(strstr(text, "trained.oberak.gravity"));
 	/* LF only: this is not one of the CRLF configs it sits beside. */
 	cr_assert_null(strstr(text, "\r"));
 	cr_assert_eq(G_ProgressTagCount(&p), 2);
@@ -137,7 +137,7 @@ Test(g_progress, round_trips_through_text) {
 	memset(&written, 0, sizeof(written));
 	written.unlockedTier = 2;
 	grant(&written, "training.begun");
-	grant(&written, "trained.kingKai.gravity");
+	grant(&written, "trained.oberak.gravity");
 	cr_assert(G_ProgressSerialize(&written, "k", text, sizeof(text)) > 0);
 
 	cr_assert(G_ProgressParse(text, "test.progress", &read, &report));
@@ -145,8 +145,8 @@ Test(g_progress, round_trips_through_text) {
 	cr_assert_eq(report.restored, 2);
 	cr_assert_eq(report.dropped, 0);
 	cr_assert(G_TagTest(&read.tags, G_TagFind("training.begun")));
-	cr_assert(G_TagTest(&read.tags, G_TagFind("trained.kingKai.gravity")));
-	cr_assert_eq(G_TagTest(&read.tags, G_TagFind("trained.roshi.flight")), qfalse);
+	cr_assert(G_TagTest(&read.tags, G_TagFind("trained.oberak.gravity")));
+	cr_assert_eq(G_TagTest(&read.tags, G_TagFind("trained.rhogan.flight")), qfalse);
 }
 
 /* The reason names are stored rather than bits: a tag inserted in the middle of
@@ -159,16 +159,16 @@ Test(g_progress, names_survive_a_renumbered_tag_vocabulary) {
 	int before, after;
 
 	memset(&written, 0, sizeof(written));
-	grant(&written, "trained.roshi.flight");
-	before = G_TagFind("trained.roshi.flight");
+	grant(&written, "trained.rhogan.flight");
+	before = G_TagFind("trained.rhogan.flight");
 	cr_assert(G_ProgressSerialize(&written, "k", text, sizeof(text)) > 0);
 
 	loadTags(
 		"tag training.begun\n"
-		"tag trained.roshi.greeting\n"
-		"tag trained.roshi.powerup\n"		/* inserted ahead of it */
-		"tag trained.roshi.flight\n");
-	after = G_TagFind("trained.roshi.flight");
+		"tag trained.rhogan.greeting\n"
+		"tag trained.rhogan.powerup\n"		/* inserted ahead of it */
+		"tag trained.rhogan.flight\n");
+	after = G_TagFind("trained.rhogan.flight");
 	cr_assert_neq(before, after, "fixture did not actually move the bit");
 
 	cr_assert(G_ProgressParse(text, "test.progress", &read, &report));
@@ -185,8 +185,8 @@ Test(g_progress, unknown_tag_names_are_dropped_and_reported) {
 		"version 1\n"
 		"key k\n"
 		"tier 2\n"
-		"tag trained.roshi.flight\n"
-		"tag trained.roshi.retired\n"
+		"tag trained.rhogan.flight\n"
+		"tag trained.rhogan.retired\n"
 		"tag trained.gone.entirely\n";
 
 	cr_assert(G_ProgressParse(text, "test.progress", &read, &report));
@@ -194,9 +194,9 @@ Test(g_progress, unknown_tag_names_are_dropped_and_reported) {
 	cr_assert_eq(report.restored, 1);
 	cr_assert_eq(report.dropped, 2);
 	cr_assert_eq(report.named, 2);
-	cr_assert_str_eq(report.droppedNames[0], "trained.roshi.retired");
+	cr_assert_str_eq(report.droppedNames[0], "trained.rhogan.retired");
 	cr_assert_str_eq(report.droppedNames[1], "trained.gone.entirely");
-	cr_assert(G_TagTest(&read.tags, G_TagFind("trained.roshi.flight")));
+	cr_assert(G_TagTest(&read.tags, G_TagFind("trained.rhogan.flight")));
 }
 
 Test(g_progress, the_dropped_name_list_is_bounded_but_the_count_is_not) {
@@ -223,7 +223,7 @@ Test(g_progress, an_unknown_version_loads_nothing) {
 	char text[] =
 		"version 99\n"
 		"tier 4\n"
-		"tag trained.roshi.flight\n";
+		"tag trained.rhogan.flight\n";
 
 	cr_assert_eq(G_ProgressParse(text, "test.progress", &read, &report), qfalse);
 	cr_assert_eq(read.unlockedTier, 0);
@@ -233,7 +233,7 @@ Test(g_progress, an_unknown_version_loads_nothing) {
 Test(g_progress, a_file_without_a_version_loads_nothing) {
 	progress_t read;
 	progressLoad_t report;
-	char text[] = "tier 4\ntag trained.roshi.flight\n";
+	char text[] = "tier 4\ntag trained.rhogan.flight\n";
 
 	cr_assert_eq(G_ProgressParse(text, "test.progress", &read, &report), qfalse);
 	cr_assert_eq(read.unlockedTier, 0);
@@ -249,7 +249,7 @@ Test(g_progress, unknown_keys_are_skipped_with_their_value) {
 		"key k\n"
 		"lastSeen 12345\n"
 		"tier 2\n"
-		"tag trained.roshi.flight\n";
+		"tag trained.rhogan.flight\n";
 
 	cr_assert(G_ProgressParse(text, "test.progress", &read, &report));
 	cr_assert_eq(read.unlockedTier, 2);

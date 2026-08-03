@@ -1,13 +1,13 @@
 // Master placement for desert. Names come from rules/masters.def.
 //
-// Roshi stands on the info_player_deathmatch at the north of the map with a
+// Rhogan stands on the info_player_deathmatch at the north of the map with a
 // radius wide enough to cover the spawn itself, so a player who spawns there is
 // greeted without having to find him first - which is what makes the trigger
-// verifiable in a smoke run. King Kai is out at the intermission viewpoint,
+// verifiable in a smoke run. Oberak is out at the intermission viewpoint,
 // far enough that reaching him is a flight.
 //
 // Rewrite this file with masterplace/mastersave rather than by hand; see the
 // masterplace banner comment in Game/Game/g_training.c.
 
-place  roshi    -40810 4681 1486   768
-place  kingKai  -29790 -28265 6062  768
+place  rhogan    -40810 4681 1486   768
+place  oberak  -29790 -28265 6062  768

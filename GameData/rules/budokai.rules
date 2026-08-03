@@ -28,7 +28,7 @@
 rule budokai_untrained {
 	forbids  budokai.entry
 
-	say  "The Budokai is for trained fighters. Find Roshi, pass his flight test, then come back."
+	say  "The Budokai is for trained fighters. Find Rhogan, pass his flight test, then come back."
 }
 
 // Said once ever - it grants the tag it forbids, and the tag is saved with the

@@ -4,7 +4,7 @@
 // airborneTime, auraTime, fatigue, tierCurrent, gravity. The master arc after
 // them is keyed on masterNear and needs the placements in
 // rules/masters_<mapname>.def to fire at all. The two are parallel ladders
-// rather than a sequence: a player can walk up to Roshi on their first minute,
+// rather than a sequence: a player can walk up to Rhogan on their first minute,
 // and where both halves match, the master rule wins because it states more.
 //
 // Rules are a chain: each step requires the tag the step before it granted, and
@@ -123,66 +123,66 @@ rule seen_first_ascension {
 // A master greets you when you land in front of him with something left in the
 // tank. Landing is the interaction: a player who flies past overhead has an
 // airborneTime far past this range and is not talked at.
-rule roshi_greeting {
-	when  masterNear    is      roshi
+rule rhogan_greeting {
+	when  masterNear    is      rhogan
 	when  airborneTime  atMost  2s
 	when  fatigue       above   0pl
 
-	forbids  trained.roshi.greeting
+	forbids  trained.rhogan.greeting
 
-	grant      trained.roshi.greeting
+	grant      trained.rhogan.greeting
 	say        "So you found me. Everyone starts the same way: stay off the ground."
 	objective  "Stay airborne for forty-five seconds"  track  airborneTime  goal  45s
 }
 
-rule roshi_flight_pass {
-	when  masterNear    is       roshi
+rule rhogan_flight_pass {
+	when  masterNear    is       rhogan
 	when  airborneTime  atLeast  45s
 	when  fatigue       above    0pl
 
-	requires  trained.roshi.greeting
-	forbids   trained.roshi.flight
+	requires  trained.rhogan.greeting
+	forbids   trained.rhogan.flight
 
-	grant   trained.roshi.flight
+	grant   trained.rhogan.flight
 	grant   budokai.entry
 	say     "Not bad. You have the endurance of a delivery boy. Enter the Budokai."
 	unlock  tier 2
 }
 
-rule roshi_flight_fail {
-	when  masterNear    is       roshi
+rule rhogan_flight_fail {
+	when  masterNear    is       rhogan
 	when  airborneTime  atLeast  45s
 	when  fatigue       is       0pl
 
-	requires  trained.roshi.greeting
-	forbids   trained.roshi.flight
+	requires  trained.rhogan.greeting
+	forbids   trained.rhogan.flight
 
 	say  "Empty. Ki holds you up there, not willpower. Land and try again."
 }
 
 rule kingkai_greeting {
-	when  masterNear    is      kingKai
+	when  masterNear    is      oberak
 	when  airborneTime  atMost  2s
 	when  fatigue       above   0pl
 
-	requires  trained.roshi.flight
-	forbids   trained.kingKai.greeting
+	requires  trained.rhogan.flight
+	forbids   trained.oberak.greeting
 
-	grant       trained.kingKai.greeting
+	grant       trained.oberak.greeting
 	say         "My planet is small and it pulls hard. Keep your aura up in it."
 	setGravity  10g
 	objective   "Hold your aura for twenty seconds under ten times gravity"  track  auraTime  goal  20s
 }
 
 rule kingkai_gravity_pass {
-	when  masterNear  is       kingKai
+	when  masterNear  is       oberak
 	when  gravity     atLeast  10g
 	when  auraTime    atLeast  20s
 
-	requires  trained.kingKai.greeting
-	forbids   trained.kingKai.gravity
+	requires  trained.oberak.greeting
+	forbids   trained.oberak.gravity
 
-	grant   trained.kingKai.gravity
+	grant   trained.oberak.gravity
 	say     "Ten times gravity and you are still glowing. Now the joke."
 	unlock  tier 3
 }
@@ -190,13 +190,13 @@ rule kingkai_gravity_pass {
 // One criterion more than the pass, so an exhausted player gets this line
 // instead and the pass stays out of reach until there is ki to hold an aura up.
 rule kingkai_gravity_fail {
-	when  masterNear  is       kingKai
+	when  masterNear  is       oberak
 	when  gravity     atLeast  10g
 	when  auraTime    atLeast  20s
 	when  fatigue     is       0pl
 
-	requires  trained.kingKai.greeting
-	forbids   trained.kingKai.gravity
+	requires  trained.oberak.greeting
+	forbids   trained.oberak.gravity
 
 	say  "Flat on your face under my gravity. Rest, then hold it up again."
 }
@@ -282,16 +282,16 @@ test "the first ascension is noticed once" {
 
 // ------------------------------------------------- the master arc's vectors
 
-test "roshi greets a player who lands in front of him" {
-	given   masterNear  roshi
+test "rhogan greets a player who lands in front of him" {
+	given   masterNear  rhogan
 	given   fatigue     1000pl
-	expect  roshi_greeting
+	expect  rhogan_greeting
 }
 
 // The greeting is the interaction, so a player who never lands gets the solo
 // nudge rather than a master's line.
-test "flying past roshi is not landing in front of him" {
-	given   masterNear    roshi
+test "flying past rhogan is not landing in front of him" {
+	given   masterNear    rhogan
 	given   airborneTime  30s
 	given   fatigue       1000pl
 	given   tags          training.begun
@@ -303,59 +303,59 @@ test "away from every master nothing greets anyone" {
 	expect  idle_nudge
 }
 
-test "endurance in front of roshi passes with ki left" {
-	given   masterNear    roshi
+test "endurance in front of rhogan passes with ki left" {
+	given   masterNear    rhogan
 	given   airborneTime  46s
 	given   fatigue       500pl
-	given   tags          trained.roshi.greeting
-	expect  roshi_flight_pass
+	given   tags          trained.rhogan.greeting
+	expect  rhogan_flight_pass
 }
 
-test "fatigued out in front of roshi gets the failure line" {
-	given   masterNear    roshi
+test "fatigued out in front of rhogan gets the failure line" {
+	given   masterNear    rhogan
 	given   airborneTime  46s
 	given   fatigue       0pl
-	given   tags          trained.roshi.greeting
-	expect  roshi_flight_fail
+	given   tags          trained.rhogan.greeting
+	expect  rhogan_flight_fail
 }
 
 // The master rule states three criteria and the solo one two, so the specific
 // rule wins wherever both apply - which is what buys free fallbacks.
-test "roshi's lesson beats the solo lesson on the same state" {
-	given   masterNear    roshi
+test "rhogan's lesson beats the solo lesson on the same state" {
+	given   masterNear    rhogan
 	given   airborneTime  46s
 	given   fatigue       500pl
-	given   tags          training.begun  trained.flight.hover  trained.roshi.greeting
-	expect  roshi_flight_pass
+	given   tags          training.begun  trained.flight.hover  trained.rhogan.greeting
+	expect  rhogan_flight_pass
 }
 
-test "king kai waits until roshi is finished with you" {
-	given   masterNear  kingKai
+test "oberak waits until rhogan is finished with you" {
+	given   masterNear  oberak
 	given   fatigue     1000pl
 	expect  idle_nudge
 }
 
-test "king kai greets a player roshi has passed" {
-	given   masterNear  kingKai
+test "oberak greets a player rhogan has passed" {
+	given   masterNear  oberak
 	given   fatigue     1000pl
-	given   tags        trained.roshi.greeting  trained.roshi.flight
+	given   tags        trained.rhogan.greeting  trained.rhogan.flight
 	expect  kingkai_greeting
 }
 
 test "the aura holds under ten times gravity" {
-	given   masterNear  kingKai
+	given   masterNear  oberak
 	given   gravity     10g
 	given   auraTime    21s
 	given   fatigue     300pl
-	given   tags        trained.roshi.flight  trained.kingKai.greeting
+	given   tags        trained.rhogan.flight  trained.oberak.greeting
 	expect  kingkai_gravity_pass
 }
 
 test "nothing left to hold the aura with fails the gravity lesson" {
-	given   masterNear  kingKai
+	given   masterNear  oberak
 	given   gravity     10g
 	given   auraTime    21s
 	given   fatigue     0pl
-	given   tags        trained.roshi.flight  trained.kingKai.greeting
+	given   tags        trained.rhogan.flight  trained.oberak.greeting
 	expect  kingkai_gravity_fail
 }

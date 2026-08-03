@@ -51,7 +51,7 @@ static qboolean lessonOf(const rule_t *rule,int *tagBit,int *tier){
 masterOf
 
 Which master's radius a lesson is taught in. Only an exact criterion counts -
-`masterNear is roshi` compiles to [id,id] - because a range across several ids
+`masterNear is rhogan` compiles to [id,id] - because a range across several ids
 would be a lesson that belongs to no one section.
 ================*/
 static int masterOf(const rule_t *rule){

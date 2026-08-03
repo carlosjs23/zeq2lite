@@ -290,7 +290,7 @@ typedef struct {
 	char		dummyModel[MAX_QPATH];	// the model it was spawned with, kept so the
 									// roster can seat it again after a map_restart
 	// Rule engine tags. ClientSpawn preserves only pers and sess, and a tag like
-	// trained.roshi.flight has to survive dying - putting it in the wiped half
+	// trained.rhogan.flight has to survive dying - putting it in the wiped half
 	// would only break for players who die mid-arc, which is the worst possible
 	// discovery schedule.
 	tagSet_t	tags;

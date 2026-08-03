@@ -659,8 +659,8 @@ Test(g_rules, the_training_arc_grants_what_the_budokai_gate_requires) {
 }
 
 /* The master arc is the reason the vocabulary is loaded before the rules parse:
-   `masterNear is roshi` is only a legal value because rules/masters.def declared
-   roshi, and this is the assertion that the two files agree. */
+   `masterNear is rhogan` is only a legal value because rules/masters.def declared
+   rhogan, and this is the assertion that the two files agree. */
 Test(g_rules, the_shipped_content_keys_on_the_shipped_masters) {
 	const char *const *vocabulary;
 	int count, i, j, keyed;

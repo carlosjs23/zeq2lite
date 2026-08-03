@@ -93,7 +93,7 @@ static int countPlaced(void){
 }
 
 // Masters load BEFORE the rules, because the master names are what
-// `masterNear is roshi` is validated against - installing them afterwards would
+// `masterNear is rhogan` is validated against - installing them afterwards would
 // mean every master name in the content was an unknown value at parse time.
 static void loadMasters(void){
 	const char *const *vocabulary;
@@ -866,8 +866,8 @@ static void runRuleTests(void){
 //
 //   trjournal 2 4 10
 //   trjsec 0 "" "dtraining.begun|dtrained.flight.hover|atrained.flight.endurance|ltrained.aura.sustain"
-//   trjsec 1 "roshi" "dtrained.roshi.greeting|atrained.roshi.flight"
-//   trjsec 2 "kingKai" "ltrained.kingKai.greeting|ltrained.kingKai.gravity"
+//   trjsec 1 "rhogan" "dtrained.rhogan.greeting|atrained.rhogan.flight"
+//   trjsec 2 "oberak" "ltrained.oberak.greeting|ltrained.oberak.gravity"
 //   trjend
 //
 // trjournal resets the client's page and trjend marks it complete, so a client
@@ -947,9 +947,9 @@ static void sendJournal(gentity_t *ent){
 //
 // End to end, for an author:
 //
-//   1. Declare the master once in GameData/rules/masters.def:  master 1 roshi
+//   1. Declare the master once in GameData/rules/masters.def:  master 1 rhogan
 //   2. Start the map with cheats on:  +set g_training 1 +set sv_cheats 1
-//   3. Fly to where the master belongs and:  \masterplace roshi 320
+//   3. Fly to where the master belongs and:  \masterplace rhogan 320
 //      (the radius is optional and defaults to MASTER_DEFAULT_RADIUS)
 //   4. \masterlist to check what is placed and how far away you are
 //   5. \mastersave writes rules/masters_<mapname>.def under fs_homepath

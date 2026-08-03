@@ -13,7 +13,7 @@ on it. Cite the function, macro or enum member, with the line as a convenience.
 
 ## Scope
 
-A player flies to a master (Roshi, King Kai), receives an objective, performs a
+A player flies to a master (Rhogan, Oberak), receives an objective, performs a
 measurable feat, and is rewarded with progress toward tier unlocks. Solo
 playable. No AI opponents, no new netcode, no external services.
 
@@ -90,7 +90,7 @@ per-client rule cost by raising its own packet rate.
 | Data | Lives in | Because |
 |---|---|---|
 | `airborneTime`, `auraTime` | wiped part of `gclient_t` | resetting on death is correct |
-| **tag set** | **`client->pers`** | `trained.roshi.flight` must survive dying |
+| **tag set** | **`client->pers`** | `trained.rhogan.flight` must survive dying |
 
 Tags in the wrong half is a bug that only appears when someone dies mid-arc —
 the worst possible discovery schedule.
@@ -107,7 +107,7 @@ typedef enum {
 ### Rules
 
 Every criterion is a **range**, which removes the need for an operator enum
-entirely — `atLeast 45s` is `[45000, INT_MAX]`, `is roshi` is `[1,1]`.
+entirely — `atLeast 45s` is `[45000, INT_MAX]`, `is rhogan` is `[1,1]`.
 
 ```c
 typedef struct { int key; int min; int max; } criterion_t;
@@ -134,13 +134,13 @@ language design exists to convert quiet failures into loud ones.
 
 ### Tags
 
-A bitfield of labels (`trained.roshi.flight`, `seen.firstAscension`). Rules carry
+A bitfield of labels (`trained.rhogan.flight`, `seen.firstAscension`). Rules carry
 require/forbid sets. This supplies quest chains, prerequisites and one-shot
 events with no extra machinery — a rule that grants a tag it also forbids is
 self-terminating.
 
-**A bitfield is flat; dots are not hierarchy for free.** `trained.roshi.flight`
-is just a name containing dots. For `requires trained.roshi.*` to work, bits must
+**A bitfield is flat; dots are not hierarchy for free.** `trained.rhogan.flight`
+is just a name containing dots. For `requires trained.rhogan.*` to work, bits must
 be **allocated by prefix at declaration time in `tags.def`**, so a prefix becomes
 a contiguous mask. That is a constraint to design in now, not to retrofit — the
 same argument the plan makes for world facts.
@@ -191,15 +191,15 @@ against is the **silent no-op**: a typo'd fact or tag makes a rule never match,
 with no error, and nobody notices for a month.
 
 ```
-rule roshi_flight_pass {
-    when  masterNear    is       roshi
+rule rhogan_flight_pass {
+    when  masterNear    is       rhogan
     when  airborneTime  atLeast  45s
     when  fatigue       above    0
 
-    requires  trained.roshi.greeting
-    forbids   trained.roshi.flight
+    requires  trained.rhogan.greeting
+    forbids   trained.rhogan.flight
 
-    grant   trained.roshi.flight
+    grant   trained.rhogan.flight
     say     "Not bad. You have the endurance of a delivery boy."
     unlock  tier 2
 }
@@ -211,25 +211,25 @@ Design rules:
    `between X and Y`. All compile to the same two ints.
 2. **Unit suffixes** — `45s`, `2500pl`, `10g`. Bare numbers are unreadable and
    unverifiable; wrong units become a parse error.
-3. **Named enum values** — `masterNear is roshi`, never `masterNear 1 1`.
+3. **Named enum values** — `masterNear is rhogan`, never `masterNear 1 1`.
 4. **Declared vocabulary.** `facts.def` is generated from the C enum by
    `ruledump facts`; `tags.def` lists every legal tag. Anything undeclared is a
    **load error**, which converts the worst failure mode into the loudest one.
 5. **Errors written for a machine reader**, with Levenshtein suggestions:
    ```
-   rules/roshi.rules:14: unknown fact 'airbornTime' - did you mean 'airborneTime'?
-   rules/roshi.rules:19: tag 'trained.roshi.fligth' not declared in tags.def
+   rules/rhogan.rules:14: unknown fact 'airbornTime' - did you mean 'airborneTime'?
+   rules/rhogan.rules:19: tag 'trained.rhogan.fligth' not declared in tags.def
    ```
 6. **Inline tests, executed by Criterion.** The matcher is a pure function of
    `(facts, tags) → rule`, so content carries its own vectors and is verifiable
    without launching the game:
    ```
    test "fatigued out gets the failure line, not the pass" {
-       given   masterNear    roshi
+       given   masterNear    rhogan
        given   airborneTime  46s
        given   fatigue       0
-       given   tags          trained.roshi.greeting
-       expect  roshi_flight_fail
+       given   tags          trained.rhogan.greeting
+       expect  rhogan_flight_fail
    }
    ```
 
@@ -802,7 +802,7 @@ Criterion suite, and `ruledump`/`ruletest` console commands. `POOLSIZE` bumped.
 **Phase 1 content must not use `masterNear`** — master triggers arrive in Phase
 2, so a rule keyed on them cannot be exercised here. Build Phase 1 vectors from
 facts that exist at this point: `airborneTime`, `auraTime`, `fatigue`,
-`tierCurrent`, `gravity`. The Roshi and King Kai examples elsewhere in this
+`tierCurrent`, `gravity`. The Rhogan and Oberak examples elsewhere in this
 document are Phase 2 content.
 
 **Phase 1b — melee legibility.** Restore the five commented feedback events, add

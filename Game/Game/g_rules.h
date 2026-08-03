@@ -9,7 +9,7 @@
 #include "../../Shared/q_shared.h"
 
 // A prefix group is reserved whole at first declaration, so every tag sharing a
-// prefix lands on contiguous bits and `requires trained.roshi.*` is one mask.
+// prefix lands on contiguous bits and `requires trained.rhogan.*` is one mask.
 // The group size is therefore a hard per-prefix content limit, not just the
 // global one.
 #define MAX_TAG_BITS		512
@@ -120,7 +120,7 @@ qboolean	G_TagsEmpty(const tagSet_t *set);
 int		G_TagFind(const char *name);
 const char	*G_TagName(int bit);
 int		G_TagCount(void);
-// Contiguous mask for a declared prefix group, as `trained.roshi.*` compiles to.
+// Contiguous mask for a declared prefix group, as `trained.rhogan.*` compiles to.
 qboolean	G_TagPrefixMask(const char *prefix,tagSet_t *out);
 
 int		G_RulesFactKey(const char *name);

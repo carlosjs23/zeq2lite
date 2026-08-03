@@ -30,8 +30,8 @@ typedef struct {
 // time: it comes from rules/masters.def so that adding a master is content work
 // rather than a C change. The built-in table below is the fallback for a tree
 // with no masters.def and MUST agree with the shipped ids, since a rule
-// compiles `masterNear is roshi` to the index in this table.
-static const char *const masterValues[] = {"none","roshi","kingKai"};
+// compiles `masterNear is rhogan` to the index in this table.
+static const char *const masterValues[] = {"none","rhogan","oberak"};
 static const char *const roundValues[] = {"none","waiting","inProgress","over"};
 
 // Indexed by factKey_t. Not const: G_RulesSetMasterVocabulary rewrites the
@@ -1054,7 +1054,7 @@ static qboolean validateRules(const char *path){
 // ---------------------------------------------------------------- public API
 
 // Called with the names loaded from masters.def, BEFORE content is parsed, so
-// that `masterNear is roshi` validates against the masters this server actually
+// that `masterNear is rhogan` validates against the masters this server actually
 // has. Deliberately not cleared by G_RulesReset: the vocabulary is loaded once
 // per map and the rules are reloaded inside it.
 void G_RulesSetMasterVocabulary(const char *const *names,int count){

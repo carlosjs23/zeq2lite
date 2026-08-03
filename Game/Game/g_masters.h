@@ -2,7 +2,7 @@
 // stand on a given map.
 //
 // Two files, deliberately. rules/masters.def is the GLOBAL vocabulary - the
-// names and ids `masterNear is roshi` is validated against - and it is the same
+// names and ids `masterNear is rhogan` is validated against - and it is the same
 // on every map, so a piece of content either loads everywhere or nowhere.
 // rules/masters_<mapname>.def is per-map PLACEMENT: an origin and a radius for
 // each master that appears on that map. A map that places nobody is not a
@@ -55,7 +55,7 @@ const char	*G_MastersName(int id);
 int		G_MastersNearest(const vec3_t origin);
 
 // The masterNear value table: index 0 is "none" and index i is the master with
-// id i, which is what makes `masterNear is roshi` compile to the id.
+// id i, which is what makes `masterNear is rhogan` compile to the id.
 const char *const *G_MastersVocabulary(int *count);
 
 // Authoring. Placing a master that is already placed moves it.

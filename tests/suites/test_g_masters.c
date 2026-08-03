@@ -20,8 +20,8 @@ honest without launching anything.
 #define PLACE_PATH  "rules/masters_desert.def"
 
 static const char *const kDef =
-	"master 1 roshi\n"
-	"master 2 kingKai\n";
+	"master 1 rhogan\n"
+	"master 2 oberak\n";
 
 static void setup(void) {
 	fake_fs_reset();
@@ -51,11 +51,11 @@ Test(g_masters, parses_ids_and_names) {
 
 	cr_assert(parseDef(kDef), "%s", G_MastersError());
 	cr_assert_eq(G_MastersCount(), 2);
-	master = G_MastersFind("roshi");
+	master = G_MastersFind("rhogan");
 	cr_assert_not_null(master);
 	cr_assert_eq(master->id, 1);
 	cr_assert_eq(master->placed, qfalse);
-	cr_assert_str_eq(G_MastersName(2), "kingKai");
+	cr_assert_str_eq(G_MastersName(2), "oberak");
 	cr_assert_str_eq(G_MastersName(0), "none");
 }
 
@@ -65,32 +65,32 @@ Test(g_masters, the_vocabulary_is_indexed_by_id) {
 	const char *const *vocabulary;
 	int count;
 
-	cr_assert(parseDef("master 2 kingKai\nmaster 1 roshi\n"), "%s", G_MastersError());
+	cr_assert(parseDef("master 2 oberak\nmaster 1 rhogan\n"), "%s", G_MastersError());
 	vocabulary = G_MastersVocabulary(&count);
 	cr_assert_eq(count, 3);
 	cr_assert_str_eq(vocabulary[0], "none");
-	cr_assert_str_eq(vocabulary[1], "roshi");
-	cr_assert_str_eq(vocabulary[2], "kingKai");
+	cr_assert_str_eq(vocabulary[1], "rhogan");
+	cr_assert_str_eq(vocabulary[2], "oberak");
 }
 
 Test(g_masters, a_reused_id_is_an_error) {
-	cr_assert_not(parseDef("master 1 roshi\nmaster 1 kingKai\n"));
-	cr_assert_not_null(strstr(G_MastersError(), "already 'roshi'"), "%s", G_MastersError());
+	cr_assert_not(parseDef("master 1 rhogan\nmaster 1 oberak\n"));
+	cr_assert_not_null(strstr(G_MastersError(), "already 'rhogan'"), "%s", G_MastersError());
 }
 
 Test(g_masters, a_reused_name_is_an_error) {
-	cr_assert_not(parseDef("master 1 roshi\nmaster 2 roshi\n"));
+	cr_assert_not(parseDef("master 1 rhogan\nmaster 2 rhogan\n"));
 	cr_assert_not_null(strstr(G_MastersError(), "declared twice"), "%s", G_MastersError());
 }
 
 /* Id 0 is the masterNear value 'none', so a master may not claim it. */
 Test(g_masters, id_zero_is_rejected) {
-	cr_assert_not(parseDef("master 0 roshi\n"));
+	cr_assert_not(parseDef("master 0 rhogan\n"));
 	cr_assert_not_null(strstr(G_MastersError(), "out of range"), "%s", G_MastersError());
 }
 
 Test(g_masters, an_unknown_declaration_names_the_one_it_expected) {
-	cr_assert_not(parseDef("teacher 1 roshi\n"));
+	cr_assert_not(parseDef("teacher 1 rhogan\n"));
 	cr_assert_not_null(strstr(G_MastersError(), "did you mean 'master'"), "%s", G_MastersError());
 	cr_assert_not_null(strstr(G_MastersError(), DEF_PATH), "%s", G_MastersError());
 }
@@ -101,22 +101,22 @@ Test(g_masters, places_a_declared_master) {
 	const master_t *master;
 
 	cr_assert(parseDef(kDef), "%s", G_MastersError());
-	cr_assert(parsePlacements("place roshi 100 200 300 512\n"), "%s", G_MastersError());
-	master = G_MastersFind("roshi");
+	cr_assert(parsePlacements("place rhogan 100 200 300 512\n"), "%s", G_MastersError());
+	master = G_MastersFind("rhogan");
 	cr_assert_eq(master->placed, qtrue);
 	cr_assert_float_eq(master->origin[0], 100.0f, 0.01f);
 	cr_assert_float_eq(master->origin[2], 300.0f, 0.01f);
 	cr_assert_float_eq(master->radius, 512.0f, 0.01f);
 	/* A master the map does not place is still declared, and still a legal
 	   value for a rule - it is just never near anyone here. */
-	cr_assert_eq(G_MastersFind("kingKai")->placed, qfalse);
+	cr_assert_eq(G_MastersFind("oberak")->placed, qfalse);
 }
 
 Test(g_masters, negative_coordinates_survive_the_parse) {
 	cr_assert(parseDef(kDef), "%s", G_MastersError());
-	cr_assert(parsePlacements("place roshi -40810 4681 -1486 768\n"), "%s", G_MastersError());
-	cr_assert_float_eq(G_MastersFind("roshi")->origin[0], -40810.0f, 0.01f);
-	cr_assert_float_eq(G_MastersFind("roshi")->origin[2], -1486.0f, 0.01f);
+	cr_assert(parsePlacements("place rhogan -40810 4681 -1486 768\n"), "%s", G_MastersError());
+	cr_assert_float_eq(G_MastersFind("rhogan")->origin[0], -40810.0f, 0.01f);
+	cr_assert_float_eq(G_MastersFind("rhogan")->origin[2], -1486.0f, 0.01f);
 }
 
 /* Placing a name masters.def never declared is the silent no-op this whole
@@ -129,13 +129,13 @@ Test(g_masters, placing_an_undeclared_master_is_an_error) {
 
 Test(g_masters, a_radius_of_zero_is_an_error) {
 	cr_assert(parseDef(kDef), "%s", G_MastersError());
-	cr_assert_not(parsePlacements("place roshi 0 0 0 0\n"));
+	cr_assert_not(parsePlacements("place rhogan 0 0 0 0\n"));
 	cr_assert_not_null(strstr(G_MastersError(), "nobody can reach"), "%s", G_MastersError());
 }
 
 Test(g_masters, a_truncated_placement_line_says_what_was_missing) {
 	cr_assert(parseDef(kDef), "%s", G_MastersError());
-	cr_assert_not(parsePlacements("place roshi 100 200 300\n"));
+	cr_assert_not(parsePlacements("place rhogan 100 200 300\n"));
 	cr_assert_not_null(strstr(G_MastersError(), "radius"), "%s", G_MastersError());
 }
 
@@ -144,7 +144,7 @@ Test(g_masters, a_truncated_placement_line_says_what_was_missing) {
 Test(g_masters, a_missing_placement_file_is_not_an_error) {
 	cr_assert(parseDef(kDef), "%s", G_MastersError());
 	cr_assert(G_MastersLoadPlacements("rules/masters_nosuchmap.def"));
-	cr_assert_eq(G_MastersFind("roshi")->placed, qfalse);
+	cr_assert_eq(G_MastersFind("rhogan")->placed, qfalse);
 	cr_assert_eq(fake_fs_leak_count(), 0);
 }
 
@@ -153,8 +153,8 @@ Test(g_masters, a_missing_placement_file_is_not_an_error) {
 static void twoMasters(void) {
 	cr_assert(parseDef(kDef), "%s", G_MastersError());
 	cr_assert(parsePlacements(
-		"place roshi   0 0 0     100\n"
-		"place kingKai 50 0 0    100\n"), "%s", G_MastersError());
+		"place rhogan   0 0 0     100\n"
+		"place oberak 50 0 0    100\n"), "%s", G_MastersError());
 }
 
 Test(g_masters, inside_the_radius_reports_the_master) {
@@ -172,11 +172,11 @@ Test(g_masters, outside_every_radius_reports_none) {
 /* Overlapping radii are normal once an author drops two masters in one room,
    and the readout should follow the one the player walked up to. */
 Test(g_masters, the_nearest_master_wins_an_overlap) {
-	vec3_t nearRoshi = {10, 0, 0};
-	vec3_t nearKingKai = {40, 0, 0};
+	vec3_t nearRhogan = {10, 0, 0};
+	vec3_t nearOberak = {40, 0, 0};
 	twoMasters();
-	cr_assert_eq(G_MastersNearest(nearRoshi), 1);
-	cr_assert_eq(G_MastersNearest(nearKingKai), 2);
+	cr_assert_eq(G_MastersNearest(nearRhogan), 1);
+	cr_assert_eq(G_MastersNearest(nearOberak), 2);
 }
 
 Test(g_masters, an_unplaced_master_is_never_near_anyone) {
@@ -200,9 +200,9 @@ Test(g_masters, the_radius_is_spherical) {
 Test(g_masters, masterplace_moves_a_declared_master) {
 	vec3_t where = {1, 2, 3};
 	twoMasters();
-	cr_assert(G_MastersPlace("roshi", where, 640.0f));
-	cr_assert_float_eq(G_MastersFind("roshi")->origin[1], 2.0f, 0.01f);
-	cr_assert_float_eq(G_MastersFind("roshi")->radius, 640.0f, 0.01f);
+	cr_assert(G_MastersPlace("rhogan", where, 640.0f));
+	cr_assert_float_eq(G_MastersFind("rhogan")->origin[1], 2.0f, 0.01f);
+	cr_assert_float_eq(G_MastersFind("rhogan")->radius, 640.0f, 0.01f);
 }
 
 /* masterplace cannot invent a master, because the name is also the rule
@@ -233,8 +233,8 @@ static void loadShipped(const char *name, const char *path) {
 	free(data);
 }
 
-Test(g_masters, the_shipped_desert_placement_loads_and_puts_roshi_somewhere) {
-	const master_t *roshi;
+Test(g_masters, the_shipped_desert_placement_loads_and_puts_rhogan_somewhere) {
+	const master_t *rhogan;
 	vec3_t at;
 
 	loadShipped(DEF_PATH, RULES_CONTENT_DIR "/masters.def");
@@ -243,12 +243,12 @@ Test(g_masters, the_shipped_desert_placement_loads_and_puts_roshi_somewhere) {
 	cr_assert(G_MastersLoadDef(DEF_PATH), "%s", G_MastersError());
 	cr_assert(G_MastersLoadPlacements(PLACE_PATH), "%s", G_MastersError());
 
-	roshi = G_MastersFind("roshi");
-	cr_assert_not_null(roshi);
-	cr_assert_eq(roshi->placed, qtrue);
+	rhogan = G_MastersFind("rhogan");
+	cr_assert_not_null(rhogan);
+	cr_assert_eq(rhogan->placed, qtrue);
 	/* Standing on his origin has to resolve to him, which is the property the
 	   smoke run depends on when it spawns inside the radius. */
-	VectorCopy(roshi->origin, at);
-	cr_assert_eq(G_MastersNearest(at), roshi->id);
+	VectorCopy(rhogan->origin, at);
+	cr_assert_eq(G_MastersNearest(at), rhogan->id);
 	cr_assert_eq(fake_fs_leak_count(), 0);
 }
