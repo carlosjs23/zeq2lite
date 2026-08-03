@@ -126,9 +126,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	TRAINING_TOAST_TIME	6000
 #define	TRAINING_TOAST_FADE	800
 #define	TRAINING_TOAST_STEP	(SMALLCHAR_HEIGHT+4)
+// Toasts run the width of the screen, so they stack above the status panel and
+// the weapon select rather than above the tracker: a line long enough to be
+// worth reading reaches across whatever is in the bottom-left corner.
+#define	TRAINING_TOAST_BOTTOM	(HUD_PANEL_Y-38-TRAINING_TOAST_STEP-4)
 // A toast is one line: long text is clamped rather than wrapped, since the
 // column it sits in is the width of the screen minus the two margins.
-#define	TRAINING_TOAST_CHARS	64
+#define	TRAINING_TOAST_CHARS	76
 #define	ZOOM_TIME			150
 #define	ITEM_BLOB_TIME		200
 #define	MUZZLE_FLASH_TIME	80 //20

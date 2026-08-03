@@ -1012,6 +1012,21 @@ void CG_TrainingComplete(const char *text,int objectiveId){
 	CG_TrainingToast(text,qtrue);
 }
 /*================
+CG_DrawTrainingLine
+
+CG_DrawStringExt draws its drop shadow at a fixed half alpha whatever colour it
+is handed, so a string that fades out loses its text and keeps its shadow: the
+last second of every toast is a smear of black with nothing in it. Issuing the
+two passes here is what makes a faded line fade whole.
+================*/
+static void CG_DrawTrainingLine(int x,int y,int height,const char *text,const vec4_t color,int maxChars){
+	vec4_t	shadow = {0.0f,0.0f,0.0f,0.5f};
+
+	shadow[3] = 0.5f * color[3];
+	CG_DrawStringExt(-1,x+1,y+1,text,shadow,qtrue,qfalse,SMALLCHAR_WIDTH,height,maxChars);
+	CG_DrawStringExt(-1,x,y,text,color,qfalse,qfalse,SMALLCHAR_WIDTH,height,maxChars);
+}
+/*================
 CG_DrawTrainingTracker
 
 Objective text, then the bar it is measured on, sharing a right edge with the
@@ -1063,8 +1078,7 @@ static void CG_DrawTrainingTracker(void){
 	if(finishing){Vector4Copy(doneColor,textColor);}
 	width = CG_DrawStrlen(label) * SMALLCHAR_WIDTH;
 	if(width > TRAINING_RIGHT-TRAINING_MARGIN){width = TRAINING_RIGHT-TRAINING_MARGIN;}
-	CG_DrawStringExt(-1,TRAINING_RIGHT-width,TRAINING_TEXT_Y,label,textColor,qfalse,qtrue,
-		SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,0);
+	CG_DrawTrainingLine(TRAINING_RIGHT-width,TRAINING_TEXT_Y,SMALLCHAR_HEIGHT,label,textColor,0);
 	CG_DrawHorGauge(TRAINING_LEFT,TRAINING_BAR_Y,TRAINING_BAR_WIDTH,TRAINING_BAR_HEIGHT,
 		trackColor,trackColor,1,1,qfalse);
 	if(cg.trainingProgress > 0){
@@ -1108,13 +1122,12 @@ static void CG_DrawTrainingMaster(void){
 	name = CG_TrainingMasterName(id);
 	line = name[0] ? va("training with %s",name) : "master nearby";
 	width = CG_DrawStrlen(line) * SMALLCHAR_WIDTH;
-	CG_DrawStringExt(-1,TRAINING_RIGHT-width,TRAINING_MASTER_Y,line,masterColor,qfalse,qtrue,
-		SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT/2,0);
+	CG_DrawTrainingLine(TRAINING_RIGHT-width,TRAINING_MASTER_Y,SMALLCHAR_HEIGHT/2,line,masterColor,0);
 }
 /*================
 CG_DrawTrainingToasts
 
-Stacked upward from the tracker, oldest at the top, each fading out on its own
+Oldest at the top, newest nearest the tracker, each fading out on its own
 clock. A completion is coloured like the bar it just filled.
 ================*/
 static void CG_DrawTrainingToasts(void){
@@ -1142,12 +1155,11 @@ static void CG_DrawTrainingToasts(void){
 		}
 		Vector4Copy(toast->completion ? doneColor : sayColor,color);
 		color[3] = fade[3];
-		y = TRAINING_MASTER_Y - (live - row) * TRAINING_TOAST_STEP;
+		y = TRAINING_TOAST_BOTTOM - (live - 1 - row) * TRAINING_TOAST_STEP;
 		width = CG_DrawStrlen(toast->text) * SMALLCHAR_WIDTH;
 		x = TRAINING_RIGHT - width;
 		if(x < TRAINING_MARGIN){x = TRAINING_MARGIN;}
-		CG_DrawStringExt(-1,x,y,toast->text,color,qfalse,qtrue,SMALLCHAR_WIDTH,SMALLCHAR_HEIGHT,
-			TRAINING_TOAST_CHARS);
+		CG_DrawTrainingLine(x,y,SMALLCHAR_HEIGHT,toast->text,color,TRAINING_TOAST_CHARS);
 		row++;
 	}
 }
