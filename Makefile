@@ -1410,6 +1410,13 @@ else
 	$(B)/client/con_tty.o
 endif
 
+# mingw32 still links SDL 1.2, which has no clipboard API, and sys_win32.c
+# already answers both clipboard symbols there through the Win32 API.
+ifneq ($(PLATFORM),mingw32)
+  Q3OBJ += \
+	$(B)/client/sdl_clipboard.o
+endif
+
 Q3ROBJ = \
   $(B)/renderer/tr_backend.o \
   $(B)/renderer/tr_bloom.o \
@@ -1756,6 +1763,14 @@ Q3DOBJ = \
   \
   $(B)/ded/con_log.o \
   $(B)/ded/sys_main.o
+
+# The dedicated server links no window system, so it takes the clipboard stubs
+# rather than the SDL back end the client uses.  On mingw32 sys_win32.c already
+# provides both symbols through the Win32 API.
+ifneq ($(PLATFORM),mingw32)
+  Q3DOBJ += \
+	$(B)/ded/null_clipboard.o
+endif
 
 ifeq ($(ARCH),i386)
   Q3DOBJ += \

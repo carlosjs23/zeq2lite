@@ -78,6 +78,9 @@ char *Sys_GetClipboardData( void ) {
 	return NULL;
 }
 
+void Sys_SetClipboardData( const char *text ) {
+}
+
 int		Sys_Milliseconds (void) {
 	return 0;
 }

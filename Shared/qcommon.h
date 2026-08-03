@@ -1064,6 +1064,8 @@ char	*Sys_GetCurrentUser( void );
 void	QDECL Sys_Error( const char *error, ...) __attribute__ ((noreturn, format (printf, 1, 2)));
 void	Sys_Quit (void) __attribute__ ((noreturn));
 char	*Sys_GetClipboardData( void );	// note that this isn't journaled...
+										// caller owns the result and Z_Frees it
+void	Sys_SetClipboardData( const char *text );
 
 void	Sys_Print( const char *msg );
 

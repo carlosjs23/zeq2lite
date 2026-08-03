@@ -165,15 +165,10 @@ char *Sys_GetCurrentUser( void )
 	return p->pw_name;
 }
 
-/*
-==================
-Sys_GetClipboardData
-==================
-*/
-char *Sys_GetClipboardData(void)
-{
-	return NULL;
-}
+// Sys_GetClipboardData / Sys_SetClipboardData are not here: this file is
+// shared with the dedicated server, which must not link SDL.  The client gets
+// them from Engine/sdl/sdl_clipboard.c, the dedicated server from
+// Engine/null/null_clipboard.c.
 
 /*
 ==================

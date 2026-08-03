@@ -237,6 +237,48 @@ char *Sys_GetClipboardData( void )
 }
 
 /*
+================
+Sys_SetClipboardData
+
+Win32 takes ownership of the moveable block once SetClipboardData succeeds, so
+it is only freed on the paths that never handed it over.
+================
+*/
+void Sys_SetClipboardData( const char *text )
+{
+	HGLOBAL	memoryHandle;
+	char	*clipMemory;
+	size_t	size;
+
+	if ( !text ) {
+		return;
+	}
+
+	size = strlen( text ) + 1;
+	memoryHandle = GlobalAlloc( GMEM_MOVEABLE|GMEM_DDESHARE, size );
+	if ( !memoryHandle ) {
+		return;
+	}
+
+	clipMemory = (char *)GlobalLock( memoryHandle );
+	if ( clipMemory ) {
+		Q_strncpyz( clipMemory, text, size );
+		GlobalUnlock( memoryHandle );
+
+		if ( OpenClipboard( NULL ) ) {
+			if ( EmptyClipboard() && SetClipboardData( CF_TEXT, memoryHandle ) ) {
+				memoryHandle = NULL;
+			}
+			CloseClipboard();
+		}
+	}
+
+	if ( memoryHandle ) {
+		GlobalFree( memoryHandle );
+	}
+}
+
+/*
 ==============
 Sys_Basename
 ==============
