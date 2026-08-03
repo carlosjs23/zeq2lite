@@ -20,6 +20,7 @@ gate that keeps content honest without launching the game.
 #define TAGS_PATH   "rules/tags.def"
 #define RULES_PATH  "rules/training.rules"
 #define MASTERS_PATH "rules/masters.def"
+#define BUDOKAI_PATH "rules/budokai.rules"
 
 /* The chain the sample content and most inline fixtures share. */
 static const char *const kTags =
@@ -609,6 +610,52 @@ Test(g_rules, the_shipped_content_loads_and_its_vectors_pass) {
 	cr_assert(G_RulesRunTests(&passed, &failed, err, sizeof(err)), "%s", err);
 	cr_assert_eq(failed, 0);
 	cr_assert_eq(fake_fs_leak_count(), 0);
+}
+
+/* The Budokai ships its own content against the SAME tag vocabulary, which is
+   what lets a tournament gate on a tag a training session granted. Its vectors
+   run here for the same reason the training arc's do: the announcer is authored
+   content, and content that only runs in a live tournament is content nobody
+   checks. */
+Test(g_rules, the_shipped_budokai_content_loads_and_its_vectors_pass) {
+	int passed, failed;
+	char err[MAX_RULE_ERROR];
+
+	loadShipped(TAGS_PATH, RULES_CONTENT_DIR "/tags.def");
+	loadShipped(BUDOKAI_PATH, RULES_CONTENT_DIR "/budokai.rules");
+
+	cr_assert(G_RulesLoad(TAGS_PATH, BUDOKAI_PATH), "%s", G_RulesError());
+	cr_assert_gt(G_RulesCount(), 0);
+	cr_assert_gt(G_RulesTestCount(), 0);
+	cr_assert(G_RulesRunTests(&passed, &failed, err, sizeof(err)), "%s", err);
+	cr_assert_eq(failed, 0);
+	cr_assert_eq(fake_fs_leak_count(), 0);
+}
+
+/* The gate itself, asserted across the two files: the tournament reads
+   budokai.entry, and a training lesson has to be able to grant it. A rename on
+   either side is otherwise a silent no-op - the tournament simply never lets
+   anybody in and nothing says why. */
+Test(g_rules, the_training_arc_grants_what_the_budokai_gate_requires) {
+	const rule_t *rule;
+	int i, j, entry, granted;
+
+	loadShipped(TAGS_PATH, RULES_CONTENT_DIR "/tags.def");
+	loadShipped(RULES_PATH, RULES_CONTENT_DIR "/training.rules");
+	cr_assert(G_RulesLoad(TAGS_PATH, RULES_PATH), "%s", G_RulesError());
+
+	entry = G_TagFind("budokai.entry");
+	cr_assert_geq(entry, 0, "budokai.entry is no longer declared in tags.def");
+	granted = 0;
+	for (i = 0; i < G_RulesCount(); ++i) {
+		rule = G_RulesGet(i);
+		for (j = 0; j < rule->numActions; ++j) {
+			if (rule->actions[j].type == acGrant && rule->actions[j].tag == entry) {
+				granted++;
+			}
+		}
+	}
+	cr_assert_gt(granted, 0, "no training lesson grants budokai.entry");
 }
 
 /* The master arc is the reason the vocabulary is loaded before the rules parse:

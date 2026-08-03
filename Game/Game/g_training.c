@@ -249,14 +249,13 @@ void G_TrainingClientConnect(int clientNum,const char *userinfo){
 // ClientBegin also runs on a team change, where pers is preserved and the tags
 // in it are newer than the file. Loading once per connection is what keeps a
 // team change from rolling a session back to its last write.
-void G_TrainingClientBegin(int clientNum){
+static void loadProgress(int clientNum){
 	gclient_t *client;
 	progress_t p;
 	progressLoad_t report;
 	int i;
 
 	client = level.clients + clientNum;
-	if(!trainingLive){return;}
 	if(client->pers.progressLoaded){return;}
 	client->pers.progressLoaded = qtrue;
 	if(!client->pers.progressKey[0]){return;}
@@ -586,9 +585,11 @@ static void budokaiRingCheck(gentity_t *ent){
 	if(!G_RingDefined()){return;}
 	if(g_worldFacts[wRoundState] != roundInProgress){return;}
 	if(ent->client->sess.sessionTeam == TEAM_SPECTATOR){return;}
-	if(ent->powerLevelTotal <= 0){return;}
 	if(budokaiRingOutTime && level.time - budokaiRingOutTime < BUDOKAI_RINGOUT_COOLDOWN){return;}
 	ps = &ent->client->ps;
+	// A body on the floor outside the ring is a fighter who already lost the
+	// round; isDead is the flag the rest of the module reads for that.
+	if(ps->bitFlags & isDead){return;}
 	grounded = ((ps->bitFlags & (usingJump | usingSoar)) || ps->groundEntityNum == ENTITYNUM_NONE) ? qfalse : qtrue;
 	if(!G_RingIsOut(ps->origin,grounded)){return;}
 	budokaiRingOut(ent);
@@ -708,7 +709,7 @@ static void dumpRules(void){
 	gclient_t *client;
 	int i,j;
 
-	G_Printf("rules loaded: %i from %s\n",G_RulesCount(),TRAINING_RULES_FILE);
+	G_Printf("rules loaded: %i from %s\n",G_RulesCount(),contentFile());
 	for(i=0;i<G_RulesCount();i++){
 		rule = G_RulesGet(i);
 		G_Printf("  %2i %-28s %i criteria, %i actions\n",i,rule->name,rule->numCriteria,rule->numActions);

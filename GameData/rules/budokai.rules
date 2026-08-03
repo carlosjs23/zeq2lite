@@ -1,0 +1,138 @@
+// Tenkaichi Budokai content: the announcer.
+//
+// This file is the mode's voice, and it is the payoff the plan is written
+// towards - the round bell, the entry refusal and the ring-out warning are
+// authored here and cost no C at all. GT_TOURNAMENT loads this instead of
+// training.rules, because the solo arc talks to a player standing alone in an
+// empty map and half of it would be firing over a title fight.
+//
+// The tag vocabulary is shared with the training arc, which is the whole point:
+// budokai.entry is granted by a lesson in rules/training.rules, saved with the
+// player's progress, and read back here as the gate on entering the ring.
+//
+// Three fact sources take part:
+//
+//   world roundState / roundTime  - driven from the tournament flow in
+//                                   g_training.c: waiting, inProgress, over.
+//   world.round.inProgress        - the same state as a tag, so a rule can
+//                                   require it instead of restating the fact.
+//   ringDistance / ringHeight     - the player against the ring in
+//                                   rules/arena_<mapname>.def. ringDistance is
+//                                   how far PAST the edge, so inside is
+//                                   negative; ringHeight is measured from the
+//                                   ring floor.
+
+// The refusal. Nothing gates this on the round, because the line is for a
+// player sitting in the seats wondering why the queue will not take him, and
+// that is true whenever the fight is not his.
+rule budokai_untrained {
+	forbids  budokai.entry
+
+	say  "The Budokai is for trained fighters. Find Roshi, pass his flight test, then come back."
+}
+
+// Said once ever - it grants the tag it forbids, and the tag is saved with the
+// player - so a regular does not get welcomed every time he reconnects.
+rule budokai_welcome {
+	requires  budokai.entry
+	forbids   seen.budokai
+
+	grant  seen.budokai
+	say    "You trained for this. Stay inside the ring and put him on the floor."
+}
+
+// The bell. roundTime only runs while a round is being fought, but it reads
+// zero while the arena waits as well, so the world tag is what separates "the
+// round just started" from "no round has started".
+rule budokai_round_start {
+	when  world roundTime  atMost  5s
+
+	requires  budokai.entry  world.round.inProgress
+
+	say  "Begin!"
+}
+
+// The ring-out warning, and the reason the ring is a cylinder with no lid: out
+// over the edge is legal for as long as you can stay up. This fires when a
+// fighter is past the edge AND low enough that landing is the next thing that
+// happens to him.
+rule budokai_ringout_warning {
+	when  ringDistance  atLeast  1
+	when  ringHeight    atMost   512
+
+	requires  budokai.entry  world.round.inProgress
+
+	say  "Over the edge! Do not touch down!"
+}
+
+// Forbidding the world tag is what keeps this from tying with the bell: both
+// state one criterion, and a round cannot be over and in progress at once.
+rule budokai_round_over {
+	when  world roundState  is  over
+
+	requires  budokai.entry
+	forbids   world.round.inProgress
+
+	say  "That is the round."
+}
+
+// ------------------------------------------------------------------- vectors
+
+test "an untrained challenger is told where to train" {
+	expect  budokai_untrained
+}
+
+test "a trained fighter is welcomed instead of turned away" {
+	given   tags    budokai.entry
+	expect  budokai_welcome
+}
+
+test "the bell rings on a round that has actually started" {
+	given   world roundTime  2s
+	given   tags             budokai.entry  seen.budokai
+	given   worldTags        world.round.inProgress
+	expect  budokai_round_start
+}
+
+// The same facts with the round still waiting: roundTime reads zero either way,
+// and the world tag is the whole difference.
+test "the bell is silent while the arena waits" {
+	given   world roundTime  2s
+	given   tags             budokai.entry  seen.budokai
+	expect  none
+}
+
+test "low and past the edge is a warning" {
+	given   world roundTime  30s
+	given   ringDistance     200
+	given   ringHeight       100
+	given   tags             budokai.entry  seen.budokai
+	given   worldTags        world.round.inProgress
+	expect  budokai_ringout_warning
+}
+
+// Flying out over the edge is legal, so height alone is the difference between
+// a warning and silence.
+test "high over the edge says nothing" {
+	given   world roundTime  30s
+	given   ringDistance     200
+	given   ringHeight       2000
+	given   tags             budokai.entry  seen.budokai
+	given   worldTags        world.round.inProgress
+	expect  none
+}
+
+test "inside the ring nobody is warned" {
+	given   world roundTime  30s
+	given   ringDistance     -400
+	given   ringHeight       20
+	given   tags             budokai.entry  seen.budokai
+	given   worldTags        world.round.inProgress
+	expect  none
+}
+
+test "the round ends with a line of its own" {
+	given   world roundState  over
+	given   tags              budokai.entry  seen.budokai
+	expect  budokai_round_over
+}

@@ -47,7 +47,8 @@ rule flight_endurance_pass {
 	forbids   trained.flight.endurance
 
 	grant   trained.flight.endurance
-	say     "Endurance. Now you can fight up here."
+	grant   budokai.entry
+	say     "Endurance. Now you can fight up here. The Budokai will take you."
 	unlock  tier 2
 }
 
@@ -143,7 +144,8 @@ rule roshi_flight_pass {
 	forbids   trained.roshi.flight
 
 	grant   trained.roshi.flight
-	say     "Not bad. You have the endurance of a delivery boy."
+	grant   budokai.entry
+	say     "Not bad. You have the endurance of a delivery boy. Enter the Budokai."
 	unlock  tier 2
 }
 

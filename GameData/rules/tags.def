@@ -22,3 +22,15 @@ tag  trained.kingKai.greeting
 tag  trained.kingKai.gravity
 
 tag  seen.firstAscension
+
+// The Budokai. budokai.entry is the tournament's entry requirement, granted by
+// the lesson that unlocks the first ascension in either half of the training
+// arc, so it is earnable inside a first session. world.round.inProgress is a
+// WORLD tag - the "world." prefix is what makes g_training.c set it on the
+// shared set rather than on the player who tripped the rule.
+
+tag  budokai.entry
+
+tag  seen.budokai
+
+tag  world.round.inProgress
