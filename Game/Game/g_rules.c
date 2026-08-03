@@ -32,7 +32,7 @@ typedef struct {
 // with no masters.def and MUST agree with the shipped ids, since a rule
 // compiles `masterNear is roshi` to the index in this table.
 static const char *const masterValues[] = {"none","roshi","kingKai"};
-static const char *const roundValues[] = {"waiting","inProgress","over"};
+static const char *const roundValues[] = {"none","waiting","inProgress","over"};
 
 // Indexed by factKey_t. Not const: G_RulesSetMasterVocabulary rewrites the
 // masterNear entry's value table before content is parsed.
@@ -59,7 +59,7 @@ static factDef_t factDefs[fFactCount] = {
 
 // Indexed by worldFactKey_t.
 static const factDef_t worldFactDefs[fWorldFactCount] = {
-	{"roundState",	NULL,	0,	NULL,	0,	roundValues,	3},
+	{"roundState",	NULL,	0,	NULL,	0,	roundValues,	4},
 	{"roundTime",	"s",	1000,	"ms",	1,	NULL,		0},
 	{"eventTimer",	"s",	1000,	"ms",	1,	NULL,		0},
 	{"scoreRed",	NULL,	0,	NULL,	0,	NULL,		0},

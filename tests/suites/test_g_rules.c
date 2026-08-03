@@ -142,7 +142,7 @@ Test(g_rules, world_facts_parse_into_their_own_key_space) {
 
 	rule = G_RulesFind("w");
 	cr_assert_eq(rule->criteria[0].key, wRoundState | RULE_WORLD_KEY);
-	cr_assert_eq(rule->criteria[0].min, 0);
+	cr_assert_eq(rule->criteria[0].min, roundWaiting);
 }
 
 Test(g_rules, comments_and_trailing_comments_are_skipped) {
@@ -471,7 +471,7 @@ Test(g_rules, world_facts_and_world_tags_take_part_in_matching) {
 	memset(&worldTags, 0, sizeof(worldTags));
 
 	cr_assert_null(G_RulesMatch(facts, worldFacts, &tags, &worldTags));
-	worldFacts[wRoundState] = 1;
+	worldFacts[wRoundState] = roundInProgress;
 	cr_assert_null(G_RulesMatch(facts, worldFacts, &tags, &worldTags));
 
 	/* The tag may be held on either side; the matcher reads the union. */

@@ -47,8 +47,13 @@ typedef enum {
 // The named values of roundState, in the order its vocabulary declares them:
 // `when world roundState is inProgress` compiles to roundInProgress, so the C
 // that drives the fact and the content that reads it cannot drift apart.
+//
+// `none` is zero so that a gametype with no rounds reads as having no round.
+// Without it the unset slot spelled `waiting`, and a warmup rule keyed on that
+// matched forever in every FFA - outranking the flight ladder it shares facts
+// with and stalling the arc at its first lesson.
 typedef enum {
-	roundWaiting, roundInProgress, roundOver
+	roundNone, roundWaiting, roundInProgress, roundOver
 } roundState_t;
 
 // Client and world facts share one criterion key space; the flag selects which
