@@ -35,6 +35,11 @@
 #define RING_VANTAGE_BACK	1.6f
 #define RING_VANTAGE_HEIGHT	0.6f
 
+// Where the two fighters stand when a round begins: this much of the radius out
+// from the middle, on opposite sides. Well inside the edge, because a fighter
+// who starts within a step of it loses to a shove rather than to a fight.
+#define RING_CORNER_BACK	0.6f
+
 typedef struct {
 	qboolean	defined;
 	vec3_t		center;		// x and y are the ring axis; z is where the author stood
@@ -66,6 +71,12 @@ qboolean	G_RingIsOut(const vec3_t origin,qboolean grounded);
 
 // Where a spectator sees the whole fight from, aimed at the middle of the ring.
 void		G_RingVantage(vec3_t origin,vec3_t angles);
+
+// Where fighter 0 and fighter 1 start a round, facing each other across the
+// middle. The map's own spawn points are nowhere near the authored ring on any
+// of the shipped maps, so without this both fighters begin a Budokai round
+// already outside it and the round ends on its first frame.
+void		G_RingCorner(int index,vec3_t origin,vec3_t angles);
 
 // Authoring. Placing a ring when one exists moves it.
 qboolean	G_RingPlace(const vec3_t origin,float radius,float floor);

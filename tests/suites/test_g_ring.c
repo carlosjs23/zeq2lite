@@ -217,6 +217,27 @@ Test(g_ring, the_vantage_looks_back_at_the_center_from_outside) {
 	cr_assert_float_eq(DotProduct(forward, toCenter), 1.0f, 0.001f);
 }
 
+/* The two round-start corners: inside the ring, on opposite sides of it, and
+   facing each other across the middle. Both inside is the point - a fighter who
+   starts a round outside the ring loses it on the first frame. */
+Test(g_ring, the_corners_face_each_other_from_inside) {
+	vec3_t a, aAngles, b, bAngles, forward, toOther;
+
+	cr_assert(parseRing("ring  0 0 300  1000  276\n"), "%s", G_RingError());
+	G_RingCorner(0, a, aAngles);
+	G_RingCorner(1, b, bAngles);
+	cr_assert_lt(G_RingDistance(a), 0, "corner 0 starts outside the ring");
+	cr_assert_lt(G_RingDistance(b), 0, "corner 1 starts outside the ring");
+
+	VectorSubtract(b, a, toOther);
+	cr_assert_gt(VectorLength(toOther), 0, "both corners are the same spot");
+
+	AngleVectors(aAngles, forward, NULL, NULL);
+	toOther[2] = 0;
+	VectorNormalize(toOther);
+	cr_assert_float_eq(DotProduct(forward, toOther), 1.0f, 0.001f);
+}
+
 /* ----------------------------------------------------------- shipped content */
 
 static void loadShipped(const char *name, const char *path) {

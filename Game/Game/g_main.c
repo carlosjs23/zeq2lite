@@ -456,6 +456,10 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	G_InitWorldSession();
 
+	// Before the entity and client arrays are cleared below: this only latches
+	// the roster, the fighters are seated on the first frame.
+	G_DummyReadRoster( restart ? qtrue : qfalse );
+
 	// initialize all entities for this game
 	memset( g_entities, 0, MAX_GENTITIES * sizeof(g_entities[0]) );
 	level.gentities = g_entities;
@@ -531,6 +535,10 @@ void G_ShutdownGame( int restart ) {
 
 	// write all the client session data so we can get it back
 	G_WriteSessionData();
+
+	// The AI fighters have no engine-side client_t to be reconnected from, so
+	// their roster goes out alongside the sessions that describe them.
+	G_DummyWriteRoster();
 }
 
 
@@ -1586,6 +1594,10 @@ void G_RunFrame( int levelTime ) {
 
 	// get any cvar changes
 	G_UpdateCvars();
+
+	// Seat any AI fighters a round restart carried over, before the entity pass
+	// runs them and before CheckTournament counts the fight line.
+	G_DummyFrame();
 
 	//
 	// go through all allocated objects

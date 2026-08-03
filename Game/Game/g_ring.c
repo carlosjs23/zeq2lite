@@ -84,6 +84,25 @@ void G_RingVantage(vec3_t origin,vec3_t angles){
 	vectoangles(look,angles);
 }
 
+void G_RingCorner(int index,vec3_t origin,vec3_t angles){
+	vec3_t look;
+	float side;
+
+	VectorClear(origin);
+	VectorClear(angles);
+	if(!ring.defined){return;}
+	side = (index & 1) ? -RING_CORNER_BACK : RING_CORNER_BACK;
+	origin[0] = ring.center[0] + ring.radius * side;
+	origin[1] = ring.center[1];
+	// The same offset arenaplace took off when it wrote the floor: ps.origin is
+	// the middle of the bounding box and the ring floor is where the feet go.
+	origin[2] = ring.floor + RING_PLACE_FLOOR_DROP;
+	look[0] = ring.center[0] - origin[0];
+	look[1] = ring.center[1] - origin[1];
+	look[2] = 0;
+	vectoangles(look,angles);
+}
+
 // ----------------------------------------------------------------- parsing
 
 typedef struct {

@@ -603,11 +603,22 @@ static void budokaiRingCheck(gentity_t *ent){
 // The gate the plan's payoff rests on: train, then test it. A server whose
 // content declares no entry tag gates nobody, so this costs nothing to a mode
 // that does not want it.
+//
+// Bots bypass the gate, deliberately. budokai.entry is a progression gate on a
+// human's own advancement, and an AI fighter is not advancing through anything:
+// it was spawned by a player who has already passed the gate, as the opponent
+// he passed it to fight. Gating the sparring partner would only mean a trained
+// player standing alone in the ring.
+//
+// Losing is not bypassed. A bot that is rung out or beaten goes through
+// RemoveTournamentLoser like a human - to the back of the queue, not out of the
+// game - because a bot removed after one round would end the practice session
+// the player came for, and because AddTournamentPlayer pulls it straight back
+// in when it is the only one waiting, which is the next round.
 qboolean G_TrainingMayFight(gclient_t *client){
 	if(!trainingLive){return qtrue;}
 	if(g_gametype.integer != GT_TOURNAMENT){return qtrue;}
 	if(budokaiEntryTag < 0){return qtrue;}
-	// A dummy is the sparring partner the mode is verified with, not an entrant.
 	if(client->pers.isDummy){return qtrue;}
 	return G_TagTest(&client->pers.tags,budokaiEntryTag);
 }
@@ -620,6 +631,46 @@ void G_TrainingEntryRefused(int clientNum){
 // Spectators watch from the ring rather than from the intermission point, which
 // was authored to show off a map and not to show a fight. Nothing free-floating:
 // this is one origin and one set of angles handed to the spawn selector.
+// A fighter starts a round in the ring, on the side of it the other fighter is
+// not on. The corner is picked by slot order rather than by score so that both
+// clients agree without the two spawns having to be resolved together, and it
+// only applies to the tournament: in every other gametype the map's own spawn
+// points are still what the author placed.
+qboolean G_TrainingFighterSpawn(gclient_t *client,vec3_t origin,vec3_t angles){
+	static const vec3_t mins = {-15,-15,-24};
+	static const vec3_t maxs = {15,15,32};
+	trace_t trace;
+	vec3_t start,end;
+	int index,i,slot;
+
+	if(!trainingLive){return qfalse;}
+	if(g_gametype.integer != GT_TOURNAMENT){return qfalse;}
+	if(!G_RingDefined()){return qfalse;}
+	if(client->sess.sessionTeam == TEAM_SPECTATOR){return qfalse;}
+	slot = client - level.clients;
+	index = 0;
+	for(i=0;i<slot;i++){
+		if(level.clients[i].pers.connected == CON_DISCONNECTED){continue;}
+		if(level.clients[i].sess.sessionTeam == TEAM_SPECTATOR){continue;}
+		index++;
+	}
+	G_RingCorner(index,origin,angles);
+	// The arena file states one floor height for the whole ring, and the terrain
+	// under a corner of it need not be at that height - on desert it is a
+	// thousand units lower, which would open every round with both fighters
+	// falling. Settle onto what is actually there; keep the authored height if
+	// there is nothing, because a ring over open air is the author's business.
+	VectorCopy(origin,start);
+	start[2] += 32;
+	VectorCopy(origin,end);
+	end[2] -= 4096;
+	trap_Trace(&trace,start,mins,maxs,end,ENTITYNUM_NONE,MASK_PLAYERSOLID);
+	if(trace.fraction < 1.0f && !trace.startsolid){
+		VectorCopy(trace.endpos,origin);
+	}
+	return qtrue;
+}
+
 qboolean G_TrainingSpectatorSpawn(vec3_t origin,vec3_t angles){
 	if(!trainingLive){return qfalse;}
 	if(!G_RingDefined()){return qfalse;}

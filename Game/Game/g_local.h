@@ -287,6 +287,8 @@ typedef struct {
 									// the game module builds its usercmds itself
 	qboolean	aiActive;			// and builds them from g_ai.c rather than leaving
 									// them empty
+	char		dummyModel[MAX_QPATH];	// the model it was spawned with, kept so the
+									// roster can seat it again after a map_restart
 	// Rule engine tags. ClientSpawn preserves only pers and sess, and a tag like
 	// trained.roshi.flight has to survive dying - putting it in the wiped half
 	// would only break for players who die mid-arc, which is the worst possible
@@ -730,6 +732,9 @@ void G_RunClient( gentity_t *ent );
 // g_dummy.c
 //
 void G_RunDummy( gentity_t *ent );
+void G_DummyWriteRoster( void );
+void G_DummyReadRoster( qboolean restart );
+void G_DummyFrame( void );
 gentity_t *G_NearestClient( gentity_t *from, qboolean humansOnly );
 void G_PlaceDummy( gentity_t *dummy, gentity_t *owner, float distance );
 void Cmd_Dummy_f( gentity_t *ent );
@@ -820,6 +825,7 @@ void		G_TrainingWorldFrame( void );
 qboolean	G_TrainingMayFight( gclient_t *client );
 void		G_TrainingEntryRefused( int clientNum );
 qboolean	G_TrainingSpectatorSpawn( vec3_t origin, vec3_t angles );
+qboolean	G_TrainingFighterSpawn( gclient_t *client, vec3_t origin, vec3_t angles );
 qboolean	G_TrainingTierUnlocked( gclient_t *client, int tier );
 qboolean	G_TrainingConsoleCommand( const char *cmd );
 qboolean	G_TrainingClientCommand( gentity_t *ent, const char *cmd );

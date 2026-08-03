@@ -920,6 +920,11 @@ void ClientSpawn(gentity_t *ent) {
 	if(client->sess.sessionTeam == TEAM_SPECTATOR){
 		spawnPoint = SelectSpectatorSpawnPoint(spawn_origin, spawn_angles);
 	}
+	// A Budokai round is fought in the ring, and no shipped map puts a spawn
+	// point anywhere near the one its arena file describes.
+	else if ( G_TrainingFighterSpawn( client, spawn_origin, spawn_angles ) ){
+		spawnPoint = NULL;
+	}
 	else if (g_gametype.integer >= GT_CTF ){
 		// all base oriented team games use the CTF spawn points
 		spawnPoint = SelectCTFSpawnPoint(client->sess.sessionTeam,client->pers.teamState.state,spawn_origin, spawn_angles);

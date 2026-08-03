@@ -29,7 +29,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // transmitted like any other player.
 //
 // A dummy does not move or fight. It stands where it was put, turns to face
-// the nearest player, and takes damage.
+// the nearest player, and takes damage. An `ai` fighter is the same slot with
+// g_ai.c driving it, and in GT_TOURNAMENT it is a full participant: it takes a
+// place on the fight line, it is ranked, and when it loses it goes to the back
+// of the queue exactly as a human does.
 
 #include "g_local.h"
 
@@ -37,6 +40,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	DUMMY_DISTANCE_MIN		64
 #define	DUMMY_DISTANCE_MAX		8000
 #define	DUMMY_DROP_MAX			256
+
+// The roster that carries AI fighters across a tournament round restart. It is
+// a cvar because nothing else in the module outlives VM_Restart, which
+// map_restart performs before a single line of this file runs again.
+#define	DUMMY_ROSTER_CVAR		"g_dummyRoster"
+
+static char		dummyRoster[MAX_CVAR_VALUE_STRING];
+static qboolean	dummyRosterPending;
 
 /*
 =================
@@ -68,15 +79,23 @@ static int G_DummySlot( void ) {
 G_DummyModelOk
 
 The model name ends up in an info string, so it must not carry any of the
-characters that would split one.
+characters that would split one - and in the restart roster, where the fields
+are whitespace separated, so it must not carry whitespace either.
 =================
 */
 static qboolean G_DummyModelOk( const char *model ) {
+	const char	*p;
+
 	if ( !model[0] || strlen( model ) >= MAX_QPATH ) {
 		return qfalse;
 	}
 	if ( strchr( model, '\\' ) || strchr( model, '\"' ) || strchr( model, ';' ) ) {
 		return qfalse;
+	}
+	for ( p = model ; *p ; p++ ) {
+		if ( *p <= ' ' ) {
+			return qfalse;
+		}
 	}
 	return qtrue;
 }
@@ -200,9 +219,47 @@ G_SpawnDummy
 Returns the dummy, or NULL with the reason already printed to the caller.
 =================
 */
+/*
+=================
+G_DummySeat
+
+Connect and begin one dummy in a named slot. firstTime is what tells
+ClientConnect whether to build session data or read back what the slot already
+had: a fresh spawn wants the former, a fighter being seated again after a round
+restart wants the latter, because the session is what holds its team and its
+place in the tournament queue.
+=================
+*/
+static char *G_DummySeat( int clientNum, const char *model, qboolean fights, qboolean firstTime ) {
+	char		userinfo[MAX_INFO_STRING];
+	char		*denied;
+
+	Com_sprintf( userinfo, sizeof( userinfo ),
+		"\\name\\%s %i\\model\\%s\\headmodel\\%s\\legsmodel\\%s"
+		"\\ip\\localhost\\rate\\25000\\snaps\\20\\team\\free",
+		fights ? "Fighter" : "Dummy", clientNum, model, model, model );
+
+	trap_SetUserinfo( clientNum, userinfo );
+
+	denied = ClientConnect( clientNum, firstTime );
+	if ( denied ) {
+		return denied;
+	}
+
+	// ClientConnect clears the client, and ClientBegin runs a client frame that
+	// G_RunDummy has to recognise, so the mark goes between the two.
+	level.clients[clientNum].pers.isDummy = qtrue;
+	level.clients[clientNum].pers.aiActive = fights;
+	Q_strncpyz( level.clients[clientNum].pers.dummyModel, model,
+		sizeof( level.clients[clientNum].pers.dummyModel ) );
+
+	ClientBegin( clientNum );
+
+	return NULL;
+}
+
 static gentity_t *G_SpawnDummy( gentity_t *owner, const char *model, float distance, qboolean fights ) {
 	gentity_t	*dummy;
-	char		userinfo[MAX_INFO_STRING];
 	char		*denied;
 	int			clientNum;
 
@@ -212,30 +269,160 @@ static gentity_t *G_SpawnDummy( gentity_t *owner, const char *model, float dista
 		return NULL;
 	}
 
-	Com_sprintf( userinfo, sizeof( userinfo ),
-		"\\name\\%s %i\\model\\%s\\headmodel\\%s\\legsmodel\\%s"
-		"\\ip\\localhost\\rate\\25000\\snaps\\20\\team\\free",
-		fights ? "Fighter" : "Dummy", clientNum, model, model, model );
-
-	trap_SetUserinfo( clientNum, userinfo );
-
-	denied = ClientConnect( clientNum, qtrue );
+	denied = G_DummySeat( clientNum, model, fights, qtrue );
 	if ( denied ) {
 		trap_SendServerCommand( owner - g_entities, va( "print \"Rejected: %s\n\"", denied ) );
 		return NULL;
 	}
 
-	// ClientConnect clears the client, and ClientBegin runs a client frame that
-	// G_RunDummy has to recognise, so the mark goes between the two.
-	level.clients[clientNum].pers.isDummy = qtrue;
-	level.clients[clientNum].pers.aiActive = fights;
-
-	ClientBegin( clientNum );
-
 	dummy = &g_entities[clientNum];
 	G_PlaceDummy( dummy, owner, distance );
 
 	return dummy;
+}
+
+/*
+=================
+G_DummyWriteRoster
+
+An AI fighter was not a tournament participant for one reason: a round ends in
+map_restart, SV_MapRestart_f reconnects every client the engine knows about,
+and the engine does not know about this one - its client_t stays CS_FREE so
+that no snapshot is ever sent to it. G_InitGame then cleared the slot and the
+opponent was gone, leaving numPlayingClients at one and the round waiting for a
+second fighter forever.
+
+So the roster is written where it survives: a cvar outlives the VM_Restart that
+map_restart performs, and the per-client session cvars the stock code already
+writes carry the team and the queue position, so a fighter seated again from
+this list comes back on the same terms a human does.
+=================
+*/
+void G_DummyWriteRoster( void ) {
+	char	roster[MAX_CVAR_VALUE_STRING];
+	char	entry[MAX_QPATH + 16];
+	int		i;
+
+	roster[0] = 0;
+	for ( i = 0 ; i < level.maxclients ; i++ ) {
+		if ( !level.clients[i].pers.isDummy ) {
+			continue;
+		}
+		if ( level.clients[i].pers.connected != CON_CONNECTED ) {
+			continue;
+		}
+		if ( !level.clients[i].pers.dummyModel[0] ) {
+			continue;
+		}
+		Com_sprintf( entry, sizeof( entry ), "%s%i %i %s",
+			roster[0] ? " " : "", i,
+			level.clients[i].pers.aiActive ? 1 : 0,
+			level.clients[i].pers.dummyModel );
+		// A roster longer than a cvar loses its tail rather than its head: the
+		// fighters seated first are the ones standing in the ring.
+		if ( strlen( roster ) + strlen( entry ) + 1 >= sizeof( roster ) ) {
+			break;
+		}
+		Q_strcat( roster, sizeof( roster ), entry );
+	}
+
+	trap_Cvar_Set( DUMMY_ROSTER_CVAR, roster );
+}
+
+/*
+=================
+G_DummyReadRoster
+
+Only a restart carries fighters over. A new map is a new set of them, and a
+roster left behind by the previous map would seat opponents nobody asked for.
+=================
+*/
+void G_DummyReadRoster( qboolean restart ) {
+	dummyRoster[0] = 0;
+	dummyRosterPending = qfalse;
+
+	if ( !restart ) {
+		trap_Cvar_Set( DUMMY_ROSTER_CVAR, "" );
+		return;
+	}
+
+	trap_Cvar_VariableStringBuffer( DUMMY_ROSTER_CVAR, dummyRoster, sizeof( dummyRoster ) );
+	if ( dummyRoster[0] ) {
+		dummyRosterPending = qtrue;
+	}
+}
+
+/*
+=================
+G_DummyFrame
+
+Seating happens on a frame rather than in G_InitGame because the humans are not
+back yet when G_InitGame runs - SV_MapRestart_f reconnects them afterwards - and
+it waits for one of them for the same reason CheckTournament ignores a level
+with no playing clients at all: a frame that sees half the fight line drops
+warmup back to "waiting for players", and the next frame then starts a fresh
+countdown that restarts the level again, forever. Both fighters have to arrive
+in the same frame, so the AI goes in on the one where the human is already back.
+=================
+*/
+void G_DummyFrame( void ) {
+	char		*p;
+	char		*token;
+	char		model[MAX_QPATH];
+	int			clientNum;
+	qboolean	fights;
+	int			i;
+
+	if ( !dummyRosterPending ) {
+		return;
+	}
+
+	for ( i = 0 ; i < level.maxclients ; i++ ) {
+		if ( level.clients[i].pers.connected == CON_CONNECTED &&
+			!level.clients[i].pers.isDummy ) {
+			break;
+		}
+	}
+	if ( i == level.maxclients ) {
+		return;
+	}
+
+	dummyRosterPending = qfalse;
+
+	p = dummyRoster;
+	while ( 1 ) {
+		token = COM_ParseExt( &p, qtrue );
+		if ( !token[0] ) {
+			break;
+		}
+		clientNum = atoi( token );
+
+		token = COM_ParseExt( &p, qtrue );
+		if ( !token[0] ) {
+			break;
+		}
+		fights = atoi( token ) ? qtrue : qfalse;
+
+		token = COM_ParseExt( &p, qtrue );
+		if ( !token[0] ) {
+			break;
+		}
+		Q_strncpyz( model, token, sizeof( model ) );
+
+		if ( clientNum < 0 || clientNum >= level.maxclients ) {
+			continue;
+		}
+		// A human may have taken the slot while the level was restarting; the
+		// engine hands connections out from the bottom and dummies from the
+		// top, so this is rare rather than impossible.
+		if ( level.clients[clientNum].pers.connected != CON_DISCONNECTED ) {
+			continue;
+		}
+		if ( !G_DummyModelOk( model ) ) {
+			continue;
+		}
+		G_DummySeat( clientNum, model, fights, qfalse );
+	}
 }
 
 /*
