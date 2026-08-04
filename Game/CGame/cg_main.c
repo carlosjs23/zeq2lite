@@ -90,6 +90,7 @@ vmCvar_t	cg_gibs;
 vmCvar_t	cg_drawTimer;
 vmCvar_t	cg_drawFPS;
 vmCvar_t	cg_debugFight;
+vmCvar_t	cg_masterCompare;
 vmCvar_t	cg_drawSnapshot;
 vmCvar_t	cg_draw3dIcons;
 vmCvar_t	cg_drawIcons;
@@ -234,6 +235,10 @@ static cvarTable_t cvarTable[] = {
 	// Not archived: a debug overlay left on by a stale config is a support
 	// question nobody can explain.
 	{ &cg_debugFight, "cg_debugFight", "0", CVAR_CHEAT },
+	// The offset in world units at which a converted master's md3 assembly is
+	// drawn beside his skeletal one, for judging the two in one frame. Zero
+	// draws only the skeletal build and is the only value a player wants.
+	{ &cg_masterCompare, "cg_masterCompare", "0", CVAR_CHEAT },
 	{ &cg_drawSnapshot, "cg_drawSnapshot", "0", CVAR_ARCHIVE  },
 	{ &cg_draw3dIcons, "cg_draw3dIcons", "1", CVAR_ARCHIVE  },
 	{ &cg_advancedFlight, "cg_advancedFlight", "0", CVAR_USERINFO |CVAR_ARCHIVE  },

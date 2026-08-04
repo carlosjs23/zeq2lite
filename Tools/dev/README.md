@@ -22,6 +22,8 @@ Python scripts use only the standard library; shell scripts need bash.
 | `make_ui_art.py` | generate the interface images the data set never shipped |
 | `make_ring_art.py` | generate the tournament ring's floor, kerb, posts and ki wall |
 | `make_aura_mesh.py` | generate the screen-space aura's ring mesh |
+| `iqm.py` | write IQM models this engine's loader accepts (library, not a script) |
+| `md3_to_iqm.py` | convert a three-part md3 character to a skeletal IQM; `--report` measures what that costs |
 | `auragen.c` | procedurally generate aura reference images (compile: `cc -O2 -o auragen auragen.c -lz`) |
 | `aura_reference_clean.py` | turn any aura art into pipeline form - strips painted checkerboards (**needs numpy+scipy**) |
 | `make_aura_texture.py` | generate the screen-space aura's spike strip |
@@ -664,6 +666,76 @@ body before kitbashing, and prefer the donor the body already agrees with.
 
 `md3_preview.py` renders a model and sheet offline, which is how to iterate on
 either of these without a map load per attempt.
+
+## Skeletal characters (`iqm.py`, `md3_to_iqm.py`)
+
+`zeq2build.sh` converts the five training masters to `players/<who>/tier1/character.iqm`
+on every build, the same way it generates the aura mesh: the converter is the
+source, the `.iqm` is a build product, and nothing binary is committed.
+`cg_master.c` draws the IQM when it registered and the three md3s when it did
+not, so deleting a `character.iqm` is a complete rollback.
+
+Three things about this engine's IQM path decide the shape of everything the
+writer emits, and none of them is in the IQM specification:
+
+**A joint is only usable as a tag if its bind transform is the identity.**
+`R_IQMLerpTag` returns `ComputeJointMats`' output, which is
+`pose_global * inverse(bind_global)` - a skinning matrix. That equals the
+joint's own transform only when the bind is the identity. So `iqm.py` binds
+every joint at the identity and puts the entire rest pose in the pose track,
+which also means mesh vertices are authored in plain model space. Bind a joint
+at its rest transform instead and gear attached to it sits at an offset with
+nothing in any log to explain it.
+
+**`num_poses` must equal `num_joints`,** or the loader rejects the file with
+nothing but "couldn't load iqm file".
+
+**The vertex path is skinning-only.** A vertex whose blend weights sum to zero
+lands on the origin. The model loads, draws, and is invisible.
+
+`tests/suites/test_iqm.c` pins all three.
+
+### What the conversion recovers, and what it does not
+
+md3 is vertex animation and a skeleton cannot represent that in general. The
+converter recovers the *rigid* part: lower, upper and head each become one bone
+whose animation is the md3's own per-frame tag chain, and every md3 tag becomes
+a bone of its own carrying that tag's model-space transform, so
+`trap_R_LerpTag` keeps working by name. What is lost is deformation *inside* a
+part - striding legs, swinging arms.
+
+`--report` measures exactly that residual, in world units against a fighter
+about 56 units tall:
+
+```
+rhogan         668 frames, reference frame 107
+    all  lower    790 verts   mean RMS  11.55   worst  48.78 units
+    idle lower    790 verts   mean RMS   0.10   worst   0.20 units
+```
+
+That split is the whole argument for where the line was drawn. Over the idle
+the residual is a tenth of a unit - the idle is rigid, and a master standing at
+his mark converts with no visible loss, which is what the side-by-side shows.
+Over the full animation set it is eleven units, a fifth of body height, on
+every character in the roster. A playable fighter on this bind would be a
+statue sliding around the map, so the roster stays on md3 until there is a
+route to real skinning weights.
+
+The reference frame is the idle's first frame rather than frame 0, because
+frame 0 of every shipped rig is a death pose.
+
+### Looking at one
+
+`cg_masterCompare <units>` (cheat) draws a converted master's md3 assembly that
+far to his side, so both builds are in one frame under the same light. The md3
+set is registered on demand the first time it is asked for, so a converted
+master costs nothing until then:
+
+```bash
+Tools/dev/zeq2shot.sh --map desert --frames 900 \
+  --after "cg_masterCompare 64" --after "cg_draw2D 0" \
+  --after "setviewpos -40590 4560 1495 200" --out /tmp/side.png
+```
 
 ## Environment overrides
 

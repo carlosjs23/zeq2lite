@@ -154,4 +154,21 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 	python3 "$ZEQ2_ROOT/Tools/dev/make_ring_art.py" \
 		"$ZEQ2_BUILD/$ZEQ2_GAME" >/dev/null
 	echo "ok: ring art and ringTournament.shader generated"
+
+	# The training masters as skeletal characters. Same rule as the aura mesh:
+	# the converter is the source and the .iqm is a build product, so nothing
+	# binary lands in the repository and the model cannot drift from the tool
+	# that makes it.
+	#
+	# Only the masters. The playable roster stays on md3 - see
+	# Tools/dev/README.md for the residual this rigid bind leaves on a fighter,
+	# which is small for a man standing at his mark and large for one throwing
+	# a punch. Adding a name here is the whole cost of converting one.
+	echo "=== converting masters to IQM in $ZEQ2_GAME/ ==="
+	for who in rhogan seppa oberak naida tolm; do
+		src="$ZEQ2_BUILD/$ZEQ2_GAME/players/$who"
+		[[ -f "$src/tier1/lower.md3" ]] || continue
+		python3 "$ZEQ2_ROOT/Tools/dev/md3_to_iqm.py" "$src" \
+			"$src/tier1/character.iqm" | sed 's/^/    /'
+	done
 fi

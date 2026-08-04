@@ -55,6 +55,7 @@
 typedef struct {
 	char		name[CG_MASTER_NAME];
 	vec3_t		origin;
+	qhandle_t	iqmModel;	// whole character on one skeleton, when converted
 	qhandle_t	legsModel;
 	qhandle_t	torsoModel;
 	qhandle_t	headModel;
@@ -77,6 +78,26 @@ static clientInfo_t	cgMasterScratch;
 static animation_t	cgMasterIdle[CG_MASTERS_MAX];
 
 /*================
+CG_MasterRegisterMD3
+
+The three-part assembly, registered on demand. A master who converted does not
+pay for these at load; cg_masterCompare pulls them in at the first frame that
+asks for them, which costs one hitch on a control only a developer sets.
+================*/
+static qboolean CG_MasterRegisterMD3(cgMaster_t *master){
+	char	path[MAX_QPATH];
+
+	if(master->legsModel && master->torsoModel && master->headModel){return qtrue;}
+	Com_sprintf(path,sizeof(path),"players/%s/tier1/lower.md3",master->name);
+	master->legsModel = trap_R_RegisterModel(path);
+	Com_sprintf(path,sizeof(path),"players/%s/tier1/upper.md3",master->name);
+	master->torsoModel = trap_R_RegisterModel(path);
+	Com_sprintf(path,sizeof(path),"players/%s/tier1/head.md3",master->name);
+	master->headModel = trap_R_RegisterModel(path);
+	return master->legsModel && master->torsoModel && master->headModel;
+}
+
+/*================
 CG_MasterRegister
 
 Tier 1 only. A master is met at the start of the arc, in the form the player
@@ -86,15 +107,18 @@ nobody loads.
 static qboolean CG_MasterRegister(cgMaster_t *master){
 	char	path[MAX_QPATH];
 
-	Com_sprintf(path,sizeof(path),"players/%s/tier1/lower.md3",master->name);
-	master->legsModel = trap_R_RegisterModel(path);
-	Com_sprintf(path,sizeof(path),"players/%s/tier1/upper.md3",master->name);
-	master->torsoModel = trap_R_RegisterModel(path);
-	Com_sprintf(path,sizeof(path),"players/%s/tier1/head.md3",master->name);
-	master->headModel = trap_R_RegisterModel(path);
+	// The skeletal build if the converter produced one, the three md3s if it
+	// did not. Both are checked every time rather than the choice being made
+	// once for the cast: a master whose IQM is missing is a master the build
+	// skipped, and he should still be standing there.
+	Com_sprintf(path,sizeof(path),"players/%s/tier1/character.iqm",master->name);
+	master->iqmModel = trap_R_RegisterModel(path);
 	Com_sprintf(path,sizeof(path),"players/%s/tier1/default.skin",master->name);
 	master->skin = trap_R_RegisterSkin(path);
-	if(!master->legsModel || !master->torsoModel || !master->headModel){return qfalse;}
+	// The md3 set is only loaded when it is going to be drawn. Three md3s are
+	// thirteen megabytes against the IQM's three hundred kilobytes, so a
+	// converted master that registered both would carry that cost for nothing.
+	if(!master->iqmModel && !CG_MasterRegisterMD3(master)){return qfalse;}
 	Com_sprintf(path,sizeof(path),"players/%s/animation.cfg",master->name);
 	if(!CG_ParseAnimationFile(path,&cgMasterScratch,qtrue)){return qfalse;}
 	// animation.cfg lands in camAnimations, not animations: CG_ParseAnimationFile
@@ -197,22 +221,17 @@ the nearest player), and it is the difference between a character waiting and a
 statue: the greeting rule fires when the player lands in front of him, so the
 model has to already be looking that way when it does.
 ================*/
-static void CG_MasterDraw(cgMaster_t *master,const animation_t *anim){
+static void CG_MasterDrawMD3(cgMaster_t *master,const animation_t *anim,
+		const vec3_t origin,const vec3_t angles){
 	refEntity_t	legs,torso,head;
-	vec3_t		delta,angles;
 
 	memset(&legs,0,sizeof(legs));
 	memset(&torso,0,sizeof(torso));
 	memset(&head,0,sizeof(head));
 
-	VectorSubtract(cg.refdef.vieworg,master->origin,delta);
-	delta[2] = 0;
-	VectorClear(angles);
-	if(delta[0] || delta[1]){vectoangles(delta,angles);}
-	angles[PITCH] = angles[ROLL] = 0;
 	AnglesToAxis(angles,legs.axis);
-	VectorCopy(master->origin,legs.origin);
-	VectorCopy(master->origin,legs.lightingOrigin);
+	VectorCopy(origin,legs.origin);
+	VectorCopy(origin,legs.lightingOrigin);
 	legs.hModel = master->legsModel;
 	legs.customSkin = master->skin;
 	legs.renderfx = RF_LIGHTING_ORIGIN;
@@ -223,7 +242,7 @@ static void CG_MasterDraw(cgMaster_t *master,const animation_t *anim){
 	torso.hModel = master->torsoModel;
 	torso.customSkin = master->skin;
 	torso.renderfx = RF_LIGHTING_ORIGIN;
-	VectorCopy(master->origin,torso.lightingOrigin);
+	VectorCopy(origin,torso.lightingOrigin);
 	CG_MasterAnimate(anim,&torso);
 	CG_PositionRotatedEntityOnTag(&torso,&legs,master->legsModel,"tag_torso");
 	trap_R_AddRefEntityToScene(&torso);
@@ -232,10 +251,76 @@ static void CG_MasterDraw(cgMaster_t *master,const animation_t *anim){
 	head.hModel = master->headModel;
 	head.customSkin = master->skin;
 	head.renderfx = RF_LIGHTING_ORIGIN;
-	VectorCopy(master->origin,head.lightingOrigin);
+	VectorCopy(origin,head.lightingOrigin);
 	CG_MasterAnimate(anim,&head);
 	CG_PositionRotatedEntityOnTag(&head,&torso,master->torsoModel,"tag_head");
 	trap_R_AddRefEntityToScene(&head);
+}
+
+/*================
+CG_MasterDrawSkeletal
+
+One entity for the whole character. The three parts are meshes on one skeleton
+and the tag chain that used to be rebuilt here every frame is baked into the
+pose track, so there is nothing to position: the frame pair alone puts the torso
+over the hips and the head over the torso.
+
+The headgear is a mesh weighted to its own bone under the head rather than
+geometry merged into the head mesh, which is the thing this phase is for. It
+follows the head for free and it is one bone away from being scaled, hidden or
+aimed independently - none of which is reachable when the gear is welded into
+the head's vertex list.
+
+Frame numbers are the md3's own: the converter emits one IQM frame per md3
+frame, so animation.cfg's ranges index the pose track directly and this shares
+CG_MasterAnimate with the md3 path unchanged.
+================*/
+static void CG_MasterDrawSkeletal(cgMaster_t *master,const animation_t *anim,
+		const vec3_t origin,const vec3_t angles){
+	refEntity_t	ent;
+
+	memset(&ent,0,sizeof(ent));
+	AnglesToAxis(angles,ent.axis);
+	VectorCopy(origin,ent.origin);
+	VectorCopy(origin,ent.lightingOrigin);
+	ent.hModel = master->iqmModel;
+	ent.customSkin = master->skin;
+	ent.renderfx = RF_LIGHTING_ORIGIN;
+	CG_MasterAnimate(anim,&ent);
+	trap_R_AddRefEntityToScene(&ent);
+}
+
+/*================
+CG_MasterDraw
+
+He faces whoever is looking at him. A dummy does the same (g_dummy.c turns to
+the nearest player), and it is the difference between a character waiting and a
+statue: the greeting rule fires when the player lands in front of him, so the
+model has to already be looking that way when it does.
+
+cg_masterCompare puts the md3 assembly beside the skeletal one so the two can be
+judged in the same frame under the same light. It is a developer control and not
+a fallback - the choice of path is made by whether the IQM registered.
+================*/
+static void CG_MasterDraw(cgMaster_t *master,const animation_t *anim){
+	vec3_t	delta,angles,right,beside;
+
+	VectorSubtract(cg.refdef.vieworg,master->origin,delta);
+	delta[2] = 0;
+	VectorClear(angles);
+	if(delta[0] || delta[1]){vectoangles(delta,angles);}
+	angles[PITCH] = angles[ROLL] = 0;
+
+	if(!master->iqmModel){
+		CG_MasterDrawMD3(master,anim,master->origin,angles);
+		return;
+	}
+	CG_MasterDrawSkeletal(master,anim,master->origin,angles);
+	if(cg_masterCompare.value && CG_MasterRegisterMD3(master)){
+		AngleVectors(angles,NULL,right,NULL);
+		VectorMA(master->origin,cg_masterCompare.value,right,beside);
+		CG_MasterDrawMD3(master,anim,beside,angles);
+	}
 }
 
 /*================
