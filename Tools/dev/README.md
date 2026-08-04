@@ -724,6 +724,27 @@ route to real skinning weights.
 The reference frame is the idle's first frame rather than frame 0, because
 frame 0 of every shipped rig is a death pose.
 
+Every character in the roster measures the same way - this is a property of md3
+vertex animation, not of any one rig:
+
+| character | mean RMS, all anims | mean RMS, idle |
+| --- | --- | --- |
+| goku | 11.5 | 0.10 |
+| krillin | 9.3 | 0.10 |
+| piccolo | 15.3 | 0.11 |
+| frieza | 11.3 | 0.09 |
+| nappa | 13.0 | 0.10 |
+| raditz | 13.2 | 0.10 |
+| vegetaCell | 11.6 | 0.10 |
+| vegetaSaiyan | 14.0 | 0.10 |
+
+`cg_masterAnim 9` with `cg_masterCompare 64` is the same fact as a picture: the
+md3 strides and the skeletal copy stands in its idle with only its torso and
+head rotating. **The playable roster stays on md3.** Moving it would need real
+skinning weights, which means solving them from the vertex trajectories - a
+skinning decomposition, not something this converter can reach - or authoring
+rigs, and there is no source art.
+
 ### Driving a bone from the game module
 
 `refEntity_t` carries `bones[REF_MAX_BONES]`, each a joint name plus an additive
