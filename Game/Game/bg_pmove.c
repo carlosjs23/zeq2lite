@@ -3315,7 +3315,73 @@ void PM_WeaponRelease(void){
 	if(PM_FireCharge(qfalse)){return;}
 	PM_WeaponDiscard();
 }
-void PM_Weapon(void){
+// What the usercmd asked for before PM_WeaponState withdrew an unreachable
+// request, so the refusal can still name the skill the player reached for.
+// Set and read within one PM_Weapon call, and reset at the top of it.
+static int	pm_skillRequested;
+
+/*==============
+PM_SkillRefusalReason
+Names the gate that is holding a skill change, in the terms a player can act
+on: whether the skill itself is unavailable, whether something they are doing
+has to end first, or whether waiting is enough.
+Read in the order the gates apply, so the answer is the first thing that would
+have to change - soaring holds every skill regardless of what else is up, and a
+skill whose requirements have lapsed cannot be reached by waiting at all.
+==============*/
+static int PM_SkillRefusalReason(int requested){
+	if(pm->ps->bitFlags & usingSoar){return SKILLREFUSE_SOARING;}
+	if(!PM_WeaponSelectable(requested)){return SKILLREFUSE_UNUSABLE;}
+	if(pm->ps->bitFlags & isStruggling || pm->ps->bitFlags & isPreparing
+		|| pm->ps->bitFlags & usingMelee || pm->ps->timers[tmTransform] > 1
+		|| pm->ps->stats[stMeleeState] > 2){return SKILLREFUSE_BUSY;}
+	switch(pm->ps->weaponstate){
+	case WEAPON_CHARGING:
+	case WEAPON_ALTCHARGING:
+	case WEAPON_GUIDING:
+	case WEAPON_ALTGUIDING:
+		return SKILLREFUSE_CHARGING;
+	default:
+		break;
+	}
+	if(pm->ps->weaponTime > 0 || pm->ps->weaponstate == WEAPON_FIRING
+		|| pm->ps->weaponstate == WEAPON_ALTFIRING){return SKILLREFUSE_COOLING;}
+	return SKILLREFUSE_BUSY;
+}
+
+/*==============
+PM_CheckSkillRefused
+Says out loud what PM_Weapon just did quietly. A usercmd still naming a skill
+other than the one in hand after the whole of PM_Weapon has run is a request
+that was dropped, and every path that drops one arrives here rather than each
+gate having to remember to speak.
+The latch makes one request cost one cue: the usercmd repeats the request for
+as long as the client holds it, and it clears the moment the request is
+withdrawn or granted - both of which read as the usercmd naming the skill in
+hand again.
+==============*/
+static void PM_CheckSkillRefused(void){
+	int	requested;
+
+	requested = pm_skillRequested ? pm_skillRequested : pm->cmd.weapon;
+	if(requested == pm->ps->weapon){
+		pm->ps->pm_flags &= ~PMF_SKILL_REFUSED;
+		return;
+	}
+	// Nothing here is a refusal the player can learn from: a spectator, a
+	// corpse and a fighter with no skills at all are all asking for something
+	// the skill bar is not even showing.
+	if(pm->ps->pm_type != PM_NORMAL){return;}
+	if(pm->ps->persistant[PERS_TEAM] == TEAM_SPECTATOR){return;}
+	if(pm->ps->weapon == WP_NONE){return;}
+	if(requested <= WP_NONE || requested >= WP_NUM_WEAPONS){return;}
+	if(!(pm->ps->stats[stSkills] & (1 << requested))){return;}
+	if(pm->ps->pm_flags & PMF_SKILL_REFUSED){return;}
+	pm->ps->pm_flags |= PMF_SKILL_REFUSED;
+	BG_AddPredictableEventToPlayerstate(EV_SKILL_REFUSED,PM_SkillRefusalReason(requested),pm->ps);
+}
+
+static void PM_WeaponState(void){
 	int	*weaponInfo;
 	int	*alt_weaponInfo;
 	int chargeRate;
@@ -3324,11 +3390,33 @@ void PM_Weapon(void){
 	float energyScale;
 	qboolean usable;
 	float powerScale = ((float)pm->ps->powerLevel[plCurrent] / 1000.0) * pm->ps->baseStats[stEnergyAttack];
+	pm_skillRequested = 0;
 	pm->ps->currentSkill[WPSTAT_CHANGED] = 0;
 	PM_CheckWeaponSelectionMode();
 	if(!PM_WeaponSelectable(pm->cmd.weapon)) {
 		pm->ps->currentSkill[WPSTAT_CHANGED] = -1;
-		return;
+		// This gate is about the skill being asked for, and returning outright
+		// froze the skill the fighter is actually holding: its cooldown, its
+		// windup and its shot all stopped for as long as the request stood.
+		// Withdrawing the request instead refuses the change and leaves the
+		// weapon in hand running. pm_skillRequested keeps what was asked for so
+		// PM_CheckSkillRefused can still say it was refused.
+		if(PM_WeaponSelectable(pm->ps->weapon)){
+			pm_skillRequested = pm->cmd.weapon;
+			pm->cmd.weapon = pm->ps->weapon;
+		} else{
+			// Nothing in hand is usable either, so the weapon really is out of
+			// action. Only the countdown goes on, because a cooldown is time
+			// passing rather than anything the fighter is doing.
+			if(pm->ps->weaponTime > 0){
+				pm->ps->weaponTime -= pml.msec;
+				if(pm->ps->weaponTime <= 0){
+					pm->ps->weaponTime = 0;
+					if(pm->ps->weaponstate == WEAPON_COOLING){pm->ps->weaponstate = WEAPON_READY;}
+				}
+			}
+			return;
+		}
 	}
 	if(pm->ps->weaponstate != WEAPON_GUIDING){pm->ps->bitFlags &= ~isGuiding;}
 	if(pm->ps->persistant[PERS_TEAM] == TEAM_SPECTATOR){return;}
@@ -3553,6 +3641,11 @@ void PM_Weapon(void){
 	default:
 		break;
 	}
+}
+
+void PM_Weapon(void){
+	PM_WeaponState();
+	PM_CheckSkillRefused();
 }
 /*================
 PM_CheckLockon

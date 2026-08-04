@@ -190,8 +190,15 @@ typedef enum {
 #define PMF_GRAPPLE_PULL	2048	// pull towards grapple location
 #define PMF_FOLLOW			4096	// spectate following another player
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboa0rd
-#define PMF_LOCK_HELD		16384	// 
+#define PMF_LOCK_HELD		16384	//
 #define PMF_BLOCK_HELD		32768	// Block, swat, push etc.
+// A skill change pmove turned down has been announced. One request is one cue
+// however many usercmds carry it, and a usercmd repeats the requested skill for
+// as long as the client holds the request, so without a latch a wheel notch
+// taken against a gate would fire an event every frame. Lives in pm_flags
+// because prediction and the server must reach the same answer, and pm_flags is
+// already the per-frame state both of them run on. Value 4 was the free bit.
+#define PMF_SKILL_REFUSED	4
 
 #define	MAXTOUCH	32
 typedef struct {
@@ -662,9 +669,24 @@ typedef enum {
 	// above is a number a demo or an older client already means something by.
 	EV_MELEE_BREAKER_BACKFIRE,
 	EV_MELEE_BREAKER_CLASH,
-	EV_MELEE_CLASH
+	EV_MELEE_CLASH,
+	// pmove turning a skill change down, with the reason in eventParm. Appended
+	// for the same reason the three above were.
+	EV_SKILL_REFUSED
 	// END ADDING
 } entity_event_t;
+
+// Why a skill change was refused, carried in EV_SKILL_REFUSED's eventParm. The
+// client picks one reaction per group rather than one per gate: a player being
+// told "not now" needs to know whether waiting fixes it, not which of eighteen
+// melee states is up.
+typedef enum {
+	SKILLREFUSE_UNUSABLE,	// the skill's own requirements are not met
+	SKILLREFUSE_SOARING,	// soaring holds every skill, not just this one
+	SKILLREFUSE_CHARGING,	// a windup or a guided shot owns the weapon
+	SKILLREFUSE_COOLING,	// the skill in hand has not finished
+	SKILLREFUSE_BUSY		// melee, a transform, a struggle, a knockback
+} skillRefusal_t;
 typedef enum {
 	// DEATH
 	ANIM_DEATH_GROUND,
