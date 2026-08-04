@@ -1260,12 +1260,24 @@ can mess up the server's parsing
 ==================
 */
 qboolean Info_Validate( const char *s ) {
-	if ( strchr( s, '\"' ) ) {
-		return qfalse;
+	const char	*ch = s;
+
+	// non-printables belong in an info string no more than a quote or a
+	// semicolon does: a newline in a userinfo key splits the string when it
+	// is written back out and parsed again
+	while ( *ch != '\0' ) {
+		if ( !Q_isprint( *ch ) ) {
+			return qfalse;
+		}
+		if ( *ch == '\"' ) {
+			return qfalse;
+		}
+		if ( *ch == ';' ) {
+			return qfalse;
+		}
+		++ch;
 	}
-	if ( strchr( s, ';' ) ) {
-		return qfalse;
-	}
+
 	return qtrue;
 }
 
