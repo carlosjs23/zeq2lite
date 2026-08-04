@@ -1029,6 +1029,13 @@ int SV_FrameMsec(void);
 qboolean SV_GameCommand( void );
 int SV_SendQueuedPackets(void);
 
+// Development JSON debug socket (Engine/server/sv_debugsocket.c). Gated on
+// net_debugPort, loopback only, polled once per frame from Com_Frame - never
+// from a thread, because nothing in this engine is thread safe.
+void SV_DebugSocketInit( void );
+void SV_DebugSocketFrame( void );
+void SV_DebugSocketShutdown( void );
+
 //
 // UI interface
 //

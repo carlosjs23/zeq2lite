@@ -2710,6 +2710,8 @@ void Com_Init( char *commandLine ) {
 	Com_Printf ("Altivec support is %s\n", com_altivec->integer ? "enabled" : "disabled");
 #endif
 
+	SV_DebugSocketInit();
+
 	com_pipefile = Cvar_Get( "com_pipefile", "", CVAR_ARCHIVE|CVAR_LATCH );
 	if( com_pipefile->string[0] )
 	{
@@ -3102,6 +3104,9 @@ void Com_Frame( void ) {
 
 	Com_ReadFromPipe( );
 
+	// Once per frame, on the main thread, where a console command would run.
+	SV_DebugSocketFrame( );
+
 	com_frameNumber++;
 }
 
@@ -3125,6 +3130,8 @@ void Com_Shutdown (void) {
 		FS_FCloseFile( pipefile );
 		FS_HomeRemove( com_pipefile->string );
 	}
+
+	SV_DebugSocketShutdown( );
 
 }
 

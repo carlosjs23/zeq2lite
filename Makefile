@@ -1380,6 +1380,7 @@ Q3OBJ = \
   $(B)/client/cl_curl.o \
   \
   $(B)/client/sv_ccmds.o \
+  $(B)/client/sv_debugsocket.o \
   $(B)/client/sv_client.o \
   $(B)/client/sv_game.o \
   $(B)/client/sv_init.o \
@@ -1728,6 +1729,7 @@ endif
 Q3DOBJ = \
   $(B)/ded/sv_client.o \
   $(B)/ded/sv_ccmds.o \
+  $(B)/ded/sv_debugsocket.o \
   $(B)/ded/sv_game.o \
   $(B)/ded/sv_init.o \
   $(B)/ded/sv_main.o \
@@ -2351,6 +2353,7 @@ test-clean:
 lint:
 	@python3 tests/lint/check_strncpyz_field_sizes.py
 	@python3 tests/lint/check_self_aliasing_copies.py
+	@python3 tests/lint/check_debugsocket_enum_mirror.py
 
 .PHONY: all clean clean2 clean-debug clean-release install copyfiles \
 	debug default dist distclean installer makedirs \
