@@ -107,6 +107,7 @@ vmCvar_t	cg_draw2D;
 vmCvar_t	cg_drawStatus;
 vmCvar_t	cg_drawMeleeState;
 vmCvar_t	cg_drawTraining;
+vmCvar_t	cg_drawSkillState;
 vmCvar_t	cg_drawMasterMarks;
 vmCvar_t	cg_animSpeed;
 vmCvar_t	cg_debugAnim;
@@ -226,6 +227,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_drawStatus, "cg_drawStatus", "1", CVAR_ARCHIVE  },
 	{ &cg_drawMeleeState, "cg_drawMeleeState", "1", CVAR_ARCHIVE  },
 	{ &cg_drawTraining, "cg_drawTraining", "1", CVAR_ARCHIVE  },
+	{ &cg_drawSkillState, "cg_drawSkillState", "1", CVAR_ARCHIVE  },
 	{ &cg_drawMasterMarks, "cg_drawMasterMarks", "1", CVAR_ARCHIVE  },
 	{ &cg_drawTimer, "cg_drawTimer", "0", CVAR_ARCHIVE  },
 	{ &cg_drawFPS, "cg_drawFPS", "0", CVAR_ARCHIVE  },
@@ -513,6 +515,9 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.budokaiCrowdSound = trap_S_RegisterSound( "effects/budokai/crowd.ogg", qfalse );
 	cgs.media.budokaiSwellSound = trap_S_RegisterSound( "effects/budokai/crowdSwell.ogg", qfalse );
 	cgs.media.radarwarningSound = trap_S_RegisterSound( "interface/sense/warning.ogg", qfalse );
+	// The menus' own buzz. A refusal in the HUD and a refusal in a menu are the
+	// same answer, and the data set already ships the sound for it.
+	cgs.media.skillDeniedSound = trap_S_RegisterSound( "interface/menu/cancel.ogg", qfalse );
 	cgs.media.lightspeedSound1 = trap_S_RegisterSound( "effects/zanzoken/zanzoken1.ogg", qfalse );
 	cgs.media.lightspeedSound2 = trap_S_RegisterSound( "effects/zanzoken/zanzoken2.ogg", qfalse );
 	cgs.media.lightspeedSound3 = trap_S_RegisterSound( "effects/zanzoken/zanzoken3.ogg", qfalse );
@@ -1420,6 +1425,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.RadarMidpointShader = trap_R_RegisterShaderNoMip( "interface/sense/midpoint.png" );
 	cgs.media.RadarMasterShader = trap_R_RegisterShaderNoMip( "interface/training/radarMaster.png" );
 	cgs.media.RadarQuestShader = trap_R_RegisterShaderNoMip( "interface/training/radarQuest.png" );
+	cgs.media.skillDenyShader = trap_R_RegisterShaderNoMip( "interface/hud/skillDeny.png" );
 	// END ADDING
 
 	// register the inline models

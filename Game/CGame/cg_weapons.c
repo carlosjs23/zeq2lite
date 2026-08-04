@@ -731,6 +731,51 @@ static void CG_DrawWeaponSelectQuarterFan( void ) {
 	
 }
 
+static qboolean CG_WeaponSelectable( int i );
+
+/*
+===============================
+CG_DrawSkillDeny
+
+The two things an icon can say that are not "pick me", drawn as one mark in two
+registers so a player learns a single symbol.
+
+Corner-mounted and steady in the guard colour: this skill's own requirements
+are not met - goku's solar flare wants flight, and no amount of waiting on the
+ground reaches it. Over the whole icon and decaying in the threat colour: the
+change was refused just now, which is a reaction to what the player did rather
+than a standing property of the skill, so it fades the way a reaction should.
+
+The refusal outranks the lock on the same icon: it is the newer answer and the
+one that was asked for.
+===============================
+*/
+static void CG_DrawSkillDeny( int skill, qboolean usable, float x, float y, float fade ) {
+	vec4_t	threatColor = {1.0f,0.35f,0.2f,1.0f};
+	vec4_t	guardColor = {0.4f,0.72f,1.0f,1.0f};
+	vec4_t	mark;
+	float	flash;
+
+	flash = 0;
+	if ( cg.skillRefuseTime && cg.skillRefuseIndex == skill ) {
+		flash = 1.0f - (float)( cg.time - cg.skillRefuseTime ) / (float)SKILL_REFUSE_TIME;
+	}
+	if ( flash > 0 ) {
+		Vector4Copy( threatColor, mark );
+		mark[3] = flash * fade;
+		trap_R_SetColor( mark );
+		CG_DrawPic( qfalse, x - 2, y - 2, 28, 28, cgs.media.skillDenyShader );
+		return;
+	}
+	if ( usable ) {
+		return;
+	}
+	Vector4Copy( guardColor, mark );
+	mark[3] = 0.85f * fade;
+	trap_R_SetColor( mark );
+	CG_DrawPic( qfalse, x + 13, y + 13, 11, 11, cgs.media.skillDenyShader );
+}
+
 /*
 ===============================
 CG_DrawWeaponSelectHorCenterBar
@@ -743,6 +788,7 @@ static void CG_DrawWeaponSelectHorCenterBar( void ) {
 	int		x, y, w;
 	char	name[MAX_WEAPONNAME * 2 + 4]; // Need a little more leeway
 	float	*color;
+	vec4_t	dimColor;
 	cg_userWeapon_t	*weaponInfo;
 	cg_userWeapon_t	*alt_weaponInfo;
 
@@ -774,28 +820,41 @@ static void CG_DrawWeaponSelectHorCenterBar( void ) {
 			continue;
 		}
 
-		//CG_RegisterWeapon( i );
-
 		weaponInfo = CG_FindUserWeaponGraphics( cg.snap->ps.clientNum, i );
-		usable = qfalse;
-		// draw weapon icon
-		//CG_DrawPic(qfalse, x, y, 32, 32, cg_weapons[i].weaponIcon );
-		if(i == 1 && cg.snap->ps.powerups[PW_SKILLS] & USABLE_SKILL1){usable = qtrue;}
-		if(i == 2 && cg.snap->ps.powerups[PW_SKILLS] & USABLE_SKILL2){usable = qtrue;}
-		if(i == 3 && cg.snap->ps.powerups[PW_SKILLS] & USABLE_SKILL3){usable = qtrue;}
-		if(i == 4 && cg.snap->ps.powerups[PW_SKILLS] & USABLE_SKILL4){usable = qtrue;}
-		if(i == 5 && cg.snap->ps.powerups[PW_SKILLS] & USABLE_SKILL5){usable = qtrue;}
-		if(i == 6 && cg.snap->ps.powerups[PW_SKILLS] & USABLE_SKILL6){usable = qtrue;}
-		if(!usable){
-			continue;
+		usable = CG_WeaponSelectable( i );
+		// An unavailable skill keeps its slot instead of leaving the bar. A
+		// skill that vanishes teaches nothing - the player never learns it
+		// exists, let alone what is holding it - so it is drawn dim with the
+		// deny mark on it. It stays out of the wheel regardless: the cycle is
+		// CG_StepWeaponSelect's, and that walks the same predicate it always
+		// did. The slot count above already counted it, so the bar was
+		// centring for it before it was drawn.
+		if ( usable ) {
+			trap_R_SetColor( color );
+		} else {
+			Vector4Copy( color, dimColor );
+			dimColor[3] = color[3] * 0.35f;
+			trap_R_SetColor( dimColor );
 		}
-		CG_DrawPic(qfalse, x, y, 24, 24, weaponInfo->weaponIcon );
-		if ( i == cg.weaponSelect ) {
+		// A skill whose .grfx never named an icon would otherwise draw as
+		// shader handle 0 - the default black and white block - and the block
+		// ignores the tint, so it would arrive at full brightness with the deny
+		// mark on it. The slot and its mark still stand; only the lie about the
+		// art goes.
+		if ( weaponInfo->weaponIcon ) {
+			CG_DrawPic(qfalse, x, y, 24, 24, weaponInfo->weaponIcon );
+		}
+		if ( usable && i == cg.weaponSelect ) {
+			trap_R_SetColor( color );
 			CG_DrawPic(qfalse, x-4, y-4, 32, 32, cgs.media.selectShader );
+		}
+		if ( cg_drawSkillState.integer ) {
+			CG_DrawSkillDeny( i, usable, x, y, color[3] );
 		}
 		x += 30;
 
 	}
+	trap_R_SetColor( color );
 
 	weaponInfo = CG_FindUserWeaponGraphics( cg.snap->ps.clientNum, cg.weaponSelect );
 	alt_weaponInfo = CG_FindUserWeaponGraphics ( cg.snap->ps.clientNum, ALTWEAPON_OFFSET + cg.weaponSelect);
@@ -993,14 +1052,20 @@ void CG_Weapon_f( void ) {
 	if ( num < 1 || num > 15 ) {
 		return;
 	}
-	if ( !CG_WeaponSelectable( num ) ) {
-		return;
+	if ( !( cg.snap->ps.stats[ stSkills ] & ( 1 << num ) ) ) {
+		return;		// not a skill this fighter has at all
 	}
 	cg.weaponSelectTime = cg.time;
-	cg.weaponSelect = num;
 	cg.weaponDesired = num;
 	cg.weaponSelectionMode = 3;
 	cg.drawWeaponBar = 1;
+	// A skill whose requirements have lapsed is still asked for, because the
+	// refusal and its reason are what the player is owed - dropping the bind
+	// here is exactly the silence this pass exists to end. The highlight stays
+	// on what fires; the deny mark lands on the icon that was asked for.
+	if ( CG_WeaponSelectable( num ) ) {
+		cg.weaponSelect = num;
+	}
 }
 
 	/*

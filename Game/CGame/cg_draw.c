@@ -1961,7 +1961,17 @@ static void CG_Draw2D( void ) {
 		CG_DrawCrosshairNames();
 		CG_DrawRadar();
 	}
-	else if(!(cg.snap->ps.bitFlags & usingSoar)){
+	// Soaring hides the HUD to give the flight its own screen, and soaring is
+	// also the state that refuses every skill change - so the one answer a
+	// player is owed while soaring had nowhere at all to appear. The bar comes
+	// back for as long as the refusal it is carrying lasts, and nothing else
+	// does.
+	else if(cg.snap->ps.bitFlags & usingSoar){
+		if(cg.skillRefuseTime && cg.time - cg.skillRefuseTime < SKILL_REFUSE_TIME){
+			CG_DrawWeaponSelect();
+		}
+	}
+	else{
 		if (!(cg.snap->ps.timers[tmTransform] > 1) && !(cg.snap->ps.powerups[PW_STATE] < 0)){
 			playerState_t	*ps;
 			clientInfo_t *ci;

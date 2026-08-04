@@ -228,6 +228,55 @@ def rounded(width, height, radius, border, glow, fill=None, gradient=0,
     return pixel
 
 
+SHEAR = 0.36397023426620234                 # tan(20 degrees), the deck's cut
+
+
+def deny_mark(size=64, thickness=0.13, inset=0.10, soft=0.035):
+    """The skill bar's refusal mark: a sheared frame with a bar struck through.
+
+    Drawn white and tinted by trap_R_SetColor, the way the radar marks and every
+    other bare .png in this interface are - the shader the engine builds for a
+    loose image is rgbGen vertex, so the colour belongs to the caller and this
+    only decides the shape. cg_weapons.c draws it twice over: small and steady
+    in the guard colour for a skill whose requirements are unmet, large and
+    decaying in the threat colour for a change just refused.
+
+    The frame is a parallelogram cut at the deck's 20 degrees rather than a
+    circle, because it sits on a skill icon that is a plain square and has to
+    read as interface rather than as part of the art. The strike is the
+    anti-diagonal: it crosses both sheared edges instead of running near-parallel
+    to either, which is what keeps the mark legible at the eleven virtual units
+    the corner badge is drawn at.
+    """
+    samples = 4
+
+    def alpha(u, v):
+        # The frame leans the way the panel edges do: top edge pushed right.
+        lean = SHEAR * (0.5 - v) * 0.5
+        left, right = inset + lean, 1.0 - inset + lean
+        top, bottom = inset, 1.0 - inset
+        # Distance inside the parallelogram, negative outside it.
+        d = min(u - left, right - u, v - top, bottom - v)
+        frame = min(d / soft, (thickness - d) / soft, 1.0)
+        # The strike, clipped to the frame's own footprint so it does not
+        # overhang the badge.
+        strike = min((thickness * 0.75 - abs(u - v) * 0.7071) / soft,
+                     (d + thickness) / soft, 1.0)
+        return max(min(max(frame, strike), 1.0), 0.0)
+
+    def pixel(x, y):
+        total = 0.0
+        for sy in range(samples):
+            for sx in range(samples):
+                u = (x + (sx + 0.5) / samples) / size
+                v = (y + (sy + 0.5) / samples) / size
+                total += alpha(u, v)
+        a = int(round(255.0 * total / (samples * samples)))
+        return (255, 255, 255, max(0, min(255, a)))
+
+    return pixel
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -271,6 +320,11 @@ def main():
          rounded(HUD_PANEL_WIDTH * ps, HUD_PANEL_HEIGHT * ps, 10 * ps,
                  args.border * ps, args.glow * ps, fill=(15, 27, 40, 236),
                  gradient=14))
+
+    # The skill bar's refusal mark. Square and generously oversized: it is drawn
+    # at anything from eleven to twenty-eight virtual units and the strike has to
+    # survive the smaller of those.
+    emit("skillDeny", 64, 64, deny_mark(64))
 
     print("wrote %s into %s" % (", ".join(written), args.outdir))
 

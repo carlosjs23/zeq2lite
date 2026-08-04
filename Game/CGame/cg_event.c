@@ -579,6 +579,29 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,cgs.media.meleeBackfireSound);
 		CG_AddEarthquake(cent->lerpOrigin, 500, 1, 0, 1, 250);
 		break;
+	// pmove turned a skill change down. The reaction goes on the icon the
+	// player was reaching for, which is the request still standing in
+	// weaponDesired; once that has lapsed the only honest place left for it is
+	// the skill in hand. The bar is forced up because a refusal the player
+	// cannot see is the defect this event exists to close.
+	case EV_SKILL_REFUSED:
+		DEBUGNAME("EV_SKILL_REFUSED");
+		if(es->number != cg.snap->ps.clientNum){break;}
+		// Only a refusal that answers something the player just did earns a
+		// reaction. pmove cannot tell a request from a usercmd that is merely
+		// still catching up - a fresh spawn hands the client a weapon it has
+		// not heard about yet, and the first usercmds out name the old one -
+		// so the client, which knows when it last asked, is where that gets
+		// sorted out.
+		if(cg.time - cg.weaponSelectTime > WEAPON_REQUEST_TIME){break;}
+		cg.skillRefuseIndex = (cg.weaponDesired > 0) ? cg.weaponDesired : cg.weaponSelect;
+		cg.skillRefuseReason = es->eventParm;
+		cg.skillRefuseTime = cg.time;
+		cg.drawWeaponBar = 1;
+		if(cg_drawSkillState.integer){
+			trap_S_StartLocalSound(cgs.media.skillDeniedSound,CHAN_LOCAL_SOUND);
+		}
+		break;
 	case EV_TIERUP_FIRST:
 		DEBUGNAME("EV_TIERUP_FIRST");
 		trap_S_StartSound(cent->lerpOrigin,es->number,CHAN_BODY,ci->tierConfig[ci->tierCurrent].soundTransformFirst);
