@@ -267,3 +267,93 @@ Test(msg, buffers_survive_a_playerstate_delta) {
 	cr_assert_float_eq(out.buffers[bfZanzokenCost], 0.5f, 1e-6,
 		"the neighbouring buffer entry was disturbed");
 }
+
+/* ------------------------------------------------------- overflow guarding */
+
+/*
+A short or malformed packet must not walk the reader off the end of the buffer.
+These tests deliberately hand msg_t an exactly-sized heap allocation rather
+than the file-scope array, so ASan sees a read or write past the end as the
+overrun it is instead of a hit somewhere inside 8KB of slack.
+*/
+
+Test(msg, reading_past_the_end_stops_at_the_buffer) {
+	byte	*small = malloc(8);
+	msg_t	m;
+	int		i;
+
+	MSG_Init(&m, small, 8);
+	MSG_WriteLong(&m, 0x12345678);
+	MSG_BeginReading(&m);
+
+	cr_assert_eq(MSG_ReadLong(&m), 0x12345678);
+
+	/* Far more than the message holds. Every read past the end must come
+	   back zero rather than decoding whatever follows the allocation. */
+	for (i = 0; i < 64; ++i) {
+		cr_assert_eq(MSG_ReadBits(&m, 8), 0, "read %d ran past the message", i);
+	}
+	cr_assert_gt(m.readcount, m.cursize,
+		"readcount should be parked past cursize once the message is spent");
+
+	free(small);
+}
+
+Test(msg, writing_past_the_end_sets_overflowed) {
+	byte	*small = malloc(16);
+	msg_t	m;
+	int		i;
+
+	MSG_Init(&m, small, 16);
+	m.allowoverflow = qtrue;
+
+	for (i = 0; i < 64; ++i) {
+		MSG_WriteLong(&m, 0x7FFFFFFF);
+	}
+
+	cr_assert(m.overflowed, "writing 256 bytes into a 16 byte message must overflow");
+	cr_assert_leq(m.cursize, m.maxsize, "cursize ran past the buffer");
+
+	free(small);
+}
+
+Test(msg, oob_writing_past_the_end_sets_overflowed) {
+	byte	*small = malloc(16);
+	msg_t	m;
+	int		i;
+
+	MSG_InitOOB(&m, small, 16);
+	m.allowoverflow = qtrue;
+
+	for (i = 0; i < 64; ++i) {
+		MSG_WriteLong(&m, 0x7FFFFFFF);
+	}
+
+	cr_assert(m.overflowed, "out-of-band writes must respect maxsize too");
+	cr_assert_leq(m.cursize, m.maxsize, "cursize ran past the buffer");
+
+	free(small);
+}
+
+/*
+q3msgboom: a string that exactly fills the reader's buffer used to leave its
+terminating byte in the bitstream, so everything read afterwards was shifted by
+one symbol. The marker after the string is what pins that down.
+*/
+Test(msg, a_full_length_string_leaves_the_stream_aligned) {
+	char	longstr[MAX_STRING_CHARS];
+	char	*out;
+
+	memset(longstr, 'a', sizeof(longstr) - 1);
+	longstr[sizeof(longstr) - 1] = '\0';
+
+	MSG_WriteString(&msg, longstr);
+	MSG_WriteLong(&msg, 0x0BADF00D);
+
+	MSG_BeginReading(&msg);
+	out = MSG_ReadString(&msg);
+
+	cr_assert_eq(strlen(out), sizeof(longstr) - 1, "the string came back short");
+	cr_assert_eq(MSG_ReadLong(&msg), 0x0BADF00D,
+		"the read after a full-length string was misaligned");
+}
