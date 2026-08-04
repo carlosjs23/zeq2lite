@@ -539,17 +539,21 @@ qboolean FS_CreatePath (char *OSPath) {
 =================
 FS_CheckFilenameIsNotExecutable
 
-ERR_FATAL if trying to maniuplate a file with the platform library extension
+ERR_FATAL if trying to manipulate a file with the platform library, QVM or
+pk3 extension. All three are code the engine will later execute or trust, so
+nothing that writes on behalf of a server may name one.
 =================
  */
 static void FS_CheckFilenameIsNotExecutable( const char *filename,
 		const char *function )
 {
-	// Check if the filename ends with the library extension
-	if(COM_CompareExtension(filename, DLL_EXT))
+	// Check if the filename ends with the library, QVM or pk3 extension
+	if( COM_CompareExtension( filename, DLL_EXT )
+		|| COM_CompareExtension( filename, ".qvm" )
+		|| COM_CompareExtension( filename, ".pk3" ) )
 	{
 		Com_Error( ERR_FATAL, "%s: Not allowed to manipulate '%s' due "
-			"to %s extension", function, filename, DLL_EXT );
+			"to %s extension", function, filename, COM_GetExtension( filename ) );
 	}
 }
 
@@ -750,7 +754,7 @@ FS_SV_Rename
 
 ===========
 */
-void FS_SV_Rename( const char *from, const char *to ) {
+void FS_SV_Rename( const char *from, const char *to, qboolean safe ) {
 	char			*from_ospath, *to_ospath;
 
 	if ( !fs_searchpaths ) {
@@ -769,7 +773,12 @@ void FS_SV_Rename( const char *from, const char *to ) {
 		Com_Printf( "FS_SV_Rename: %s --> %s\n", from_ospath, to_ospath );
 	}
 
-	FS_CheckFilenameIsNotExecutable( to_ospath, __func__ );
+	// a finished download is renamed into place under a name the server
+	// chose, and legitimately ends in .pk3, so the caller says when the
+	// destination name is its own
+	if ( safe ) {
+		FS_CheckFilenameIsNotExecutable( to_ospath, __func__ );
+	}
 
 	rename(from_ospath, to_ospath);
 }
