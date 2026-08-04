@@ -88,6 +88,18 @@ typedef enum {
 	RT_MAX_REF_ENTITY_TYPE
 } refEntityType_t;
 
+// A bone this entity drives itself. Four is the working set the training
+// content needs - a head to turn and three parts to reproportion - and the
+// array is copied per entity per frame, so it is deliberately not generous.
+#define	REF_MAX_BONES		4
+#define	REF_BONE_NAME		16
+
+typedef struct {
+	char		name[REF_BONE_NAME];	// joint name, as the model was exported
+	vec3_t		angles;					// added to the bone's animated rotation
+	vec3_t		scale;					// per axis; 0 means "leave alone"
+} refBone_t;
+
 typedef struct {
 	refEntityType_t	reType;
 	int			renderfx;
@@ -137,6 +149,21 @@ typedef struct {
 	// flush (see RB_RenderDrawSurfList), so one entity's parameters can never
 	// leak into another's geometry - unlike polys, which merge freely.
 	float		programParams[MAX_PROGRAM_PARAMS];
+
+	// Per-bone overrides for skeletal (MOD_IQM) models, ignored by every other
+	// model type. Named rather than indexed because a joint index is a property
+	// of whatever exported the model, and a game module that held one would
+	// break silently the next time the converter changed its joint order.
+	//
+	// Both channels are applied in the bone's own frame, after its animated
+	// pose and before the bone is concatenated onto its parent - so a rotation
+	// pivots where the joint is and a scale grows the bone's own geometry.
+	// Children inherit both, which is what makes scaling a torso carry the head
+	// and arms with it.
+	//
+	// A zeroed refEntity_t is a no-op: no bones, and a zero scale reads as 1.
+	int			numBones;
+	refBone_t	bones[REF_MAX_BONES];
 } refEntity_t;
 
 

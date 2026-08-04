@@ -877,37 +877,133 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 }
 
 
-static void ComputeJointMats( iqmData_t *data, int frame, int oldframe,
+/*
+=================
+R_IQMBoneOverrides
+
+Resolve an entity's refBone_t names to joint indices, once per pose evaluation.
+
+A linear scan over the names blob, which is what R_IQMLerpTag already does for
+a tag. Four entries against at most IQM_MAX_JOINTS names is not worth an index
+the game module would then have to keep in step with the exporter.
+
+Returns the number of joints that matched; overrides[] is filled with -1 for
+every joint that carries no override, so the caller can test one array.
+=================
+*/
+static int R_IQMBoneOverrides( iqmData_t *data, const refEntity_t *ent,
+			       const refBone_t *out[] ) {
+	int		i, joint, found = 0;
+	char		*names;
+
+	for( i = 0; i < data->num_joints; i++ ) {
+		out[i] = NULL;
+	}
+	if ( !ent || ent->numBones <= 0 ) {
+		return 0;
+	}
+	for( i = 0; i < ent->numBones && i < REF_MAX_BONES; i++ ) {
+		if ( !ent->bones[i].name[0] ) {
+			continue;
+		}
+		names = data->names;
+		for( joint = 0; joint < data->num_joints; joint++ ) {
+			if( !strcmp( ent->bones[i].name, names ) ) {
+				out[joint] = &ent->bones[i];
+				found++;
+				break;
+			}
+			names += strlen( names ) + 1;
+		}
+	}
+	return found;
+}
+
+/*
+=================
+R_IQMApplyBone
+
+Fold a bone override into a joint's local pose, in place.
+
+Post-multiplied, so both channels act in the bone's own frame: the rotation
+pivots at the joint rather than at the model origin, and the scale grows the
+bone's geometry along the bone's axes. The joint is concatenated onto its
+parent afterwards, so children inherit both - a scaled torso carries the head
+and arms, which is the whole point of a proportion control.
+
+A zero scale component reads as 1 rather than as a collapse, so a game module
+that fills in only ->angles gets what it meant.
+=================
+*/
+static void R_IQMApplyBone( const refBone_t *bone, float *m ) {
+	float		local[12], axis[3][3];
+	vec3_t		scale;
+	int		r, c;
+
+	AnglesToAxis( bone->angles, axis );
+	for( c = 0; c < 3; c++ ) {
+		scale[c] = bone->scale[c] ? bone->scale[c] : 1.0f;
+	}
+	/* AnglesToAxis' rows are the rotated basis vectors, which are this
+	   matrix's columns - the same relation mat_from_axis_origin encodes on the
+	   tool side. */
+	for( r = 0; r < 3; r++ ) {
+		for( c = 0; c < 3; c++ ) {
+			local[4 * r + c] = axis[c][r] * scale[c];
+		}
+		local[4 * r + 3] = 0.0f;
+	}
+	{
+		float	tmp[12];
+
+		Com_Memcpy( tmp, m, sizeof(tmp) );
+		Matrix34Multiply( tmp, local, m );
+	}
+}
+
+static void ComputeJointMats( iqmData_t *data, const refEntity_t *ent,
+			      int frame, int oldframe,
 			      float backlerp, float *mat ) {
+	const refBone_t	*overrides[IQM_MAX_JOINTS];
 	float	*mat1, *mat2;
 	int	*joint = data->jointParents;
 	int	i;
+	int	numOverrides;
+
+	numOverrides = R_IQMBoneOverrides( data, ent, overrides );
 
 	if ( oldframe == frame ) {
 		mat1 = data->poseMats + 12 * data->num_joints * frame;
 		for( i = 0; i < data->num_joints; i++, joint++ ) {
+			float local[12];
+
+			Com_Memcpy( local, mat1 + 12*i, sizeof(local) );
+			if( numOverrides && overrides[i] ) {
+				R_IQMApplyBone( overrides[i], local );
+			}
 			if( *joint >= 0 ) {
-				Matrix34Multiply( mat + 12 * *joint,
-						  mat1 + 12*i, mat + 12*i );
+				Matrix34Multiply( mat + 12 * *joint, local, mat + 12*i );
 			} else {
-				Com_Memcpy( mat + 12*i, mat1 + 12*i, 12 * sizeof(float) );
+				Com_Memcpy( mat + 12*i, local, sizeof(local) );
 			}
 		}
 	} else  {
 		mat1 = data->poseMats + 12 * data->num_joints * frame;
 		mat2 = data->poseMats + 12 * data->num_joints * oldframe;
-		
+
 		for( i = 0; i < data->num_joints; i++, joint++ ) {
+			float tmpMat[12];
+
+			InterpolateMatrix( mat1 + 12*i, mat2 + 12*i,
+					   backlerp, tmpMat );
+			if( numOverrides && overrides[i] ) {
+				R_IQMApplyBone( overrides[i], tmpMat );
+			}
 			if( *joint >= 0 ) {
-				float tmpMat[12];
-				InterpolateMatrix( mat1 + 12*i, mat2 + 12*i,
-						   backlerp, tmpMat );
 				Matrix34Multiply( mat + 12 * *joint,
 						  tmpMat, mat + 12*i );
-				
 			} else {
-				InterpolateMatrix( mat1 + 12*i, mat2 + 12*i,
-						   backlerp, mat );
+				Com_Memcpy( mat + 12*i, tmpMat, sizeof(tmpMat) );
 			}
 		}
 	}
@@ -943,7 +1039,8 @@ void RB_IQMSurfaceAnim( surfaceType_t *surface ) {
 	RB_CHECKOVERFLOW( surf->num_vertexes, surf->num_triangles * 3 );
 
 	// compute interpolated joint matrices
-	ComputeJointMats( data, frame, oldframe, backlerp, jointMats );
+	ComputeJointMats( data, &backEnd.currentEntity->e, frame, oldframe,
+			  backlerp, jointMats );
 
 	// transform vertexes and fill other data
 	for( i = 0; i < surf->num_vertexes;
@@ -1055,7 +1152,11 @@ int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
 		return qfalse;
 	}
 
-	ComputeJointMats( data, startFrame, endFrame, frac, jointMats );
+	// No entity here: R_LerpTag is reached through refexport_t without one,
+	// so a tag resolves against the animated pose and not against any bone
+	// override the entity carries. Gear that must follow a driven bone has
+	// to be a mesh weighted to it rather than a separate model on a tag.
+	ComputeJointMats( data, NULL, startFrame, endFrame, frac, jointMats );
 
 	tag->axis[0][0] = jointMats[12 * joint + 0];
 	tag->axis[1][0] = jointMats[12 * joint + 1];

@@ -73,6 +73,27 @@ for m in "${MODULES[@]}"; do
 	staged=$((staged + 1))
 done
 
+# The renderer is a dlopen'd dylib exchanging refexport_t/refimport_t with the
+# client, so a copy left behind by an older build is a struct-layout mismatch
+# waiting to happen - refEntity_t grew a bone array and a stale renderer would
+# read the entity through the old layout. The engine loads it from the binary
+# directory, which make writes directly, but copies under the mod directory have
+# survived from earlier installs; refresh them so there is no older one on disk
+# to be picked up by a search order change or by a hand-run engine.
+for r in renderer_opengl1 renderer_opengl1_smp; do
+	src="$ZEQ2_BUILD/${r}_${ZEQ2_ARCH}.dylib"
+	[[ -f "$src" ]] || continue
+	for suffix in "$ZEQ2_ARCH" arm64; do
+		dst="$ZEQ2_BUILD/$ZEQ2_GAME/${r}_${suffix}.dylib"
+		[[ -e "$dst" ]] || continue
+		if [[ "$dst" -ot "$src" ]]; then
+			rm -f "$dst"
+			cp "$src" "$dst"
+			echo "  refreshed stale $(basename "$dst")"
+		fi
+	done
+done
+
 if (( staged == 0 )); then
 	echo "error: nothing staged - did the build produce any modules?" >&2
 	exit 1
