@@ -7,37 +7,35 @@ same character as one IQM entity on one skeleton, so that gear can hang off a
 bone instead of being baked into a head mesh, and so that a game module can be
 handed a bone to drive.
 
-WHAT THIS DOES AND DOES NOT RECOVER - read this before trusting the output.
+There are two binds here and they are not close in quality.
 
-md3 is vertex animation: every vertex has its own position in every frame. A
-skeleton cannot represent that in general. What this converter recovers is the
-*rigid* part of the motion, which for this asset set is the joint chain the
-md3s were already assembled with:
+**Rigid** (the default, no --bones). lower, upper and head each become one
+bone, bound rigidly, with their vertices frozen at one reference frame; the
+per-frame tag chain becomes the bones' animation. Everything *inside* a part is
+lost - striding legs, swinging arms. For a master standing at his mark that is
+the whole animation and the loss is nil; for a fighter mid-combo it is most of
+it.
 
-  - lower, upper and head each become one bone, bound rigidly, with their
-    vertices frozen at one reference frame;
-  - the per-frame tag chain becomes the bones' animation, so the torso still
-    twists over the hips and the head still turns with the torso, frame for
-    frame, exactly as the md3 assembly did;
-  - every md3 tag becomes a bone of its own carrying that tag's model-space
-    transform, so trap_R_LerpTag keeps working by name - R_IQMLerpTag matches
-    joints by name and this writer binds every joint at the identity, which is
-    the condition under which the matrix it returns is the joint's transform
-    rather than a skinning matrix.
+**Decomposed** (--bones N). The bones are solved out of the vertex
+trajectories by `ssdr.py` rather than taken from the tag chain: every vertex's
+path through every frame is the fit's ground truth, clusters of mutually rigid
+vertices become the bones, and each vertex gets up to four blend weights. This
+recovers deformation inside a part, which is the entire difference between a
+converted master and a converted fighter.
 
-What is lost is everything *inside* a part: legs that stride, arms that swing,
-a cape that flaps. Those vertices sit still. For a master standing at his mark
-that is the whole animation and the loss is nil; for a fighter mid-combo it is
-most of it. --report prints the per-frame RMS of exactly that residual so the
-decision is made on a number rather than on a hunch.
+Both binds share what the engine forces: every md3 tag becomes a bone of its
+own carrying that tag's model-space transform, so trap_R_LerpTag keeps working
+by name - R_IQMLerpTag matches joints by name and this writer binds every joint
+at the identity, which is the condition under which the matrix it returns is
+the joint's transform rather than a skinning matrix.
 
 usage:
-    md3_to_iqm.py <playerdir> <out.iqm> [--tier tier1] [--ref-anim IDLE]
-    md3_to_iqm.py <playerdir> --report [--tier tier1]
+    md3_to_iqm.py <playerdir> <out.iqm> [--tier tier1] [--bones 24]
+    md3_to_iqm.py <playerdir> --report [--tier tier1] [--bones 24]
+    md3_to_iqm.py <playerdir> --sweep 8,16,24,32 [--tier tier1]
 """
 
 import argparse
-import math
 import os
 import sys
 
@@ -92,6 +90,26 @@ def parse_animation_cfg(path):
 # (three deaths, a stun, a floor recover, then idle). Stated as an index rather
 # than searched for, because the comment naming it is a comment.
 IDLE_ROW = 5
+
+# Row ranges of animNumber_t (Game/Game/bg_public.h), grouped into the classes
+# the error table is reported by. Half-open, in enum order. Positional like the
+# file itself - a character whose animation.cfg is shorter simply has fewer.
+ANIM_CLASSES = (
+    ("death", 0, 3),
+    ("stun", 3, 5),
+    ("idle", 5, 8),
+    ("walk", 8, 9),
+    ("run", 9, 10),
+    ("swim", 10, 12),
+    ("jump", 12, 18),
+    ("dash", 18, 22),
+    ("fly", 22, 28),
+    ("kicharge", 28, 33),
+    ("defense", 33, 37),
+    ("melee", 37, 66),
+    ("knockback", 66, 70),
+    ("kiattack", 70, 94),
+)
 
 
 def tag_map(model, frame):
@@ -150,6 +168,56 @@ class Character:
         t = self.torso(frame)
         h = tag_map(self.upper, frame).get("tag_head", iqm.IDENTITY)
         return iqm.mat_mul(t, h)
+
+    def spans(self):
+        """(class name, frame range) for every animation.cfg row that exists."""
+        out = []
+        for name, first, last in ANIM_CLASSES:
+            span = []
+            for row in self.anims[first:last]:
+                start, count = row[0], row[1]
+                span.extend(range(max(start, 0), min(start + count, self.frames)))
+            if span:
+                out.append((name, sorted(set(span))))
+        return out
+
+    # --- the decomposition's input ----------------------------------------
+    #
+    # Per part, in the part's own md3 space, because that is the unit the game
+    # animates: CG_PlayerAnimation hands legs, torso and head their own frame
+    # numbers, so a fighter can run with his legs while his torso throws a
+    # punch. One skeleton over the whole character has one frame index and
+    # cannot do that. Solving each part separately keeps the split intact, and
+    # the tag chain that joins them is untouched - a converted part is a drop-in
+    # for its md3, tags, skins, damage states and all.
+
+    def trajectories(self, owner):
+        """One part's vertices, every frame: (verts [F, n, 3], layout)."""
+        import numpy as np
+
+        part = getattr(self, owner)
+        frames = self.frames
+        chunks = []
+        layout = []
+        offset = 0
+        for surf in part.surfaces:
+            arr = np.array([[(v[0], v[1], v[2]) for v in surf.frames[
+                min(f, len(surf.frames) - 1)]] for f in range(frames)],
+                dtype=np.float64) * md3.MD3_XYZ_SCALE
+            layout.append((surf, offset, arr.shape[1]))
+            offset += arr.shape[1]
+            chunks.append(arr)
+        if not chunks:
+            raise ValueError("%s has no surfaces" % owner)
+        return np.concatenate(chunks, axis=1), layout
+
+    def rest_normals(self, owner, ref):
+        """One part's normals at the reference frame, in trajectory order."""
+        out = []
+        for surf in getattr(self, owner).surfaces:
+            for _p, n in part_vertices(surf, ref):
+                out.append(n)
+        return out
 
 
 def build(char, ref):
@@ -238,41 +306,160 @@ def build(char, ref):
     return model
 
 
-def report(char, ref, frames=None):
-    """RMS of what the rigid bind cannot reproduce, in world units.
+def solve_part(char, owner, ref, bones, iterations, log=None):
+    """Decompose one part. Returns (verts, layout, solution)."""
+    import ssdr
 
-    Each part's true md3 vertices at a frame are compared against the same
-    vertices frozen at the reference frame. That difference is exactly what the
-    bone cannot carry: the bone reproduces the part's rigid placement from the
-    tag chain, and everything left over is deformation inside the part. A ZEQ2
-    fighter is about 56 units tall, so the number reads directly as how far a
-    vertex sits from where the md3 puts it.
+    verts, layout = char.trajectories(owner)
+    sol = ssdr.solve(verts, ref, bones, iterations=iterations, log=log)
+    return verts, layout, sol
 
-    It is an upper bound on the error rather than the tightest one - allowing
-    each part's bone an independently best-fitting rotation per frame would
-    absorb some of it - but not by an order of magnitude, because the tag chain
-    already supplies the part's rotation.
+
+def build_solved(char, owner, ref, layout, sol):
+    """Assemble one part's iqm.Model from its solved rig.
+
+    The result is a drop-in for that part's md3: same surfaces under the same
+    names, same tags at the same per-frame transforms, same frame numbering.
+    What changed is that the vertices now move, because the solved bones carry
+    the deformation the md3 stored per vertex.
+
+    Poses are the bones' own transforms. The mesh is authored in the part's own
+    space at the reference frame and every joint binds at the identity, so a
+    bone's global pose *is* the matrix the skinner multiplies its vertices by -
+    which is exactly what the solve produced.
     """
-    out = []
-    span = frames if frames is not None else range(char.frames)
-    for owner, part in (("lower", char.lower), ("upper", char.upper)):
-        base = [v for surf in part.surfaces for v in part_vertices(surf, ref)]
-        n = len(base)
-        worst = 0.0
-        total = 0.0
-        count = 0
-        for f in span:
-            live = [v for surf in part.surfaces for v in part_vertices(surf, f)]
-            acc = 0.0
-            for (bp, _bn), (lp, _ln) in zip(base, live):
-                acc += ((bp[0] - lp[0]) ** 2 + (bp[1] - lp[1]) ** 2
-                        + (bp[2] - lp[2]) ** 2)
-            rms = math.sqrt(acc / n)
-            total += rms
-            count += 1
-            worst = max(worst, rms)
-        out.append((owner, n, total / max(count, 1), worst))
-    return out
+    import numpy as np
+    import ssdr
+
+    part = getattr(char, owner)
+    model = iqm.Model()
+    model.anim_name = "md3"
+    model.framerate = 20.0
+
+    root, parent = ssdr.hierarchy(sol)
+    names = ssdr.region_names(sol)
+    # Joints have to be added parent-first, so walk the tree from the root.
+    order = [root]
+    for b in order:
+        order.extend(i for i, p in enumerate(parent) if p == b)
+    joint_of = {}
+    for b in order:
+        joint_of[b] = model.add_joint(
+            names[b], -1 if parent[b] < 0 else joint_of[parent[b]])
+
+    # Tag joints, parented to whichever solved bone sits nearest the tag at the
+    # reference frame. The parent is cosmetic - the pose track states the tag's
+    # transform in the part's space either way - but a tag hanging off the bone
+    # it rides makes the tree read as a skeleton.
+    weight_sum = sol.weights.sum(0)
+    weight_sum[weight_sum <= 0] = 1.0
+    centres = (sol.weights.T @ sol.rest) / weight_sum[:, None]
+    tags = []
+    if part.tags:
+        for name, origin, _axis in part.tags[min(ref, len(part.tags) - 1)]:
+            near = int(np.argmin(np.linalg.norm(centres - np.array(origin),
+                                                axis=1)))
+            tags.append((model.add_joint(name, joint_of[near]), name))
+
+    # --- meshes, in the part's own space at the reference frame -----------
+    normals = char.rest_normals(owner, ref)
+    for surf, start, count in layout:
+        mesh = iqm.Mesh(surf.name, surf.shaders[0][0] if surf.shaders else "")
+        for k in range(count):
+            v = start + k
+            inf = sol.influences(v)
+            bones = [joint_of[b] for b, _w in inf]
+            raw = [int(round(w * ssdr.WEIGHT_SCALE)) for _b, w in inf]
+            raw[0] += ssdr.WEIGHT_SCALE - sum(raw)
+            bones += [0] * (4 - len(bones))
+            raw += [0] * (4 - len(raw))
+            mesh.add_vertex(tuple(sol.rest[v]), surf.st[k], normals[v],
+                            tuple(bones[:4]), tuple(raw[:4]))
+        mesh.triangles = [tuple(t) for t in surf.triangles]
+        model.meshes.append(mesh)
+
+    # --- the pose track ---------------------------------------------------
+    for f in range(char.frames):
+        g = [None] * len(model.joints)
+        for b in range(sol.bones):
+            m = [0.0] * 12
+            for r in range(3):
+                m[4 * r:4 * r + 3] = [float(x) for x in sol.rot[b, f, r]]
+                m[4 * r + 3] = float(sol.trans[b, f, r])
+            g[joint_of[b]] = m
+        live = tag_map(part, f)
+        for index, name in tags:
+            g[index] = live.get(name, iqm.IDENTITY)
+        # Poses are stated relative to the parent; the bind is the identity, so
+        # a joint's own transform goes in unchanged at the root.
+        frame = []
+        for i, joint in enumerate(model.joints):
+            if joint.parent < 0:
+                frame.append(g[i])
+            else:
+                frame.append(iqm.mat_mul(iqm.mat_invert_rigid(g[joint.parent]),
+                                         g[i]))
+        model.frames.append(frame)
+    return model
+
+
+def rigid_reconstruction(verts, ref):
+    """Where the rigid bind puts a part's vertices: frozen at the reference.
+
+    A part's bone reproduces the part's placement exactly - the pose is the md3
+    tag chain - so in the part's own space the rigid bind is the rest pose held
+    still, and the residual is the whole of the deformation inside the part.
+    That is the same quantity the published 9-15 unit table measured.
+    """
+    import numpy as np
+
+    return np.repeat(verts[ref][None], verts.shape[0], axis=0)
+
+
+# The parts a character is made of, in registration order.
+PARTS = ("lower", "upper", "head")
+
+
+def error_table(char, ref, verts, rigid, decomposed=None):
+    """Mean per-frame RMS, per animation class, for one part and both binds."""
+    import numpy as np
+    import ssdr
+
+    rows = []
+    spans = [("all", list(range(char.frames)))] + char.spans()
+    for name, span in spans:
+        idx = np.array(span, dtype=int)
+        a = float(ssdr.frame_rms(verts[idx], rigid[idx]).mean())
+        b = (float(ssdr.frame_rms(verts[idx], decomposed[idx]).mean())
+             if decomposed is not None else None)
+        rows.append((name, len(idx), a, b))
+    return rows
+
+
+def convert_parts(char, ref, bones, iterations, outdir, log=None,
+                  quiet=False):
+    """Solve and write lower.iqm, upper.iqm and head.iqm. Returns the errors."""
+    import ssdr
+
+    summary = []
+    for owner in PARTS:
+        if log:
+            log("%s:" % owner)
+        verts, layout, sol = solve_part(char, owner, ref, bones, iterations,
+                                        log)
+        got = ssdr.reconstruct(verts.shape, sol.rest, sol.rot, sol.trans,
+                               sol.weights)
+        rigid = rigid_reconstruction(verts, ref)
+        model = build_solved(char, owner, ref, layout, sol)
+        path = os.path.join(outdir, owner + ".iqm")
+        size = iqm.save(model, path)
+        rows = error_table(char, ref, verts, rigid, got)
+        summary.append((owner, rows, len(model.joints), size))
+        if not quiet:
+            print("    %-6s %d joints, %d verts, %d bytes, RMS %.2f -> %.2f"
+                  % (owner, len(model.joints), verts.shape[1], size,
+                     rows[0][2], rows[0][3]), flush=True)
+    return summary
 
 
 def main():
@@ -281,32 +468,79 @@ def main():
     ap.add_argument("out", nargs="?")
     ap.add_argument("--tier", default="tier1")
     ap.add_argument("--ref-frame", type=int, default=-1,
-                    help="freeze the meshes at this md3 frame (default: idle)")
+                    help="author the meshes at this md3 frame (default: idle)")
+    ap.add_argument("--bones", type=int, default=16,
+                    help="bones to solve per part (with --parts/--report)")
+    ap.add_argument("--iterations", type=int, default=6,
+                    help="alternating least squares passes")
+    ap.add_argument("--parts", action="store_true",
+                    help="decompose each part and write lower/upper/head.iqm "
+                         "beside the md3s")
     ap.add_argument("--report", action="store_true",
-                    help="print the rigid-bind residual instead of converting")
+                    help="print the residual per animation class, both binds")
+    ap.add_argument("--rigid-only", action="store_true",
+                    help="report the rigid bind without running the solve")
+    ap.add_argument("--sweep", default="",
+                    help="comma-separated bone counts to report error against")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
     char = Character(args.playerdir, args.tier)
     ref = args.ref_frame if args.ref_frame >= 0 else char.reference_frame()
+    name = os.path.basename(args.playerdir.rstrip("/"))
+    log = None if args.quiet else lambda s: print("    " + s, flush=True)
+
+    if args.sweep:
+        import ssdr
+        print("%s  %d frames, reference frame %d"
+              % (name, char.frames, ref))
+        print("    %-6s %-6s %8s" % ("part", "bones", "RMS"))
+        for owner in PARTS:
+            verts, _layout = char.trajectories(owner)
+            rigid = rigid_reconstruction(verts, ref)
+            print("    %-6s %-6s %8.3f"
+                  % (owner, "rigid", ssdr.frame_rms(verts, rigid).mean()))
+            for count in [int(x) for x in args.sweep.split(",") if x.strip()]:
+                sol = ssdr.solve(verts, ref, count, iterations=args.iterations)
+                got = ssdr.reconstruct(verts.shape, sol.rest, sol.rot,
+                                       sol.trans, sol.weights)
+                print("    %-6s %-6d %8.3f"
+                      % (owner, count, ssdr.frame_rms(verts, got).mean()),
+                      flush=True)
+        return 0
 
     if args.report:
-        name = os.path.basename(args.playerdir.rstrip("/"))
-        print("%-14s %d frames, reference frame %d" % (name, char.frames, ref))
-        idle = None
-        if len(char.anims) > IDLE_ROW:
-            first, count = char.anims[IDLE_ROW][0], char.anims[IDLE_ROW][1]
-            idle = range(first, min(first + count, char.frames))
-        for label, span in (("all", None), ("idle", idle)):
-            if span is None and label != "all":
-                continue
-            for owner, n, mean, worst in report(char, ref, span):
-                print("    %-4s %-6s %5d verts   mean RMS %6.2f   worst %6.2f units"
-                      % (label, owner, n, mean, worst))
+        import ssdr
+        print("%s  %d frames, reference frame %d, %d bones per part"
+              % (name, char.frames, ref, args.bones))
+        for owner in PARTS:
+            verts, _layout = char.trajectories(owner)
+            rigid = rigid_reconstruction(verts, ref)
+            got = None
+            if not args.rigid_only:
+                sol = ssdr.solve(verts, ref, args.bones,
+                                 iterations=args.iterations)
+                got = ssdr.reconstruct(verts.shape, sol.rest, sol.rot,
+                                       sol.trans, sol.weights)
+            print("  %s, %d verts" % (owner, verts.shape[1]))
+            print("    %-10s %6s %8s %10s"
+                  % ("class", "frames", "rigid", "decomposed"))
+            for label, count, a, b in error_table(char, ref, verts, rigid, got):
+                print("    %-10s %6d %8.2f %10s"
+                      % (label, count, a, "-" if b is None else "%.2f" % b),
+                      flush=True)
+        return 0
+
+    if args.parts:
+        outdir = os.path.join(args.playerdir, args.tier)
+        if not args.quiet:
+            print("%s: solving %d bones per part" % (name, args.bones))
+        convert_parts(char, ref, args.bones, args.iterations, outdir,
+                      log if not args.quiet else None, args.quiet)
         return 0
 
     if not args.out:
-        ap.error("an output path is required unless --report is given")
+        ap.error("an output path is required unless --report or --parts is given")
     model = build(char, ref)
     size = iqm.save(model, args.out)
     if not args.quiet:
