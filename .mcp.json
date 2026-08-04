@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "zeq2": {
+      "command": "python3",
+      "args": ["Tools/mcp/zeq2_mcp.py"],
+      "env": {}
+    }
+  }
+}
