@@ -869,9 +869,10 @@ endif #NetBSD
 endif #IRIX
 endif #SunOS
 
+# The bytecode interpreter runs everywhere, so the absence of a JIT is no
+# reason to skip producing the QVMs -- it only decides how they execute.
 ifneq ($(HAVE_VM_COMPILED),true)
   BASE_CFLAGS += -DNO_VM_COMPILED
-  BUILD_GAME_QVM=0
 endif
 
 TARGETS =
