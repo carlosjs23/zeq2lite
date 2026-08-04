@@ -181,10 +181,9 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 	# binary lands in the repository and the model cannot drift from the tool
 	# that makes it.
 	#
-	# Only the masters. The playable roster stays on md3 - see
-	# Tools/dev/README.md for the residual this rigid bind leaves on a fighter,
-	# which is small for a man standing at his mark and large for one throwing
-	# a punch. Adding a name here is the whole cost of converting one.
+	# Only the masters get the single-skeleton character.iqm: cg_master.c draws
+	# a master as one entity, and the rigid bind is exact for a man standing at
+	# his mark. Adding a name here is the whole cost of converting one.
 	echo "=== converting masters to IQM in $ZEQ2_GAME/ ==="
 	for who in rhogan seppa oberak naida tolm; do
 		src="$ZEQ2_BUILD/$ZEQ2_GAME/players/$who"
@@ -192,4 +191,43 @@ if [[ -d "$ZEQ2_ROOT/GameData" ]] && command -v python3 >/dev/null 2>&1; then
 		python3 "$ZEQ2_ROOT/Tools/dev/md3_to_iqm.py" "$src" \
 			"$src/tier1/character.iqm" | sed 's/^/    /'
 	done
+
+	# The playable characters, as skinned parts. Same rule as everything else
+	# here - the converter is the source and the .iqm is a build product - but
+	# unlike the rest this one costs about a minute per character, because it
+	# solves a rig out of the vertex trajectories rather than transcribing a tag
+	# chain. So it is skipped when the outputs are already newer than the md3s
+	# and the two tools that produce them, which makes a rebuild free and a
+	# first build a minute per name.
+	#
+	# The list is every character whose residual came in near the idle's, which
+	# is all of them - see the table in Tools/dev/README.md. Requires numpy;
+	# without it the roster simply stays on md3, which is a working game.
+	if python3 -c "import numpy" >/dev/null 2>&1; then
+		echo "=== decomposing characters into skinned IQM parts ==="
+		for who in goku krillin piccolo frieza nappa raditz vegetaCell \
+		           vegetaSaiyan boru draghan ganro kalla naida oberak oshiko \
+		           rhogan seppa tolm; do
+			src="$ZEQ2_BUILD/$ZEQ2_GAME/players/$who/tier1"
+			[[ -f "$src/lower.md3" ]] || continue
+			stale=0
+			for part in lower upper head; do
+				[[ -f "$src/$part.iqm" ]] || { stale=1; break; }
+				[[ "$src/$part.md3" -nt "$src/$part.iqm" ]] && { stale=1; break; }
+				for tool in ssdr.py md3_to_iqm.py iqm.py md3.py; do
+					[[ "$ZEQ2_ROOT/Tools/dev/$tool" -nt "$src/$part.iqm" ]] \
+						&& { stale=1; break 2; }
+				done
+			done
+			if [[ $stale -eq 0 ]]; then
+				echo "    $who: up to date"
+				continue
+			fi
+			python3 "$ZEQ2_ROOT/Tools/dev/md3_to_iqm.py" \
+				"$ZEQ2_BUILD/$ZEQ2_GAME/players/$who" --parts --quiet \
+				&& echo "    $who: lower.iqm upper.iqm head.iqm"
+		done
+	else
+		echo "note: no numpy - characters stay on md3 (see Tools/dev/README.md)"
+	fi
 fi
