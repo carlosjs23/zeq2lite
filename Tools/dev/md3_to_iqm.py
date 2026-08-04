@@ -416,8 +416,31 @@ def rigid_reconstruction(verts, ref):
     return np.repeat(verts[ref][None], verts.shape[0], axis=0)
 
 
-# The parts a character is made of, in registration order.
+# The parts a character is made of, in registration order, and the bone count
+# each is solved at by default. They differ because the parts do: the legs are
+# a few rigid segments and saturate by twelve bones, the torso carries two arms
+# and keeps improving past twenty-four, and the head barely deforms at all -
+# and handing the head more bones than its motion needs makes the fit *worse*,
+# because the clustering has more ways to land in a poor local minimum. See
+# --sweep, and Tools/dev/README.md for the table these came from.
 PARTS = ("lower", "upper", "head")
+DEFAULT_BONES = {"lower": 16, "upper": 24, "head": 12}
+
+
+def parse_bones(spec):
+    """"24" for every part, or "lower=16,upper=24,head=12" for each."""
+    out = dict(DEFAULT_BONES)
+    if not spec:
+        return out
+    if "=" not in spec:
+        return {part: int(spec) for part in PARTS}
+    for item in spec.split(","):
+        key, _sep, value = item.partition("=")
+        key = key.strip()
+        if key not in out:
+            raise ValueError("unknown part %r" % key)
+        out[key] = int(value)
+    return out
 
 
 def error_table(char, ref, verts, rigid, decomposed=None):
@@ -445,8 +468,8 @@ def convert_parts(char, ref, bones, iterations, outdir, log=None,
     for owner in PARTS:
         if log:
             log("%s:" % owner)
-        verts, layout, sol = solve_part(char, owner, ref, bones, iterations,
-                                        log)
+        verts, layout, sol = solve_part(char, owner, ref, bones[owner],
+                                        iterations, log)
         got = ssdr.reconstruct(verts.shape, sol.rest, sol.rot, sol.trans,
                                sol.weights)
         rigid = rigid_reconstruction(verts, ref)
@@ -454,12 +477,36 @@ def convert_parts(char, ref, bones, iterations, outdir, log=None,
         path = os.path.join(outdir, owner + ".iqm")
         size = iqm.save(model, path)
         rows = error_table(char, ref, verts, rigid, got)
-        summary.append((owner, rows, len(model.joints), size))
+        summary.append((owner, rows, verts.shape[1], len(model.joints), size))
         if not quiet:
             print("    %-6s %d joints, %d verts, %d bytes, RMS %.2f -> %.2f"
                   % (owner, len(model.joints), verts.shape[1], size,
                      rows[0][2], rows[0][3]), flush=True)
     return summary
+
+
+def whole_character(summary):
+    """Fold the three parts' tables into one, weighted by vertex count.
+
+    RMS over a set of vertices is the root of their mean square, so parts
+    combine as the root of the vertex-weighted mean of their squares - not as
+    the mean of their RMS values, which would flatter a big part with a small
+    residual.
+    """
+    import math
+
+    classes = [row[0] for row in summary[0][1]]
+    total = sum(count for _o, _r, count, _j, _s in summary)
+    out = []
+    for index, label in enumerate(classes):
+        frames = summary[0][1][index][1]
+        acc = [0.0, 0.0]
+        for _owner, rows, count, _joints, _size in summary:
+            for slot, value in enumerate(rows[index][2:4]):
+                acc[slot] += count * value * value
+        out.append((label, frames, math.sqrt(acc[0] / total),
+                    math.sqrt(acc[1] / total)))
+    return out
 
 
 def main():
@@ -469,8 +516,9 @@ def main():
     ap.add_argument("--tier", default="tier1")
     ap.add_argument("--ref-frame", type=int, default=-1,
                     help="author the meshes at this md3 frame (default: idle)")
-    ap.add_argument("--bones", type=int, default=16,
-                    help="bones to solve per part (with --parts/--report)")
+    ap.add_argument("--bones", default="",
+                    help="bones per part: one number, or lower=16,upper=24,"
+                         "head=12 (default)")
     ap.add_argument("--iterations", type=int, default=6,
                     help="alternating least squares passes")
     ap.add_argument("--parts", action="store_true",
@@ -487,6 +535,7 @@ def main():
 
     char = Character(args.playerdir, args.tier)
     ref = args.ref_frame if args.ref_frame >= 0 else char.reference_frame()
+    bones = parse_bones(args.bones)
     name = os.path.basename(args.playerdir.rstrip("/"))
     log = None if args.quiet else lambda s: print("    " + s, flush=True)
 
@@ -511,14 +560,15 @@ def main():
 
     if args.report:
         import ssdr
-        print("%s  %d frames, reference frame %d, %d bones per part"
-              % (name, char.frames, ref, args.bones))
+        print("%s  %d frames, reference frame %d, bones %s"
+              % (name, char.frames, ref,
+                 " ".join("%s=%d" % (p, bones[p]) for p in PARTS)))
         for owner in PARTS:
             verts, _layout = char.trajectories(owner)
             rigid = rigid_reconstruction(verts, ref)
             got = None
             if not args.rigid_only:
-                sol = ssdr.solve(verts, ref, args.bones,
+                sol = ssdr.solve(verts, ref, bones[owner],
                                  iterations=args.iterations)
                 got = ssdr.reconstruct(verts.shape, sol.rest, sol.rot,
                                        sol.trans, sol.weights)
@@ -534,9 +584,17 @@ def main():
     if args.parts:
         outdir = os.path.join(args.playerdir, args.tier)
         if not args.quiet:
-            print("%s: solving %d bones per part" % (name, args.bones))
-        convert_parts(char, ref, args.bones, args.iterations, outdir,
-                      log if not args.quiet else None, args.quiet)
+            print("%s: solving %s" % (name, " ".join(
+                "%s=%d" % (p, bones[p]) for p in PARTS)))
+        summary = convert_parts(char, ref, bones, args.iterations, outdir,
+                                log if not args.quiet else None, args.quiet)
+        if not args.quiet:
+            print("  whole character, %d verts"
+                  % sum(c for _o, _r, c, _j, _s in summary))
+            print("    %-10s %6s %8s %10s"
+                  % ("class", "frames", "rigid", "decomposed"))
+            for label, frames, a, b in whole_character(summary):
+                print("    %-10s %6d %8.2f %10.2f" % (label, frames, a, b))
         return 0
 
     if not args.out:
