@@ -1,5 +1,40 @@
 #include "cg_local.h"
 void parseTier(char *path,tierConfig_cg *tier);
+/*
+===============
+CG_RegisterCharacterPart
+
+One of lower, upper or head, preferring the skinned IQM the decomposition
+produced over the md3 it was solved from.
+
+The IQM is a drop-in: it carries the same surfaces under the same names, so
+the .skin files and every damage state match it unchanged; it carries the same
+tags at the same per-frame transforms, so CG_PositionRotatedEntityOnTag joins
+the parts exactly as before and weapons, auras and the melee anchor land where
+they did; and it keeps the md3's frame numbering, so animation.cfg still means
+what it says. The difference is that its vertices deform, because the bones
+were solved from the md3's own vertex trajectories rather than taken from the
+tag chain (Tools/dev/ssdr.py).
+
+A character with no .iqm files draws from its md3s down this same path, which
+is what every unconverted character in the roster does.
+===============
+*/
+static qboolean CG_RegisterCharacterPart(const char *dir,int tier,const char *part,qhandle_t *out){
+	char filename[MAX_QPATH * 2];
+
+	Com_sprintf(filename,sizeof(filename),"players/%s/tier%i/%s.iqm",dir,tier,part);
+	if(trap_FS_FOpenFile(filename,0,FS_READ)>0){
+		*out = trap_R_RegisterModel(filename);
+		return qtrue;
+	}
+	Com_sprintf(filename,sizeof(filename),"players/%s/tier%i/%s.md3",dir,tier,part);
+	if(trap_FS_FOpenFile(filename,0,FS_READ)>0){
+		*out = trap_R_RegisterModel(filename);
+		return qtrue;
+	}
+	return qfalse;
+}
 qboolean CG_RegisterClientModelnameWithTiers(clientInfo_t *ci, const char *modelName, const char *skinName){
 	int	i,index,partIndex,damageIndex,lastSkinIndex,lastModelIndex;
 	char filename[MAX_QPATH * 2];
@@ -78,21 +113,15 @@ qboolean CG_RegisterClientModelnameWithTiers(clientInfo_t *ci, const char *model
 		// ===================================
 		// Models
 		// ===================================
-		Com_sprintf(filename, sizeof(filename), "players/%s/tier%i/lower.md3", legsPath, i+1);
-		if(trap_FS_FOpenFile(filename,0,FS_READ)>0){ci->legsModel[i] = trap_R_RegisterModel(filename);}
-		else{
+		if(!CG_RegisterCharacterPart(legsPath, i+1, "lower", &ci->legsModel[i])){
 			if(i == 0){return qfalse;}
 			else{ci->legsModel[i] = ci->legsModel[i - 1];}
 		}
-		Com_sprintf(filename, sizeof(filename), "players/%s/tier%i/upper.md3", modelName, i+1);
-		if(trap_FS_FOpenFile(filename,0,FS_READ)>0){ci->torsoModel[i] = trap_R_RegisterModel(filename);}
-		else{
+		if(!CG_RegisterCharacterPart(modelName, i+1, "upper", &ci->torsoModel[i])){
 			if(i == 0){return qfalse;}
 			else{ci->torsoModel[i] = ci->torsoModel[i - 1];}
 		}
-		Com_sprintf(filename, sizeof(filename), "players/%s/tier%i/head.md3", headPath, i+1);
-		if(trap_FS_FOpenFile(filename,0,FS_READ)>0){ci->headModel[i] = trap_R_RegisterModel(filename);}
-		else{
+		if(!CG_RegisterCharacterPart(headPath, i+1, "head", &ci->headModel[i])){
 			if(i == 0){return qfalse;}
 			else{ci->headModel[i] = ci->headModel[i - 1];}
 		}

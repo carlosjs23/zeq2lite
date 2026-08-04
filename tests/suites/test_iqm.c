@@ -7,7 +7,7 @@ relative to the aura centre in R/G and an inner/outer flag in B, then rebuilds
 the shape in a vertex shader. MD3 has no colour channel. IQM does, and
 RB_IQMSurfaceAnim copies it straight into tess.vertexColors.
 
-Two things about that path are load-bearing and neither is obvious from reading
+Three things about that path are load-bearing and none is obvious from reading
 it, so they are pinned here before anything is built on top:
 
   1. The vertex transform is skinning-only. Every output position is
@@ -19,6 +19,11 @@ it, so they are pinned here before anything is built on top:
 
   2. frame and oldframe are reduced with "% data->num_frames" unguarded, so a
      genuinely frameless mesh divides by zero.
+
+  3. The blend walks exactly four influences and stops at the first
+     non-positive weight, so a writer must pack them from slot 0 with no gap.
+     This one matters to the skinning decomposition, whose whole output is
+     multi-influence vertices.
 
 Both are properties of the format's use here, not of any particular asset, which
 is why they are worth a test rather than a comment.
@@ -52,8 +57,10 @@ typedef struct {
 	byte			blendIndexes[4 * VERT_COUNT];
 	byte			blendWeights[4 * VERT_COUNT];
 	int				triangles[3];
-	float			poseMats[12];
-	int				jointParents[1];
+	/* Two joints' worth: the four-influence blend test needs a second one, and
+	   the single-joint tests only ever touch the first. */
+	float			poseMats[2 * 12];
+	int				jointParents[2];
 	trRefEntity_t	entity;
 } iqmFixture_t;
 
@@ -184,6 +191,57 @@ Test(iqm, a_boneless_mesh_collapses_to_the_origin) {
 		                   "holds its position, the skinning-only constraint is "
 		                   "gone and the aura mesh need not carry a dummy joint", i);
 	}
+}
+
+Test(iqm, a_vertex_blends_across_four_bones) {
+	/* What the skinning decomposition writes: a vertex weighted to several
+	   bones at once. Pinned because the blend has two properties the writer has
+	   to satisfy and neither is stated in the IQM specification - the loop runs
+	   over exactly four slots, and it breaks at the first non-positive weight
+	   rather than skipping it, so influences must be packed from slot 0 with no
+	   gap. A writer that leaves a hole silently drops every influence after it.
+
+	   One joint stands still, the other translates 100 on x, and the vertex is
+	   split 191/64 between them: it has to land 64/255 of the way along. */
+	seed_fixture(1, 2);
+
+	fx.data.num_joints = 2;
+	memcpy(fx.poseMats, identityJoint, sizeof(identityJoint));
+	memcpy(fx.poseMats + 12, identityJoint, sizeof(identityJoint));
+	fx.poseMats[12 + 3] = 100.0f;	/* second joint translates +100 on x */
+	fx.jointParents[1] = -1;
+
+	fx.blendIndexes[0] = 0;
+	fx.blendIndexes[1] = 1;
+	fx.blendWeights[0] = 191;	/* 191/255 on the joint that does not move */
+	fx.blendWeights[1] = 64;
+
+	RB_IQMSurfaceAnim((surfaceType_t *)&fx.surf);
+
+	cr_assert_float_eq(tess.xyz[0][0], 1.0f + 100.0f * 64.0f / 255.0f, 0.01f,
+	                   "a two-bone blend should land between the bones");
+
+	/* A zero in slot 1 must stop the walk: slot 2's weight is ignored even
+	   though it is set. This is the packing rule, stated as a measurement. */
+	seed_fixture(1, 2);
+	fx.data.num_joints = 2;
+	memcpy(fx.poseMats, identityJoint, sizeof(identityJoint));
+	memcpy(fx.poseMats + 12, identityJoint, sizeof(identityJoint));
+	fx.poseMats[12 + 3] = 100.0f;
+	fx.jointParents[1] = -1;
+
+	fx.blendIndexes[0] = 0;
+	fx.blendWeights[0] = 255;
+	fx.blendIndexes[1] = 1;
+	fx.blendWeights[1] = 0;
+	fx.blendIndexes[2] = 1;
+	fx.blendWeights[2] = 128;
+
+	RB_IQMSurfaceAnim((surfaceType_t *)&fx.surf);
+
+	cr_assert_float_eq(tess.xyz[0][0], 1.0f, 0.01f,
+	                   "influences after a zero weight must not contribute - "
+	                   "if they now do, the writer's packing rule is gone");
 }
 
 /* A recording ri.Printf. The loader reports every rejection the same way - by
