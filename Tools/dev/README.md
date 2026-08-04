@@ -23,7 +23,8 @@ Python scripts use only the standard library; shell scripts need bash.
 | `make_ring_art.py` | generate the tournament ring's floor, kerb, posts and ki wall |
 | `make_aura_mesh.py` | generate the screen-space aura's ring mesh |
 | `iqm.py` | write IQM models this engine's loader accepts (library, not a script) |
-| `md3_to_iqm.py` | convert a three-part md3 character to a skeletal IQM; `--report` measures what that costs |
+| `md3_to_iqm.py` | convert a character to skeletal IQM, rigid or skinned; `--report` measures what that costs |
+| `ssdr.py` | solve a skeleton and skin weights from vertex-animated geometry (**needs numpy**) |
 | `auragen.c` | procedurally generate aura reference images (compile: `cc -O2 -o auragen auragen.c -lz`) |
 | `aura_reference_clean.py` | turn any aura art into pipeline form - strips painted checkerboards (**needs numpy+scipy**) |
 | `make_aura_texture.py` | generate the screen-space aura's spike strip |
@@ -695,55 +696,135 @@ lands on the origin. The model loads, draws, and is invisible.
 
 `tests/suites/test_iqm.c` pins all three.
 
-### What the conversion recovers, and what it does not
+### The two binds, and what each one costs
 
-md3 is vertex animation and a skeleton cannot represent that in general. The
-converter recovers the *rigid* part: lower, upper and head each become one bone
-whose animation is the md3's own per-frame tag chain, and every md3 tag becomes
-a bone of its own carrying that tag's model-space transform, so
-`trap_R_LerpTag` keeps working by name. What is lost is deformation *inside* a
-part - striding legs, swinging arms.
+md3 is vertex animation and a skeleton cannot represent that in general. There
+are two ways out of it here and they measure two orders of magnitude apart.
 
-`--report` measures exactly that residual, in world units against a fighter
-about 56 units tall:
+**The rigid bind** (`md3_to_iqm.py <dir> <out.iqm>`) makes lower, upper and
+head one bone each, animated by the md3's own tag chain, and every md3 tag a
+bone of its own so `trap_R_LerpTag` keeps working. This is what a master is
+drawn from: one entity, one skeleton, `character.iqm`. What it loses is
+deformation *inside* a part - striding legs, swinging arms.
+
+**The decomposition** (`md3_to_iqm.py <dir> --parts`) solves the bones out of
+the vertex trajectories instead. `ssdr.py` implements Smooth Skinning
+Decomposition with Rigid Bones: cluster the vertices by whose rigid motion
+explains them, then alternate between fitting each bone's per-frame transform
+and fitting each vertex's four blend weights, until the reconstruction stops
+improving. It writes `lower.iqm`, `upper.iqm` and `head.iqm`, each a drop-in
+for its md3.
+
+**Per part, not per character, and that is not a detail.**
+`CG_PlayerAnimation` hands legs, torso and head their own frame numbers, which
+is how a fighter runs with his legs while his torso throws a punch. One
+skeleton over the whole character has one frame index and cannot do that. Three
+skeletons joined by the same tag chain can, and leave the .skin files, the
+damage states, the weapon tag, the aura tags and the melee anchor untouched.
+
+`--report` measures both binds in world units against a fighter about 56 units
+tall:
 
 ```
-rhogan         668 frames, reference frame 107
-    all  lower    790 verts   mean RMS  11.55   worst  48.78 units
-    idle lower    790 verts   mean RMS   0.10   worst   0.20 units
+goku  668 frames, reference frame 107, bones lower=16 upper=24 head=12
+  lower, 790 verts
+    class      frames    rigid decomposed
+    all           668    11.55       0.03
+    melee         128    15.15       0.03
 ```
 
-That split is the whole argument for where the line was drawn. Over the idle
-the residual is a tenth of a unit - the idle is rigid, and a master standing at
-his mark converts with no visible loss, which is what the side-by-side shows.
-Over the full animation set it is eleven units, a fifth of body height, on
-every character in the roster. A playable fighter on this bind would be a
-statue sliding around the map, so the roster stays on md3 until there is a
-route to real skinning weights.
+The rigid residual is eight to thirteen units on every character - a fifth of
+body height, a statue sliding around the map. The decomposed residual is a
+tenth of a unit, which is the same order as the *idle*'s rigid residual - the
+number that made the masters convert with no visible loss. Every character in
+the roster clears it, on every animation class:
 
-The reference frame is the idle's first frame rather than frame 0, because
-frame 0 of every shipped rig is a death pose.
+| character | rigid, all | decomposed, all | worst class (decomposed) |
+| --- | --- | --- | --- |
+| goku | 9.95 | 0.06 | 0.08 swim |
+| krillin | 8.62 | 0.08 | 0.12 run |
+| piccolo | 12.20 | 0.13 | 0.20 swim |
+| frieza | 8.00 | 0.14 | 0.17 jump |
+| nappa | 13.18 | 0.16 | 0.34 swim |
+| raditz | 10.52 | 0.13 | 0.18 kiattack |
+| vegetaCell | 9.21 | 0.07 | 0.12 kiattack |
+| vegetaSaiyan | 9.63 | 0.17 | 0.21 kiattack |
 
-Every character in the roster measures the same way - this is a property of md3
-vertex animation, not of any one rig:
+The ten non-playable dirs measure the same way; several are kitbashes of these
+models and report identical numbers, which is a useful check that the solve is
+deterministic. **The whole roster is converted.** Nothing stays on md3 for
+accuracy reasons, and a character with no `.iqm` still draws from its md3s down
+the same path in `cg_tiers.c`, so deleting the files is a complete rollback.
 
-| character | mean RMS, all anims | mean RMS, idle |
-| --- | --- | --- |
-| goku | 11.5 | 0.10 |
-| krillin | 9.3 | 0.10 |
-| piccolo | 15.3 | 0.11 |
-| frieza | 11.3 | 0.09 |
-| nappa | 13.0 | 0.10 |
-| raditz | 13.2 | 0.10 |
-| vegetaCell | 11.6 | 0.10 |
-| vegetaSaiyan | 14.0 | 0.10 |
+### Choosing a bone count
 
-`cg_masterAnim 9` with `cg_masterCompare 64` is the same fact as a picture: the
-md3 strides and the skeletal copy stands in its idle with only its torso and
-head rotating. **The playable roster stays on md3.** Moving it would need real
-skinning weights, which means solving them from the vertex trajectories - a
-skinning decomposition, not something this converter can reach - or authoring
-rigs, and there is no source art.
+`--sweep 4,8,12,16,24,32` prints the tradeoff. It is not the same for the three
+parts, which is why `--bones` takes `lower=16,upper=24,head=12` as well as a
+single number:
+
+| bones | lower | upper | head |
+| --- | --- | --- | --- |
+| rigid | 11.55 | 11.43 | 0.39 |
+| 4 | 1.07 | 0.96 | 0.07 |
+| 8 | 0.15 | 0.53 | 0.04 |
+| 12 | 0.04 | 0.30 | 0.03 |
+| 16 | 0.03 | 0.17 | 0.02 |
+| 24 | 0.02 | 0.08 | 0.07 |
+| 32 | 0.02 | 0.05 | 0.02 |
+
+The legs are a few rigid segments and saturate by twelve. The torso carries two
+arms and keeps improving past twenty-four. The head barely deforms at all - and
+note that it gets *worse* at 24 than at 16: the clustering is initialised by
+k-means and more bones than the motion needs give it more ways to land in a
+poor local minimum. More bones is not monotonically better, so read the sweep
+rather than assuming.
+
+### Running the conversion
+
+`zeq2build.sh` does it, and skips a character whose three `.iqm` files are
+newer than its md3s and than `ssdr.py`, `md3_to_iqm.py`, `iqm.py` and `md3.py`.
+A first build is about a minute per character; every build after that is free.
+Touching the solver invalidates all of them, which is intended - a rig that no
+longer matches the tool that made it is the failure this rule exists to stop.
+
+**Needs numpy**, and only that: no scipy, no other package. Without numpy the
+build prints a note and the roster stays on md3, which is a working game rather
+than a broken one. `python3 Tools/dev/ssdr.py --self-test` checks the solver's
+pieces against synthetic rigs with known answers and takes a second.
+
+### What it costs to draw
+
+IQM skinning is CPU work per vertex per frame - `RB_IQMSurfaceAnim` blends four
+matrices and transforms a position and a normal for each of about 3000 vertices
+per character - where md3 lerps two frames of positions. Measured on the
+`abtest` demo, one character on screen, arms interleaved to cancel thermal
+drift:
+
+```
+IQM  3.32 ms   3.28 ms
+md3  2.84 ms   2.81 ms
+```
+
+Half a millisecond per character per frame, repeatable to a hundredth. On a
+16.7 ms budget that is three percent of a frame for one fighter and six for a
+duel, which is the price of the roster deforming at all. If a crowded scene
+ever needs it back, the lever is the bone count: `--sweep` shows the torso at
+twelve bones is still forty times better than the rigid bind.
+
+### Reading the solved skeleton
+
+The bones are discovered, not authored, so their names say where on the body
+the bone's rest centroid sits and nothing more: a vertical band (`foot`,
+`shin`, `thigh`, `hips`, `chest`, `neck`, `head`), promoted to `arm` or `hand`
+when the centroid is far enough off the body's mid-line, suffixed `_l` or `_r`,
+and numbered from the top down when several land in the same band. The
+hierarchy is a minimum spanning tree over "how much does bone B's origin wander
+in bone A's frame", rooted at the bone nearest the pelvis.
+
+Nothing in the fit depends on that tree. The bind is the identity and poses are
+written relative to the parent, so any tree reproduces the same vertices
+exactly; the tree exists because the renderer wants one and because
+`refEntity_t`'s name-keyed bone overrides want names that mean something.
 
 ### Driving a bone from the game module
 
