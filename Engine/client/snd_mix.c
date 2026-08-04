@@ -182,7 +182,10 @@ void S_TransferPaintBuffer(int endtime)
 		p = (int *) paintbuffer;
 		count = (endtime - s_paintedtime) * dma.channels;
 		out_mask = dma.samples - 1; 
-		out_idx = s_paintedtime * dma.channels & out_mask;
+		// multiply unsigned: s_paintedtime is a running sample count and
+		// overflows a signed int after a few hours of play. The mask keeps
+		// the index in range either way, so this is only about the overflow.
+		out_idx = (unsigned int)s_paintedtime * dma.channels & out_mask;
 		step = 3 - dma.channels;
 
 		if (dma.samplebits == 16)
