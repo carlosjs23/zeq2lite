@@ -851,18 +851,116 @@ static qboolean CG_WeaponSelectable( int i ) {
 
 /*
 ===============
-CG_NextWeapon_f
+CG_StepWeaponSelect
+
+Walks the skill list one usable entry in 'step' direction, wrapping, and
+returns where it lands. Same predicate and same order as PM_WeaponSelectable
+walks it server side, which is what keeps the highlighted skill and the skill
+that fires from naming different things.
 ===============
 */
-void CG_NextWeapon_f( void ) {
+static int CG_StepWeaponSelect( int from, int step ) {
+	int	weapon;
+	int	i;
+
+	weapon = from;
+	for ( i = 0 ; i < 15 ; i++ ) {
+		weapon += step;
+		if ( weapon > 15 ) { weapon = 1; }
+		if ( weapon < 1 ) { weapon = 15; }
+		if ( CG_WeaponSelectable( weapon ) ) {
+			return weapon;
+		}
+	}
+	return from;
+}
+
+/*
+===============
+CG_TierSelectHeld
+
+True while the fighter holds the power level button, where PM_CheckContextOperations
+rewires a wheel notch into a tier change. Stepping the skill list locally would
+eat that notch, so a held power level button keeps the relative selection mode
+the tier path is written against.
+===============
+*/
+static qboolean CG_TierSelectHeld( void ) {
+	usercmd_t	cmd;
+
+	if ( !trap_GetUserCmd( trap_GetCurrentCmdNumber(), &cmd ) ) {
+		return qfalse;
+	}
+	return ( cmd.buttons & BUTTON_POWERLEVEL ) ? qtrue : qfalse;
+}
+
+/*
+===============
+CG_SelectWeaponStep
+
+One wheel notch. The selection is stepped here rather than on the far side of a
+round trip because the selection mode byte carries a direction and not a count:
+every notch that arrives before the server answers used to collapse into the
+single step the byte could say, so a fast scroll landed short of the skill the
+player picked. Stepping locally and sending the resulting index outright makes
+a notch worth exactly one skill however fast they come.
+===============
+*/
+static void CG_SelectWeaponStep( int step ) {
 	if ( !cg.snap || cg.snap->ps.bitFlags & usingMelee ) {
 		return;
 	}
 	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
 		return;
 	}
-	cg.weaponSelectionMode = 2;
 	cg.weaponSelectTime = cg.time;
+	if ( CG_TierSelectHeld() ) {
+		cg.weaponSelectionMode = ( step > 0 ) ? 2 : 1;
+		return;
+	}
+	cg.weaponSelect = CG_StepWeaponSelect( cg.weaponSelect, step );
+	cg.weaponDesired = cg.weaponSelect;
+	cg.weaponSelectionMode = 3;
+	cg.drawWeaponBar = 1;
+}
+
+/*
+===============
+CG_UpdateWeaponSelect
+
+Keeps the skill the bar highlights and the skill a shot comes out of the same
+thing. The predicted state is what fires, so the highlight follows it outright;
+a notch the player has just taken holds the highlight on what they asked for
+until the prediction answers. That is what lets a change pmove refuses - while
+soaring, mid-charge, or with the skill's requirements lapsed - fall back on its
+own instead of leaving the bar naming a skill that will not fire.
+===============
+*/
+void CG_UpdateWeaponSelect( void ) {
+	if ( !cg.snap || cg.predictedPlayerState.weapon <= WP_NONE ) {
+		return;
+	}
+	if ( cg.weaponSelectionMode == 1 || cg.weaponSelectionMode == 2 ) {
+		return;		// a relative notch is the tier path's, not ours
+	}
+	if ( cg.weaponDesired > 0 ) {
+		if ( cg.predictedPlayerState.weapon != cg.weaponDesired
+			&& cg.time - cg.weaponSelectTime <= WEAPON_REQUEST_TIME ) {
+			return;
+		}
+		cg.weaponDesired = -1;
+		cg.weaponSelectionMode = 0;
+	}
+	cg.weaponSelect = cg.predictedPlayerState.weapon;
+}
+
+/*
+===============
+CG_NextWeapon_f
+===============
+*/
+void CG_NextWeapon_f( void ) {
+	CG_SelectWeaponStep( 1 );
 }
 
 /*
@@ -871,14 +969,7 @@ CG_PrevWeapon_f
 ===============
 */
 void CG_PrevWeapon_f( void ) {
-	if ( !cg.snap || cg.snap->ps.bitFlags & usingMelee ) {
-		return;
-	}
-	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
-		return;
-	}
-	cg.weaponSelectionMode = 1;
-	cg.weaponSelectTime = cg.time;
+	CG_SelectWeaponStep( -1 );
 }
 
 
@@ -902,9 +993,14 @@ void CG_Weapon_f( void ) {
 	if ( num < 1 || num > 15 ) {
 		return;
 	}
+	if ( !CG_WeaponSelectable( num ) ) {
+		return;
+	}
 	cg.weaponSelectTime = cg.time;
+	cg.weaponSelect = num;
 	cg.weaponDesired = num;
 	cg.weaponSelectionMode = 3;
+	cg.drawWeaponBar = 1;
 }
 
 	/*

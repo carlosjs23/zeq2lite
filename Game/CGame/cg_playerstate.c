@@ -295,13 +295,21 @@ void CG_TransitionPlayerState( playerState_t *ps, playerState_t *ops ) {
 		cg.weaponDesired = -1;
 		cg.weaponSelectionMode = 0;
 	}
-	if(ps->currentSkill[WPSTAT_CHANGED] != 0){
-		//If the server validated a weapon change, changes it
-		cg.weaponSelectionMode = 0;
-		cg.weaponDesired = -1;
-		cg.weaponSelect = ps->weapon;
-		if(ps->currentSkill[WPSTAT_CHANGED] != -1) {
-			cg.drawWeaponBar = 1;
+	if(ps->currentSkill[WPSTAT_CHANGED] == 1){
+		cg.drawWeaponBar = 1;
+	}
+	// A relative notch is only sent while the power level button is held, where
+	// PM_CheckContextOperations spends it on the tier instead. Nothing else
+	// retires it, so it rides until the server answers or it goes stale.
+	// Everything the weapon selection itself needs is settled per frame in
+	// CG_UpdateWeaponSelect - WPSTAT_CHANGED cannot carry it, because the
+	// server runs several usercmds per snapshot and only the last one's value
+	// survives into it, so the frame that carried the change is regularly not a
+	// frame the client ever sees.
+	if(cg.weaponSelectionMode == 1 || cg.weaponSelectionMode == 2){
+		if(ps->currentSkill[WPSTAT_CHANGED] != 0
+			|| cg.time - cg.weaponSelectTime > WEAPON_REQUEST_TIME){
+			cg.weaponSelectionMode = 0;
 		}
 	}
 }

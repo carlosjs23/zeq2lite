@@ -57,6 +57,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	DUCK_TIME			100
 #define	PAIN_TWITCH_TIME	200
 #define	WEAPON_SELECT_TIME	1400
+// How long a skill the player picked keeps the highlight while nothing has
+// confirmed it. Prediction normally answers within a frame or two, so this only
+// has to cover a round trip for a client running without it; past it the
+// request is treated as refused and the highlight belongs back on what fires.
+#define	WEAPON_REQUEST_TIME	250
 #define	ITEM_SCALEUP_TIME	1000
 // A spawn is handed a maximum-power reserve of plMaximum/4, so scaling the
 // gauge to plMaximum/3 leaves it three quarters full before the first fight.
@@ -1686,6 +1691,7 @@ void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi );
 void CG_AddViewWeapon (playerState_t *ps);
 void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent, int team );
 void CG_DrawWeaponSelect( void );
+void CG_UpdateWeaponSelect( void );
 
 
 // FIXME: Should these be in drawtools instead?
