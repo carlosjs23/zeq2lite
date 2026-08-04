@@ -213,3 +213,13 @@ def add_surface(m, surf):
         surf.frames = [list(one) for _ in range(len(m.frames))]
     m.surfaces.append(surf)
     return m
+
+
+def unpack_normal(v):
+    """The inverse of pack_normal: lat/lng byte pair back to a unit vector."""
+    import math
+    lat = ((v >> 8) & 255) * 2.0 * math.pi / 255.0
+    lng = (v & 255) * 2.0 * math.pi / 255.0
+    return (math.cos(lat) * math.sin(lng),
+            math.sin(lat) * math.sin(lng),
+            math.cos(lng))
