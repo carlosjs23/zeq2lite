@@ -1332,12 +1332,20 @@ long FS_FOpenFileRead(const char *filename, fileHandle_t *file, qboolean uniqueF
 {
 	searchpath_t *search;
 	long len;
+	qboolean isLocalConfig;
 
 	if(!fs_searchpaths)
 		Com_Error(ERR_FATAL, "Filesystem call made without initialization");
 
+	isLocalConfig = !strcmp(filename, "autoexec.cfg") || !strcmp(filename, Q3CONFIG_CFG);
+
 	for(search = fs_searchpaths; search; search = search->next)
 	{
+		// these two are exec'd as commands, so a downloaded pk3 supplying
+		// its own copy would be running whatever it liked on the client
+		if (isLocalConfig && search->pack)
+			continue;
+
 	        len = FS_FOpenFileReadDir(filename, search, file, uniqueFILE, qfalse);
 	        
 	        if(file == NULL)

@@ -447,7 +447,15 @@ from executable path, then fs_basepath.
 void *Sys_LoadDll(const char *name, qboolean useSystemLib)
 {
 	void *dllhandle;
-	
+
+	// a downloaded pk3 lands in the game directory the module search walks,
+	// so refuse to hand one to the dynamic loader whatever it is named after
+	if (COM_CompareExtension(name, ".pk3"))
+	{
+		Com_Printf("Rejecting DLL named \"%s\"\n", name);
+		return NULL;
+	}
+
 	if(useSystemLib)
 		Com_Printf("Trying to load \"%s\"...\n", name);
 	
