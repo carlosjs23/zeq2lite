@@ -256,3 +256,94 @@ Test(iqm, a_single_frame_model_passes_the_frame_count_guard) {
 	             "a single-frame model must clear the frame-count guard, got: %s",
 	             lastWarning);
 }
+
+/* --------------------------------------------------------------------------
+   R_IQMLerpTag - bones as attachment points.
+
+   The skeletal characters hang gear off bones by name, through the same
+   trap_R_LerpTag the md3 path uses for tags. Two properties of that make the
+   whole scheme work, and both are invisible until an attachment lands in the
+   wrong place:
+
+     1. A tag's transform is the *accumulated* pose chain, so a bone parented
+        under another inherits it. Gear on a head bone follows the head.
+
+     2. What comes back is ComputeJointMats' output, which is
+        pose_global * inverse(bind_global) - a skinning matrix, not the joint's
+        transform. The two coincide only when the bind pose is the identity,
+        which is why Tools/dev/iqm.py emits every joint bound at the identity
+        and puts the whole rest pose in frame 0. A converter that bound joints
+        at their rest transforms would produce gear offset by that transform,
+        with nothing in the log to say so.
+   -------------------------------------------------------------------------- */
+
+typedef struct {
+	iqmData_t	data;
+	float		poseMats[2 * 12];
+	int			jointParents[2];
+	char		names[16];
+} lerpTagFixture_t;
+
+static lerpTagFixture_t tagFx;
+
+static void seed_lerp_tag(void) {
+	memset(&tagFx, 0, sizeof(tagFx));
+
+	memcpy(tagFx.poseMats, identityJoint, sizeof(identityJoint));
+	memcpy(tagFx.poseMats + 12, identityJoint, sizeof(identityJoint));
+	tagFx.poseMats[3] = 10.0f;		/* root translated  +10 x */
+	tagFx.poseMats[12 + 7] = 5.0f;	/* head translated  +5 y, in root space */
+
+	tagFx.jointParents[0] = -1;
+	tagFx.jointParents[1] = 0;
+
+	memcpy(tagFx.names, "root\0head\0", 10);
+
+	tagFx.data.num_joints   = 2;
+	tagFx.data.num_frames   = 1;
+	tagFx.data.poseMats     = tagFx.poseMats;
+	tagFx.data.jointParents = tagFx.jointParents;
+	tagFx.data.names        = tagFx.names;
+}
+
+Test(iqm, a_bone_resolves_as_a_tag_by_name) {
+	orientation_t	tag;
+
+	seed_lerp_tag();
+	memset(&tag, 0, sizeof(tag));
+
+	cr_assert(R_IQMLerpTag(&tag, &tagFx.data, 0, 0, 0.0f, "root"),
+	          "a joint named in the names blob must resolve");
+	cr_assert_float_eq(tag.origin[0], 10.0f, 0.001f,
+	                   "the root tag should sit where its pose puts it");
+}
+
+Test(iqm, a_child_bone_tag_inherits_its_parent) {
+	orientation_t	tag;
+
+	seed_lerp_tag();
+	memset(&tag, 0, sizeof(tag));
+
+	cr_assert(R_IQMLerpTag(&tag, &tagFx.data, 0, 0, 0.0f, "head"));
+
+	/* 10 from the root, 5 from the head's own pose. If this ever returns the
+	   head's local pose alone, gear parented to a bone stops following the
+	   chain and every attachment on a converted character moves to the model
+	   origin's neighbourhood. */
+	cr_assert_float_eq(tag.origin[0], 10.0f, 0.001f,
+	                   "a child bone must inherit its parent's translation");
+	cr_assert_float_eq(tag.origin[1], 5.0f, 0.001f,
+	                   "a child bone must keep its own translation");
+}
+
+Test(iqm, an_unknown_bone_name_fails_rather_than_returning_junk) {
+	orientation_t	tag;
+
+	seed_lerp_tag();
+	memset(&tag, 0xff, sizeof(tag));
+
+	cr_assert_not(R_IQMLerpTag(&tag, &tagFx.data, 0, 0, 0.0f, "tag_weapon"),
+	              "a name no joint carries must not resolve");
+	cr_assert_float_eq(tag.origin[0], 0.0f, 0.001f,
+	                   "a failed lookup must clear the tag, not leave it stale");
+}
