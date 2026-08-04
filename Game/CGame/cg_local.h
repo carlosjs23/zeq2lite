@@ -1317,6 +1317,8 @@ extern	vmCvar_t		cg_drawTimer;
 extern	vmCvar_t		cg_drawFPS;
 extern	vmCvar_t		cg_debugFight;
 extern	vmCvar_t		cg_masterCompare;
+extern	vmCvar_t		cg_masterProportion;
+extern	vmCvar_t		cg_masterAnim;
 extern	vmCvar_t		cg_drawSnapshot;
 extern	vmCvar_t		cg_draw3dIcons;
 extern	vmCvar_t		cg_drawIcons;

@@ -52,6 +52,13 @@
 // the same offset RING_PLACE_FLOOR_DROP takes off a ring floor.
 #define CG_MASTER_FLOOR_DROP	24.0f
 
+// How far a master will turn his head before his body has to come round with
+// it. Seventy degrees is past what a neck does and well short of the point
+// where the head reads as detached from the shoulders; the body then holds
+// still for a player walking a full half-circle around him.
+#define CG_MASTER_NECK_YAW		70.0f
+#define CG_MASTER_NECK_PITCH	35.0f
+
 typedef struct {
 	char		name[CG_MASTER_NAME];
 	vec3_t		origin;
@@ -61,6 +68,12 @@ typedef struct {
 	qhandle_t	headModel;
 	qhandle_t	skin;
 	qboolean	drawable;
+	// Where his body is pointed, kept between frames. A master turns his head
+	// to follow the player and only swings his body when the head runs out of
+	// travel, which needs the body's own facing remembered - it is no longer a
+	// function of where the camera is this frame.
+	float		bodyYaw;
+	qboolean	bodyAimed;
 } cgMaster_t;
 
 static cgMaster_t	cgMasters[CG_MASTERS_MAX];
@@ -76,6 +89,7 @@ static char		cgMasterBuffer[CG_MASTERS_SIZE+1];
 // who never takes a hit.
 static clientInfo_t	cgMasterScratch;
 static animation_t	cgMasterIdle[CG_MASTERS_MAX];
+static animation_t	cgMasterAnims[CG_MASTERS_MAX][MAX_TOTALANIMATIONS];
 
 /*================
 CG_MasterRegisterMD3
@@ -127,6 +141,12 @@ static qboolean CG_MasterRegister(cgMaster_t *master){
 	// cgame and reading the obvious field gets a set of zeroes.
 	cgMasterIdle[master - cgMasters] = cgMasterScratch.camAnimations[ANIM_IDLE];
 	if(cgMasterIdle[master - cgMasters].numFrames < 1){return qfalse;}
+	// The whole set is kept only so cg_masterAnim can pick another one. It is
+	// how the cost of the skeletal conversion is looked at rather than argued
+	// about: the idle is rigid and converts exactly, and anything with a stride
+	// in it does not.
+	memcpy(cgMasterAnims[master - cgMasters],cgMasterScratch.camAnimations,
+			sizeof(cgMasterAnims[0]));
 	return qtrue;
 }
 
@@ -276,10 +296,16 @@ frame, so animation.cfg's ranges index the pose track directly and this shares
 CG_MasterAnimate with the md3 path unchanged.
 ================*/
 static void CG_MasterDrawSkeletal(cgMaster_t *master,const animation_t *anim,
-		const vec3_t origin,const vec3_t angles){
+		const vec3_t origin,const vec3_t angles,
+		const refBone_t *bones,int numBones){
 	refEntity_t	ent;
 
 	memset(&ent,0,sizeof(ent));
+	if(numBones > 0){
+		if(numBones > REF_MAX_BONES){numBones = REF_MAX_BONES;}
+		memcpy(ent.bones,bones,numBones * sizeof(ent.bones[0]));
+		ent.numBones = numBones;
+	}
 	AnglesToAxis(angles,ent.axis);
 	VectorCopy(origin,ent.origin);
 	VectorCopy(origin,ent.lightingOrigin);
@@ -303,9 +329,13 @@ judged in the same frame under the same light. It is a developer control and not
 a fallback - the choice of path is made by whether the IQM registered.
 ================*/
 static void CG_MasterDraw(cgMaster_t *master,const animation_t *anim){
-	vec3_t	delta,angles,right,beside;
+	vec3_t		delta,toView,angles,body,look,right,beside;
+	refBone_t	bones[REF_MAX_BONES];
+	int			numBones;
+	float		swing;
 
 	VectorSubtract(cg.refdef.vieworg,master->origin,delta);
+	VectorCopy(delta,toView);
 	delta[2] = 0;
 	VectorClear(angles);
 	if(delta[0] || delta[1]){vectoangles(delta,angles);}
@@ -315,11 +345,61 @@ static void CG_MasterDraw(cgMaster_t *master,const animation_t *anim){
 		CG_MasterDrawMD3(master,anim,master->origin,angles);
 		return;
 	}
-	CG_MasterDrawSkeletal(master,anim,master->origin,angles);
-	if(cg_masterCompare.value && CG_MasterRegisterMD3(master)){
-		AngleVectors(angles,NULL,right,NULL);
+
+	// Head first, body second. The md3 path had no choice - a head is welded to
+	// tag_head and the only thing that can be aimed is the whole assembly - so a
+	// master pivoted on the spot to track anyone walking past him. With the head
+	// as a bone the body can hold still and only give way when the neck runs
+	// out of travel, which is what a person does.
+	if(!master->bodyAimed){
+		master->bodyYaw = angles[YAW];
+		master->bodyAimed = qtrue;
+	}
+	swing = AngleSubtract(angles[YAW],master->bodyYaw);
+	if(swing > CG_MASTER_NECK_YAW){master->bodyYaw = AngleMod(angles[YAW] - CG_MASTER_NECK_YAW);}
+	else if(swing < -CG_MASTER_NECK_YAW){master->bodyYaw = AngleMod(angles[YAW] + CG_MASTER_NECK_YAW);}
+	VectorClear(body);
+	body[YAW] = master->bodyYaw;
+
+	memset(bones,0,sizeof(bones));
+	numBones = 0;
+	VectorClear(look);
+	look[YAW] = AngleSubtract(angles[YAW],master->bodyYaw);
+	// Pitch is taken from the real line of sight rather than from the flattened
+	// one, so a master looks up at a player hovering over him.
+	if(toView[0] || toView[1]){
+		look[PITCH] = -RAD2DEG(atan2(toView[2],sqrt(toView[0]*toView[0] + toView[1]*toView[1])));
+		if(look[PITCH] > CG_MASTER_NECK_PITCH){look[PITCH] = CG_MASTER_NECK_PITCH;}
+		if(look[PITCH] < -CG_MASTER_NECK_PITCH){look[PITCH] = -CG_MASTER_NECK_PITCH;}
+	}
+	// The angles land in the head bone's own frame, which on these rigs is the
+	// model's frame: tag_head's axes are within half a degree of identity. On a
+	// rig whose head tag carries a twist - the ones the README's donor-head note
+	// is about - this would need that twist taken out first.
+	Q_strncpyz(bones[0].name,"head",sizeof(bones[0].name));
+	VectorCopy(look,bones[0].angles);
+	numBones = 1;
+
+	CG_MasterDrawSkeletal(master,anim,master->origin,body,bones,numBones);
+
+	if(cg_masterCompare.value){
+		AngleVectors(body,NULL,right,NULL);
 		VectorMA(master->origin,cg_masterCompare.value,right,beside);
-		CG_MasterDrawMD3(master,anim,beside,angles);
+		if(cg_masterProportion.value){
+			// The same character on the same skeleton with two bones scaled -
+			// which is the thing a vertex-animated md3 cannot be asked for at
+			// all, because its proportions are baked into every frame.
+			memset(bones,0,sizeof(bones));
+			Q_strncpyz(bones[0].name,"head",sizeof(bones[0].name));
+			VectorCopy(look,bones[0].angles);
+			VectorSet(bones[0].scale,cg_masterProportion.value,
+					cg_masterProportion.value,cg_masterProportion.value);
+			Q_strncpyz(bones[1].name,"lower",sizeof(bones[1].name));
+			VectorSet(bones[1].scale,1.0f,1.0f,2.0f - cg_masterProportion.value);
+			CG_MasterDrawSkeletal(master,anim,beside,body,bones,2);
+		}else if(CG_MasterRegisterMD3(master)){
+			CG_MasterDrawMD3(master,anim,beside,body);
+		}
 	}
 }
 
@@ -372,14 +452,20 @@ const float *CG_MasterOrigin(int index){
 }
 
 void CG_AddMasters(void){
-	vec3_t	delta;
-	int		i;
+	const animation_t	*anim;
+	vec3_t				delta;
+	int					i;
 
 	CG_MastersEnsure();
 	for(i=0;i<cgMasterCount;i++){
 		if(!cgMasters[i].drawable){continue;}
 		VectorSubtract(cgMasters[i].origin,cg.refdef.vieworg,delta);
 		if(VectorLength(delta) > CG_MASTER_DRAW_RANGE){continue;}
-		CG_MasterDraw(&cgMasters[i],&cgMasterIdle[i]);
+		anim = &cgMasterIdle[i];
+		if(cg_masterAnim.integer > 0 && cg_masterAnim.integer < MAX_TOTALANIMATIONS
+		&& cgMasterAnims[i][cg_masterAnim.integer].numFrames > 0){
+			anim = &cgMasterAnims[i][cg_masterAnim.integer];
+		}
+		CG_MasterDraw(&cgMasters[i],anim);
 	}
 }

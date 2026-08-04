@@ -724,6 +724,37 @@ route to real skinning weights.
 The reference frame is the idle's first frame rather than frame 0, because
 frame 0 of every shipped rig is a death pose.
 
+### Driving a bone from the game module
+
+`refEntity_t` carries `bones[REF_MAX_BONES]`, each a joint name plus an additive
+rotation and a per-axis scale (`Engine/renderer/tr_types.h`). Both are applied in
+the bone's own frame, after the animated pose and before the bone is
+concatenated onto its parent, so a rotation pivots at the joint and a scale
+grows the bone's own geometry. Only MOD_IQM reads them; md3 entities are
+untouched. A zeroed `refEntity_t` is a no-op - a zero scale reads as 1.
+
+Two things to know before using them:
+
+**Scale is inherited, and non-uniform scale is inherited as a squash of the
+whole space below it.** Halving the `lower` bone's z does not just shorten the
+legs, it flattens the torso and head that hang off it. A real proportion
+control has to put the compensating inverse scale on the children.
+
+**`R_LerpTag` gets no entity,** because `refexport_t` does not pass one. A tag
+therefore resolves against the animated pose and ignores bone overrides, so gear
+that has to follow a driven bone must be a mesh weighted to that bone - which is
+how `md3_to_iqm.py` emits headgear - rather than a separate model on a tag.
+
+The angles land in the bone's frame, which on the goku-derived rigs is the
+model's frame: `tag_head`'s axes come back within half a degree of the identity.
+A rig whose head tag carries a twist - the ones the donor-head note below is
+about - would need that twist taken out first.
+
+`cg_master.c` uses both: a master turns his head to follow the player and only
+swings his body when the neck runs out of travel at
+`CG_MASTER_NECK_YAW`, and `cg_masterProportion` scales the head and legs of the
+copy `cg_masterCompare` draws.
+
 ### Looking at one
 
 `cg_masterCompare <units>` (cheat) draws a converted master's md3 assembly that
@@ -736,6 +767,13 @@ Tools/dev/zeq2shot.sh --map desert --frames 900 \
   --after "cg_masterCompare 64" --after "cg_draw2D 0" \
   --after "setviewpos -40590 4560 1495 200" --out /tmp/side.png
 ```
+
+`cg_masterProportion <headScale>` makes that copy a second skeletal draw with
+its head scaled and its legs shortened to match, instead of the md3 assembly.
+`cg_masterAnim <animNumber_t>` loops a different animation.cfg row - `9` is
+ANIM_RUN, and running it with `cg_masterCompare` set is the one-frame version of
+the residual table above: the md3 strides and the skeletal build stands still
+with its torso rotating.
 
 ## Environment overrides
 

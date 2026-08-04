@@ -91,6 +91,8 @@ vmCvar_t	cg_drawTimer;
 vmCvar_t	cg_drawFPS;
 vmCvar_t	cg_debugFight;
 vmCvar_t	cg_masterCompare;
+vmCvar_t	cg_masterProportion;
+vmCvar_t	cg_masterAnim;
 vmCvar_t	cg_drawSnapshot;
 vmCvar_t	cg_draw3dIcons;
 vmCvar_t	cg_drawIcons;
@@ -239,6 +241,14 @@ static cvarTable_t cvarTable[] = {
 	// drawn beside his skeletal one, for judging the two in one frame. Zero
 	// draws only the skeletal build and is the only value a player wants.
 	{ &cg_masterCompare, "cg_masterCompare", "0", CVAR_CHEAT },
+	// Head scale for the copy cg_masterCompare draws, with the legs shortened
+	// by as much as the head grew. Non-zero makes that copy a second skeletal
+	// draw instead of the md3 assembly.
+	{ &cg_masterProportion, "cg_masterProportion", "0", CVAR_CHEAT },
+	// Which animation.cfg row a master loops, by animNumber_t index. Zero is
+	// his idle. For looking at what the skeletal conversion keeps and what it
+	// drops, which differs enormously between a standing pose and a stride.
+	{ &cg_masterAnim, "cg_masterAnim", "0", CVAR_CHEAT },
 	{ &cg_drawSnapshot, "cg_drawSnapshot", "0", CVAR_ARCHIVE  },
 	{ &cg_draw3dIcons, "cg_draw3dIcons", "1", CVAR_ARCHIVE  },
 	{ &cg_advancedFlight, "cg_advancedFlight", "0", CVAR_USERINFO |CVAR_ARCHIVE  },
