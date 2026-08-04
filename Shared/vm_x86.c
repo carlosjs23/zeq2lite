@@ -1098,9 +1098,12 @@ void VM_Compile(vm_t *vm, vmHeader_t *header)
 	Com_Memcpy(code, (byte *)header + header->codeOffset, header->codeLength );
 
 	// ensure that the optimisation pass knows about all the jump
-	// table targets
+	// table targets. The table comes out of the qvm file, so index jused
+	// through JUSED rather than trusting the value the way the loop below
+	// does for every other target.
+	pc = -1; // a bogus value to be printed in out-of-bounds error messages
 	for( i = 0; i < vm->numJumpTableTargets; i++ ) {
-		jused[ *(int *)(vm->jumpTableTargets + ( i * sizeof( int ) ) ) ] = 1;
+		JUSED( *(int *)(vm->jumpTableTargets + ( i * sizeof( int ) ) ) );
 	}
 
 	// Start buffer with x86-VM specific procedures
