@@ -2909,6 +2909,29 @@ qboolean FS_CheckDirTraversal(const char *checkdir)
 
 /*
 ================
+FS_InvalidGameDir
+
+Return qtrue if path names the current directory or escapes upwards.
+
+FS_CheckDirTraversal above expects a filename, so it only catches a ".."
+that has something after it. A game directory is a single component, so a
+bare ".." reaches it unflagged and lands the whole search path one level
+above the home and base paths.
+================
+*/
+qboolean FS_InvalidGameDir( const char *gamedir ) {
+	if ( !strcmp( gamedir, "." ) || !strcmp( gamedir, ".." )
+		|| !strcmp( gamedir, "/" ) || !strcmp( gamedir, "\\" )
+		|| strstr( gamedir, "/.." ) || strstr( gamedir, "\\.." )
+		|| FS_CheckDirTraversal( gamedir ) ) {
+		return qtrue;
+	}
+
+	return qfalse;
+}
+
+/*
+================
 FS_ComparePaks
 
 ----------------
@@ -3140,6 +3163,17 @@ static void FS_Startup( const char *gameName, qboolean quiet )
 	}
 	fs_homepath = Cvar_Get ("fs_homepath", Sys_DefaultInstallPath(), CVAR_INIT|CVAR_PROTECTED );
 	fs_gamedirvar = Cvar_Get ("fs_game", "", CVAR_INIT|CVAR_SYSTEMINFO );
+
+	// refuse to build a search path out of a directory that escapes upwards
+	if (FS_InvalidGameDir(gameName)) {
+		Com_Error( ERR_DROP, "Invalid com_basegame '%s'", gameName );
+	}
+	if (FS_InvalidGameDir(fs_basegame->string)) {
+		Com_Error( ERR_DROP, "Invalid fs_basegame '%s'", fs_basegame->string );
+	}
+	if (FS_InvalidGameDir(fs_gamedirvar->string)) {
+		Com_Error( ERR_DROP, "Invalid fs_game '%s'", fs_gamedirvar->string );
+	}
 
 	// add search path elements in reverse priority order
 	if (fs_basepath->string[0]) {

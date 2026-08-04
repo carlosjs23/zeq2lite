@@ -2559,7 +2559,7 @@ void Com_Init( char *commandLine ) {
 	CL_InitKeyCommands();
 
 	com_basegame = Cvar_Get("com_basegame", BASEGAME, CVAR_INIT);
-	com_homepath = Cvar_Get("com_homepath", "", CVAR_INIT);
+	com_homepath = Cvar_Get("com_homepath", "", CVAR_INIT|CVAR_PROTECTED);
 	
 	if(!com_basegame->string[0])
 		Cvar_ForceReset("com_basegame");
