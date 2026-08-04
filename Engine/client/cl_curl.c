@@ -263,7 +263,17 @@ void CL_cURL_BeginDownload( const char *localName, const char *remoteURL )
 	qcurl_easy_setopt(clc.downloadCURL, CURLOPT_FAILONERROR, 1);
 	qcurl_easy_setopt(clc.downloadCURL, CURLOPT_FOLLOWLOCATION, 1);
 	qcurl_easy_setopt(clc.downloadCURL, CURLOPT_MAXREDIRS, 5);
-	clc.downloadCURLM = qcurl_multi_init();	
+	// The download URL comes from the server, so confine libcurl to the two
+	// protocols we actually download over; anything else it supports is a way
+	// for a server to make the client speak an unrelated protocol.
+	//
+	// The bundled headers under Engine/libcurl are 7.15.5 and predate the
+	// option, but the library is dlopen'd at runtime and is far newer than
+	// that, so name the option numerically when the header does not. curl
+	// never reuses an option number, so this stays correct.
+	qcurl_easy_setopt(clc.downloadCURL, QCURLOPT_PROTOCOLS,
+		QCURLPROTO_HTTP | QCURLPROTO_HTTPS);
+	clc.downloadCURLM = qcurl_multi_init();
 	if(!clc.downloadCURLM) {
 		qcurl_easy_cleanup(clc.downloadCURL);
 		clc.downloadCURL = NULL;

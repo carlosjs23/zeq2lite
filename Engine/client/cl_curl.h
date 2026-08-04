@@ -33,6 +33,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
   #include <curl/curl.h>
 #endif
 
+// CURLOPT_PROTOCOLS arrived in libcurl 7.19.4 and the bundled headers under
+// Engine/libcurl are 7.15.5, so the name is not available at compile time
+// even though the library dlopen'd at runtime is decades newer. Spell the
+// values out: curl never reuses an option number, and the numeric form keeps
+// working against a system header where the name is deprecated.
+#define QCURLOPT_PROTOCOLS	((CURLoption)181)	// CURLOPTTYPE_LONG + 181
+#define QCURLPROTO_HTTP		(1<<0)
+#define QCURLPROTO_HTTPS	(1<<1)
+
 #ifdef USE_CURL_DLOPEN
 #ifdef WIN32
   #define DEFAULT_CURL_LIB "libcurl-4.dll"
