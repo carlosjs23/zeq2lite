@@ -181,35 +181,40 @@ def build(char, ref):
             claimed.add(name)
             tags.append((model.add_joint(name, parent), owner, name))
 
-    # --- meshes, baked into model space at the reference frame ------------
-    ref_torso = char.torso(ref)
-    ref_head = char.head_at(ref)
-    parts = (("lower", char.lower, iqm.IDENTITY, j_lower, ref),
-             ("upper", char.upper, ref_torso, j_upper, ref),
-             ("head", char.head, ref_head, j_head, 0))
-    for _owner, part, place, bone, frame in parts:
+    # --- meshes, in their own bone's space --------------------------------
+    #
+    # Each part's md3 vertices go in untransformed, because a part's md3 space
+    # *is* its bone's space: the assembly places upper.md3's origin at
+    # tag_torso and head.md3's origin at tag_head, so a bone whose pose is that
+    # tag maps the part's own coordinates into the model exactly as
+    # CG_PositionRotatedEntityOnTag did.
+    #
+    # That choice is what makes a bone rotation pivot where a person's joint
+    # is. Baking the vertices into model space instead would work identically
+    # at rest and rotate the head about the character's feet the moment
+    # anything drove the bone.
+    parts = (("lower", char.lower, j_lower, ref),
+             ("upper", char.upper, j_upper, ref),
+             ("head", char.head, j_head, 0))
+    for _owner, part, bone, frame in parts:
         for surf in part.surfaces:
             target = j_gear if surf.name.lower() == GEAR_SURFACE else bone
             mesh = iqm.Mesh(surf.name, surf.shaders[0][0] if surf.shaders else "")
             for (p, n), uv in zip(part_vertices(surf, frame), surf.st):
-                mesh.add_vertex(iqm.mat_transform(place, p), uv,
-                                iqm.mat_rotate(place, n),
-                                (target, 0, 0, 0), (255, 0, 0, 0))
+                mesh.add_vertex(p, uv, n, (target, 0, 0, 0), (255, 0, 0, 0))
             mesh.triangles = [tuple(t) for t in surf.triangles]
             model.meshes.append(mesh)
 
     # --- the pose track ---------------------------------------------------
-    inv_ref_torso = iqm.mat_invert_rigid(ref_torso)
-    inv_ref_head = iqm.mat_invert_rigid(ref_head)
     for f in range(char.frames):
         torso = char.torso(f)
         head = char.head_at(f)
         g = [None] * len(model.joints)
         g[j_root] = iqm.IDENTITY
         g[j_lower] = iqm.IDENTITY
-        g[j_upper] = iqm.mat_mul(torso, inv_ref_torso)
-        g[j_head] = iqm.mat_mul(head, inv_ref_head)
-        g[j_gear] = g[j_head]
+        g[j_upper] = torso
+        g[j_head] = head
+        g[j_gear] = head
         lower_tags = tag_map(char.lower, f)
         upper_tags = tag_map(char.upper, f)
         head_tags = tag_map(char.head, 0)
